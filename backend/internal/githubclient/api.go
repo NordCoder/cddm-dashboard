@@ -278,6 +278,7 @@ func referencedIssueNumbers(text string) []int {
 				set[number] = struct{}{}
 			}
 		}
+	}
 	numbers := make([]int, 0, len(set))
 	for number := range set {
 		numbers = append(numbers, number)
