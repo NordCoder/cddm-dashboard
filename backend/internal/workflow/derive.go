@@ -450,7 +450,14 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 		return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead result did not correlate to and resolve the active blocker")
 	}
 	if latest.Status == "blocked" {
-		return dispatchRoute(project, state, "lead", "lead_first_blocker", "blocked Implementor or QA result must be resolved by Lead first")
+		if latest.Role == "implementor" || latest.Role == "qa" {
+			return dispatchRoute(project, state, "lead", "lead_first_blocker", "blocked Implementor or QA result must be resolved by Lead first")
+		}
+		return Route{
+			Action: "manual_attention", ReasonCode: "lead_blocked_requires_decision",
+			Reason:       "Lead blocked result requires an explicit follow-up decision or owner_required escalation; automatic redispatch would repeat the same Lead lane",
+			ExpectedHead: state.CurrentHead, Guards: append(guardsForHead(state.CurrentHead), "manual_confirmation", "no_repeat_dispatch"), Warnings: state.Warnings,
+		}
 	}
 
 	if latest.Role == "implementor" {
