@@ -138,8 +138,11 @@ func (p *Poller) tick(ctx context.Context) []SyncResult {
 		if !project.PollingEnabled {
 			continue
 		}
-		if project.SyncStatus == "syncing" && project.LastSyncStartedAt != nil &&
-			now.Sub(*project.LastSyncStartedAt) < p.service.syncTimeout {
+		if project.SyncStatus == "syncing" && project.LastSyncStartedAt != nil {
+			if now.Sub(*project.LastSyncStartedAt) < p.service.syncTimeout {
+				continue
+			}
+			projectIDs = append(projectIDs, project.ID)
 			continue
 		}
 		lastAttempt := project.LastSyncCompletedAt
