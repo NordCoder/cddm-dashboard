@@ -1,0 +1,20 @@
+{
+  "name": "cddm-dashboard-web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && tsc && node scripts/copy-assets.mjs",
+    "dev": "npm run build && node scripts/dev-server.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

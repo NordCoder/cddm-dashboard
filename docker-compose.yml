@@ -1,0 +1,30 @@
+services:
+  api:
+    build:
+      context: ./backend
+    environment:
+      APP_ADDR: ":8080"
+      APP_DATABASE_PATH: /data/cddm.db
+      APP_SHUTDOWN_TIMEOUT: ${APP_SHUTDOWN_TIMEOUT:-10s}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - cddm_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+  web:
+    build:
+      context: ./web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:80"
+
+volumes:
+  cddm_data:
