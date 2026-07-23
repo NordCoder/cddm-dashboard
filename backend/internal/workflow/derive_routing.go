@@ -36,11 +36,17 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 		return manualLeadRoute(project, state, "stale_terminal_result", "latest terminal result is bound to a non-current Head")
 	}
 
+	if leadOwnerEscalation(*latest) {
+		if state.ActiveBlocker != nil {
+			matches, _ := resolvesComment(latest.Resolves, state.ActiveBlocker.CommentID)
+			if !matches {
+				return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead escalation did not correlate to the active blocker")
+			}
+		}
+		return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead requires an Owner decision; the correlated blocker remains pending until Owner acts", ExpectedHead: state.CurrentHead, Guards: []string{"lead_first_blocker_flow", "active_blocker_pending", "no_worker_dispatch"}, Warnings: state.Warnings}
+	}
 	if state.ActiveBlocker != nil && latest.CommentID != state.ActiveBlocker.CommentID {
 		return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead result did not correlate to and safely resolve the active blocker")
-	}
-	if latest.Role == "lead" && (latest.EscalateTo == "owner" || latest.Decision == "owner_required") {
-		return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead requires an Owner decision", ExpectedHead: state.CurrentHead, Guards: []string{"lead_first_blocker_flow", "no_worker_dispatch"}, Warnings: state.Warnings}
 	}
 	if latest.Status == "blocked" {
 		if latest.Role == "implementor" || latest.Role == "qa" {

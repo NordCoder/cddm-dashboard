@@ -67,6 +67,7 @@ func activeBlocker(results []ResultEvidence) (*ResultEvidence, []Warning) {
 	unresolved := make([]ResultEvidence, 0)
 	warnings := make([]Warning, 0)
 	for _, result := range results {
+		correlatedOwnerEscalation := false
 		if result.Role == "lead" && result.Effective && len(unresolved) > 0 && leadResolutionIntent(result) {
 			active := unresolved[0]
 			if !leadResolutionActionable(result) {
@@ -74,6 +75,10 @@ func activeBlocker(results []ResultEvidence) (*ResultEvidence, []Warning) {
 			} else {
 				matches, understood := resolvesComment(result.Resolves, active.CommentID)
 				switch {
+				case matches && leadOwnerEscalation(result):
+					// Escalation transfers the unresolved decision to Owner; it does not
+					// resolve the blocker before Owner has acted.
+					correlatedOwnerEscalation = true
 				case matches:
 					unresolved = unresolvedAfterResolution(unresolved, result.Resolves)
 				case len(result.Resolves) == 0:
@@ -85,7 +90,7 @@ func activeBlocker(results []ResultEvidence) (*ResultEvidence, []Warning) {
 				}
 			}
 		}
-		if result.Status == "blocked" && result.Effective && !containsBlocker(unresolved, result.CommentID) {
+		if result.Status == "blocked" && result.Effective && !correlatedOwnerEscalation && !containsBlocker(unresolved, result.CommentID) {
 			unresolved = append(unresolved, result)
 			if len(unresolved) > 1 {
 				warnings = append(warnings, warning(result.CommentID, "additional_unresolved_blocker", fmt.Sprintf("blocked result is queued behind unresolved blocker comment %d", unresolved[0].CommentID)))
@@ -127,11 +132,16 @@ func leadResolutionActionable(result ResultEvidence) bool {
 	if result.Role != "lead" || !result.Effective {
 		return false
 	}
-	if result.EscalateTo == "owner" || result.Decision == "owner_required" {
+	if leadOwnerEscalation(result) {
 		return true
 	}
 	return (result.Status == "completed" || result.Status == "no_op") &&
 		leadResumeRoleAllowed(result.ResumeRole) && oneOf(result.Decision, "continue", "correct", "resume")
+}
+
+func leadOwnerEscalation(result ResultEvidence) bool {
+	return result.Role == "lead" && result.Effective &&
+		(result.EscalateTo == "owner" || result.Decision == "owner_required")
 }
 
 func leadResumeRoleAllowed(role string) bool {
