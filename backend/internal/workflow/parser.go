@@ -42,11 +42,11 @@ func ParseComment(projectID int64, issueNumber int, comment supervisor.Comment) 
 		Warnings:    make([]Warning, 0),
 	}
 
-	start := strings.Index(comment.Body, envelopeMarker)
-	if start >= 0 {
+	markers := envelopeMarkerPositions(comment.Body)
+	if len(markers) > 0 {
 		parsed.Level = ParseLevelEnvelope
 		parsed.Meaningful = true
-		parseEnvelope(&parsed, comment.Body, start)
+		parseEnvelope(&parsed, comment.Body, markers[0], len(markers))
 		return parsed
 	}
 
@@ -75,7 +75,7 @@ func ParseComment(projectID int64, issueNumber int, comment supervisor.Comment) 
 	return parsed
 }
 
-func parseEnvelope(parsed *ParsedComment, body string, start int) {
+func parseEnvelope(parsed *ParsedComment, body string, start, markerCount int) {
 	contentStart := start + len(envelopeMarker)
 	endOffset := strings.Index(body[contentStart:], "-->")
 	if endOffset < 0 {
@@ -84,8 +84,8 @@ func parseEnvelope(parsed *ParsedComment, body string, start int) {
 		return
 	}
 	end := contentStart + endOffset
-	if strings.Contains(body[end+3:], envelopeMarker) {
-		parsed.Warnings = append(parsed.Warnings, warning(parsed.CommentID, "multiple_envelopes", "comment contains more than one supervisor:event envelope; automatic transition is disabled"))
+	if markerCount > 1 {
+		parsed.Warnings = append(parsed.Warnings, warning(parsed.CommentID, "multiple_envelopes", "comment contains more than one live supervisor:event envelope; automatic transition is disabled"))
 	}
 
 	jsonText := strings.TrimSpace(body[contentStart:end])
@@ -182,16 +182,16 @@ func parseEnvelope(parsed *ParsedComment, body string, start int) {
 		parsed.Warnings = append(parsed.Warnings, warning(parsed.CommentID, "role_mismatch", fmt.Sprintf("Markdown heading implies role %q but envelope role is %q", headingEvent.Role, event.Role)))
 		transitionSafe = false
 	}
-	if strings.Contains(body[end+3:], envelopeMarker) {
+	if markerCount > 1 {
 		transitionSafe = false
 	}
 	parsed.TransitionSafe = transitionSafe
 }
 
 func hasMarkdownHeading(body, expected string) bool {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
-		if strings.EqualFold(trimmed, expected) {
+	for _, line := range liveMarkdownLines(body) {
+		heading, ok := atxHeading(line)
+		if ok && strings.EqualFold(heading, expected) {
 			return true
 		}
 	}
@@ -199,11 +199,13 @@ func hasMarkdownHeading(body, expected string) bool {
 }
 
 func classifyHeading(body string) (string, *WorkerEvent) {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+	for _, line := range liveMarkdownLines(body) {
+		heading, ok := atxHeading(line)
+		if !ok {
+			continue
+		}
 		for _, supported := range supportedHeadings {
-			if strings.EqualFold(trimmed, supported.Name) {
+			if strings.EqualFold(heading, supported.Name) {
 				return supported.Name, &WorkerEvent{Version: 1, Event: "worker_result", Role: supported.Role, Status: supported.Status}
 			}
 		}
@@ -211,8 +213,111 @@ func classifyHeading(body string) (string, *WorkerEvent) {
 	return "", nil
 }
 
+// envelopeMarkerPositions returns only operational envelopes: the marker must start
+// its own non-fenced Markdown line. Fenced/quoted examples remain human-readable
+// activity and can never become authoritative workflow evidence.
+func envelopeMarkerPositions(body string) []int {
+	positions := make([]int, 0, 1)
+	for _, line := range liveMarkdownLineSpans(body) {
+		text := body[line.start:line.end]
+		searchFrom := 0
+		for {
+			relative := strings.Index(text[searchFrom:], envelopeMarker)
+			if relative < 0 {
+				break
+			}
+			index := searchFrom + relative
+			if strings.TrimSpace(text[:index]) == "" {
+				positions = append(positions, line.start+index)
+			}
+			searchFrom = index + len(envelopeMarker)
+		}
+	}
+	return positions
+}
+
+type markdownLineSpan struct {
+	start int
+	end   int
+}
+
+func liveMarkdownLines(body string) []string {
+	spans := liveMarkdownLineSpans(body)
+	lines := make([]string, 0, len(spans))
+	for _, span := range spans {
+		lines = append(lines, body[span.start:span.end])
+	}
+	return lines
+}
+
+func liveMarkdownLineSpans(body string) []markdownLineSpan {
+	spans := make([]markdownLineSpan, 0)
+	inFence := false
+	var fenceCharacter byte
+	fenceLength := 0
+	for start := 0; start <= len(body); {
+		end := strings.IndexByte(body[start:], '\n')
+		if end < 0 {
+			end = len(body)
+		} else {
+			end += start
+		}
+		line := strings.TrimSuffix(body[start:end], "\r")
+		character, length, isFence := markdownFence(line)
+		if isFence {
+			if !inFence {
+				inFence = true
+				fenceCharacter = character
+				fenceLength = length
+			} else if character == fenceCharacter && length >= fenceLength {
+				inFence = false
+				fenceCharacter = 0
+				fenceLength = 0
+			}
+		} else if !inFence {
+			spans = append(spans, markdownLineSpan{start: start, end: start + len(line)})
+		}
+		if end == len(body) {
+			break
+		}
+		start = end + 1
+	}
+	return spans
+}
+
+func markdownFence(line string) (byte, int, bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return 0, 0, false
+	}
+	character := trimmed[0]
+	length := 0
+	for length < len(trimmed) && trimmed[length] == character {
+		length++
+	}
+	return character, length, length >= 3
+}
+
+func atxHeading(line string) (string, bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	count := 0
+	for count < len(trimmed) && count < 6 && trimmed[count] == '#' {
+		count++
+	}
+	if count == 0 || (count < len(trimmed) && trimmed[count] != ' ' && trimmed[count] != '\t') {
+		return "", false
+	}
+	heading := strings.TrimSpace(trimmed[count:])
+	heading = strings.TrimSpace(strings.TrimRight(heading, "#"))
+	if heading == "" {
+		return "", false
+	}
+	return heading, true
+}
+
 func populateLegacyFields(event *WorkerEvent, body string) {
-	for _, match := range fieldLinePattern.FindAllStringSubmatch(body, -1) {
+	liveBody := strings.Join(liveMarkdownLines(body), "\n")
+	for _, match := range fieldLinePattern.FindAllStringSubmatch(liveBody, -1) {
 		key := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(match[1]), " ", "_"))
 		value := strings.Trim(strings.TrimSpace(match[2]), "`\"")
 		switch key {
@@ -231,7 +336,7 @@ func populateLegacyFields(event *WorkerEvent, body string) {
 		}
 	}
 
-	lower := strings.ToLower(body)
+	lower := strings.ToLower(liveBody)
 	if event.Role == "qa" && event.Verdict == "" {
 		for _, verdict := range []string{"changes_required", "inconclusive", "approved"} {
 			if strings.Contains(strings.ReplaceAll(lower, " ", "_"), verdict) {

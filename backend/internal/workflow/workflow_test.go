@@ -81,6 +81,11 @@ func TestFallbackHeadingsAndUnclassifiedActivity(t *testing.T) {
 	}
 	assertWarning(t, legacy.Warnings, "legacy_heading")
 
+	fencedFields := ParseComment(1, 6, comment(30, testTime, "## QA Verdict\n\n```text\nHead: abc\nVerdict: approved\n```"))
+	if fencedFields.Event == nil || fencedFields.Event.Head != "" || fencedFields.Event.Verdict != "" || fencedFields.TransitionSafe {
+		t.Fatalf("fenced legacy fields became operational evidence: %#v", fencedFields)
+	}
+
 	activity := ParseComment(1, 6, comment(4, testTime, "Investigated CI and added context."))
 	if activity.Level != ParseLevelActivity || !activity.Meaningful || activity.Event != nil {
 		t.Fatalf("activity = %#v", activity)
@@ -315,6 +320,118 @@ func TestCIFailureAndPendingAttention(t *testing.T) {
 	pending := DeriveProject(projectSnapshot("acme", "service", 1, pendingIssue)).WorkUnits[0]
 	if pending.Attention.Kind != AttentionWaiting || pending.Route.Action != "none" {
 		t.Fatalf("pending attention=%#v route=%#v", pending.Attention, pending.Route)
+	}
+}
+
+func TestFencedContractExamplesAreNotOperationalEvents(t *testing.T) {
+	head := fullHead("1")
+	dispatchBody := "## Lead Dispatch\n\nUse the following terminal forms:\n\n" +
+		"```html\n<!-- supervisor:event\n{\"v\":1,\"event\":\"worker_result\",\"role\":\"implementor\",\"status\":\"completed\",\"head\":\"example\"}\n-->\n```\n\n" +
+		"~~~html\n<!-- supervisor:event\n{\"v\":1,\"event\":\"worker_result\",\"role\":\"implementor\",\"status\":\"no_op\",\"head\":\"example\"}\n-->\n~~~\n\n" +
+		"> <!-- supervisor:event {\"v\":1,\"event\":\"worker_result\",\"role\":\"qa\",\"status\":\"completed\",\"head\":\"example\",\"verdict\":\"approved\"} -->\n"
+	dispatch := comment(90, testTime.Add(-time.Hour), dispatchBody)
+	parsed := ParseComment(1, 6, dispatch)
+	if parsed.Event != nil || parsed.Level != ParseLevelActivity || !hasMarkdownHeading(parsed.Markdown, "Lead Dispatch") {
+		t.Fatalf("dispatch example became operational evidence: %#v", parsed)
+	}
+
+	plainText := ParseComment(1, 6, comment(91, testTime, "QA Verdict\nHead: `"+head+"`\nVerdict: approved"))
+	if plainText.Event != nil || plainText.Level != ParseLevelActivity {
+		t.Fatalf("plain prose became a Markdown heading result: %#v", plainText)
+	}
+
+	issue := issueWith(head, eventComment(1, testTime, map[string]any{"role": "implementor", "status": "completed", "head": head}))
+	issue.Comments[0] = dispatch
+	state := DeriveProject(projectSnapshot("acme", "service", 1, issue)).WorkUnits[0]
+	if state.Route.TargetRole != "qa" || state.Route.ReasonCode != "implementation_completed" {
+		t.Fatalf("fenced examples poisoned route: %#v", state.Route)
+	}
+}
+
+func TestLaterValidResultSupersedesHistoricalMalformedEnvelope(t *testing.T) {
+	head := fullHead("2")
+	issue := issueWith(head,
+		comment(1, testTime, `<!-- supervisor:event {"v":1,} -->`),
+		eventComment(2, testTime.Add(time.Minute), map[string]any{"role": "implementor", "status": "completed", "head": head}),
+	)
+	state := DeriveProject(projectSnapshot("acme", "service", 1, issue)).WorkUnits[0]
+	if state.Route.TargetRole != "qa" || state.Route.ReasonCode != "implementation_completed" {
+		t.Fatalf("historical malformed evidence permanently blocked route: %#v", state.Route)
+	}
+	if state.Attention.Kind == AttentionProtocolWarning {
+		t.Fatalf("historical malformed evidence permanently retained protocol attention: %#v", state.Attention)
+	}
+	assertWarning(t, state.Warnings, "malformed_envelope")
+}
+
+func TestLeadResolutionMustMatchActiveBlocker(t *testing.T) {
+	head := fullHead("3")
+	unmatched := issueWith(head,
+		eventComment(1, testTime, map[string]any{"role": "qa", "status": "blocked", "head": head, "verdict": "inconclusive"}),
+		eventComment(2, testTime.Add(time.Minute), map[string]any{"role": "lead", "status": "completed", "decision": "continue", "resume_role": "qa", "resolves": 999}),
+	)
+	state := DeriveProject(projectSnapshot("acme", "service", 1, unmatched)).WorkUnits[0]
+	if state.ActiveBlocker == nil || state.ActiveBlocker.CommentID != 1 {
+		t.Fatalf("unmatched Lead result cleared blocker: %#v", state.ActiveBlocker)
+	}
+	if state.Route.Action != "manual_attention" || state.Route.ReasonCode != "unresolved_active_blocker" {
+		t.Fatalf("unmatched Lead result routed a worker: %#v", state.Route)
+	}
+	assertWarning(t, state.Warnings, "unmatched_blocker_resolution")
+
+	matched := issueWith(head,
+		eventComment(1, testTime, map[string]any{"role": "qa", "status": "blocked", "head": head, "verdict": "inconclusive"}),
+		eventComment(2, testTime.Add(time.Minute), map[string]any{"role": "lead", "status": "completed", "decision": "continue", "resume_role": "qa", "resolves": []any{1}}),
+	)
+	resolved := DeriveProject(projectSnapshot("acme", "service", 1, matched)).WorkUnits[0]
+	if resolved.ActiveBlocker != nil || resolved.Route.TargetRole != "qa" || resolved.Route.ReasonCode != "lead_resume" {
+		t.Fatalf("matched Lead resolution did not resume QA: blocker=%#v route=%#v", resolved.ActiveBlocker, resolved.Route)
+	}
+}
+
+func TestFreshQAVerdictSupersedesInvalidatedApproval(t *testing.T) {
+	oldHead := fullHead("4")
+	currentHead := fullHead("5")
+	issue := issueWith(currentHead,
+		eventComment(1, testTime, map[string]any{"role": "qa", "status": "completed", "head": oldHead, "verdict": "approved"}),
+		eventComment(2, testTime.Add(time.Minute), map[string]any{"role": "implementor", "status": "completed", "head": currentHead}),
+		eventComment(3, testTime.Add(2*time.Minute), map[string]any{"role": "qa", "status": "completed", "head": currentHead, "verdict": "approved"}),
+	)
+	state := DeriveProject(projectSnapshot("acme", "service", 1, issue)).WorkUnits[0]
+	if state.QAApprovedHead != currentHead {
+		t.Fatalf("QA approved Head = %q, want %q", state.QAApprovedHead, currentHead)
+	}
+	if state.Attention.Kind == AttentionQAInvalidated {
+		t.Fatalf("fresh QA approval remained invalidated: %#v", state.Attention)
+	}
+	if state.Route.TargetRole != "lead" || state.Route.ReasonCode != "qa_approved" {
+		t.Fatalf("route = %#v", state.Route)
+	}
+}
+
+func TestCIIsBoundToCurrentHeadAndRequiredBeforeQA(t *testing.T) {
+	currentHead := fullHead("6")
+	oldHead := fullHead("7")
+
+	missing := issueWith(currentHead, eventComment(1, testTime, map[string]any{"role": "implementor", "status": "completed", "head": currentHead}))
+	missing.PullRequests[0].CI = supervisor.CISummary{}
+	missingState := DeriveProject(projectSnapshot("acme", "service", 1, missing)).WorkUnits[0]
+	if missingState.Route.Action != "none" || missingState.Route.ReasonCode != "waiting_for_ci" || missingState.Attention.Kind != AttentionWaiting {
+		t.Fatalf("missing CI advanced workflow: attention=%#v route=%#v", missingState.Attention, missingState.Route)
+	}
+
+	stale := issueWith(currentHead, eventComment(1, testTime, map[string]any{"role": "implementor", "status": "completed", "head": currentHead}))
+	stale.PullRequests[0].CI = supervisor.CISummary{HeadSHA: oldHead, Status: "completed", Conclusion: "failure", UpdatedAt: testTime}
+	staleState := DeriveProject(projectSnapshot("acme", "service", 1, stale)).WorkUnits[0]
+	if staleState.CI.HeadSHA != "" || staleState.Route.TargetRole == "implementor" || staleState.Route.ReasonCode != "waiting_for_ci" {
+		t.Fatalf("stale CI affected routing: ci=%#v route=%#v", staleState.CI, staleState.Route)
+	}
+	assertWarning(t, staleState.Warnings, "stale_ci_summary")
+
+	exact := issueWith(currentHead, eventComment(1, testTime, map[string]any{"role": "implementor", "status": "completed", "head": currentHead}))
+	exactState := DeriveProject(projectSnapshot("acme", "service", 1, exact)).WorkUnits[0]
+	if exactState.Route.TargetRole != "qa" || exactState.Route.ReasonCode != "implementation_completed" {
+		t.Fatalf("exact successful CI did not advance: %#v", exactState.Route)
 	}
 }
 

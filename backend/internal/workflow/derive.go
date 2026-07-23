@@ -1,8 +1,10 @@
 package workflow
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,7 +98,7 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 	state.Candidate, state.Warnings = deriveCandidate(issue.PullRequests, state.Warnings)
 	if state.Candidate.Current != nil {
 		state.CurrentHead = state.Candidate.Current.HeadSHA
-		state.CI = state.Candidate.Current.CI
+		state.CI, state.Warnings = effectiveCI(state.Candidate.Current.CI, state.CurrentHead, state.Warnings)
 	}
 
 	comments, duplicateWarnings := canonicalComments(issue.Comments)
@@ -138,7 +140,9 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 		assignLatest(&state.LatestResults, evidence)
 	}
 
-	state.ActiveBlocker = activeBlocker(results)
+	var blockerWarnings []Warning
+	state.ActiveBlocker, blockerWarnings = activeBlocker(results)
+	state.Warnings = append(state.Warnings, blockerWarnings...)
 	if state.LatestResults.QA != nil {
 		state.QAReviewedHead = state.LatestResults.QA.Head
 		if state.LatestResults.QA.Verdict == "approved" && state.LatestResults.QA.Effective {
@@ -338,19 +342,74 @@ func assignLatest(results *LatestResults, evidence ResultEvidence) {
 	}
 }
 
-func activeBlocker(results []ResultEvidence) *ResultEvidence {
+func activeBlocker(results []ResultEvidence) (*ResultEvidence, []Warning) {
 	var blocker *ResultEvidence
+	warnings := make([]Warning, 0)
 	for _, result := range results {
-		copy := result
-		if result.Status == "blocked" {
-			blocker = &copy
-			continue
+		if result.Role == "lead" && result.Effective && blocker != nil && leadResolutionIntent(result) {
+			matches, understood := resolvesComment(result.Resolves, blocker.CommentID)
+			switch {
+			case matches:
+				blocker = nil
+			case len(result.Resolves) == 0:
+				warnings = append(warnings, warning(result.CommentID, "missing_blocker_resolution", fmt.Sprintf("Lead result does not identify active blocker comment %d in resolves", blocker.CommentID)))
+			case !understood:
+				warnings = append(warnings, warning(result.CommentID, "unknown_blocker_resolution", "Lead resolves value is preserved but cannot be correlated to the active blocker"))
+			default:
+				warnings = append(warnings, warning(result.CommentID, "unmatched_blocker_resolution", fmt.Sprintf("Lead resolves does not reference active blocker comment %d", blocker.CommentID)))
+			}
 		}
-		if result.Role == "lead" && (result.Decision != "" || result.ResumeRole != "" || len(result.Resolves) > 0 || result.EscalateTo != "") {
-			blocker = nil
+		if result.Status == "blocked" && result.Effective {
+			copy := result
+			blocker = &copy
 		}
 	}
-	return blocker
+	return blocker, warnings
+}
+
+func leadResolutionIntent(result ResultEvidence) bool {
+	return result.Decision != "" || result.ResumeRole != "" || len(result.Resolves) > 0 || result.EscalateTo != ""
+}
+
+func resolvesComment(raw json.RawMessage, commentID int64) (bool, bool) {
+	if len(raw) == 0 {
+		return false, false
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return false, false
+	}
+	return resolutionValueMatches(value, commentID)
+}
+
+func resolutionValueMatches(value any, commentID int64) (bool, bool) {
+	switch typed := value.(type) {
+	case json.Number:
+		parsed, err := strconv.ParseInt(string(typed), 10, 64)
+		return err == nil && parsed == commentID, err == nil
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(typed, "#")), 10, 64)
+		return err == nil && parsed == commentID, err == nil
+	case []any:
+		understood := false
+		for _, item := range typed {
+			matches, itemUnderstood := resolutionValueMatches(item, commentID)
+			understood = understood || itemUnderstood
+			if matches {
+				return true, true
+			}
+		}
+		return false, understood
+	case map[string]any:
+		for _, key := range []string{"comment_id", "id"} {
+			if item, ok := typed[key]; ok {
+				return resolutionValueMatches(item, commentID)
+			}
+		}
+	}
+	return false, false
 }
 
 func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state WorkUnitState, results []ResultEvidence) Route {
@@ -369,8 +428,8 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 	if state.Candidate.Ambiguous {
 		return manualLeadRoute(project, state, "ambiguous_candidate", "multiple open Candidates require Lead/manual selection")
 	}
-	if hasUnsafeTerminalEvidence(state) {
-		return manualLeadRoute(project, state, "unsafe_terminal_result", "malformed or incomplete terminal evidence requires Lead/manual review")
+	if latestTerminalEvidenceUnsafe(state) {
+		return manualLeadRoute(project, state, "unsafe_terminal_result", "latest terminal evidence is malformed or incomplete and requires Lead/manual review")
 	}
 
 	latest := latestResult(results)
@@ -384,29 +443,38 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 		return manualLeadRoute(project, state, "stale_terminal_result", "latest terminal result is bound to a non-current Head")
 	}
 
+	if latest.Role == "lead" && (latest.EscalateTo == "owner" || latest.Decision == "owner_required") {
+		return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead requires an Owner decision", ExpectedHead: state.CurrentHead, Guards: []string{"lead_first_blocker_flow", "no_worker_dispatch"}, Warnings: state.Warnings}
+	}
+	if state.ActiveBlocker != nil && latest.CommentID != state.ActiveBlocker.CommentID {
+		return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead result did not correlate to and resolve the active blocker")
+	}
 	if latest.Status == "blocked" {
-		if latest.Role == "lead" && (latest.EscalateTo == "owner" || latest.Decision == "owner_required") {
-			return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead escalated the blocker to Owner", ExpectedHead: state.CurrentHead, Guards: []string{"lead_first_blocker_flow"}, Warnings: state.Warnings}
-		}
 		return dispatchRoute(project, state, "lead", "lead_first_blocker", "blocked Implementor or QA result must be resolved by Lead first")
 	}
 
-	if ciFailed(state.CI) && latest.Role == "implementor" {
-		return dispatchRoute(project, state, "implementor", "candidate_ci_failed", "current Candidate CI failed and requires Implementor correction")
-	}
-	if ciPending(state.CI) && latest.Role == "implementor" {
-		route.ReasonCode = "waiting_for_ci"
-		route.Reason = "current Candidate CI has not reached a terminal successful conclusion"
-		return route
+	if latest.Role == "implementor" {
+		if ciFailed(state.CI) {
+			return dispatchRoute(project, state, "implementor", "candidate_ci_failed", "current Candidate CI failed and requires Implementor correction")
+		}
+		if !ciSucceeded(state.CI) {
+			route.ReasonCode = "waiting_for_ci"
+			route.Reason = "current Candidate has no exact-Head successful CI conclusion yet"
+			return route
+		}
 	}
 
 	switch latest.Role {
 	case "implementor":
 		if latest.Status == "completed" || latest.Status == "no_op" {
 			if qaRequired(workflowMode) {
-				return dispatchRoute(project, state, "qa", "implementation_completed", "Implementor terminal result advances to independent QA")
+				next := dispatchRoute(project, state, "qa", "implementation_completed", "Implementor terminal result advances to independent QA")
+				next.Guards = append(next.Guards, "ci_success")
+				return next
 			}
-			return dispatchRoute(project, state, "lead", "implementation_completed_no_qa", "Implementor terminal result advances to Lead because QA is not required")
+			next := dispatchRoute(project, state, "lead", "implementation_completed_no_qa", "Implementor terminal result advances to Lead because QA is not required")
+			next.Guards = append(next.Guards, "ci_success")
+			return next
 		}
 	case "qa":
 		switch latest.Verdict {
@@ -418,9 +486,6 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 			return dispatchRoute(project, state, "lead", "qa_inconclusive", "QA could not reach a conclusive verdict")
 		}
 	case "lead":
-		if latest.EscalateTo == "owner" || latest.Decision == "owner_required" {
-			return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead requires an Owner decision", ExpectedHead: state.CurrentHead, Guards: []string{"no_worker_dispatch"}, Warnings: state.Warnings}
-		}
 		if latest.ResumeRole != "" && oneOf(latest.Decision, "continue", "correct", "resume", "") {
 			return dispatchRoute(project, state, latest.ResumeRole, "lead_resume", "Lead decision resumes the validated worker role")
 		}
@@ -468,25 +533,38 @@ func latestResult(results []ResultEvidence) *ResultEvidence {
 	return &copy
 }
 
+func effectiveCI(ci supervisor.CISummary, currentHead string, warnings []Warning) (supervisor.CISummary, []Warning) {
+	if ci.HeadSHA == "" && ci.Status == "" && ci.Conclusion == "" && ci.Source == "" && ci.DetailsURL == "" && ci.UpdatedAt.IsZero() {
+		return supervisor.CISummary{}, warnings
+	}
+	if currentHead == "" {
+		return supervisor.CISummary{}, append(warnings, Warning{Code: "unbound_ci_summary", Message: "CI summary exists but no current Candidate Head is selected"})
+	}
+	if ci.HeadSHA == "" {
+		return supervisor.CISummary{}, append(warnings, Warning{Code: "unbound_ci_summary", Message: "CI summary is missing the exact Head SHA and cannot affect routing"})
+	}
+	if ci.HeadSHA != currentHead {
+		return supervisor.CISummary{}, append(warnings, Warning{Code: "stale_ci_summary", Message: fmt.Sprintf("CI summary Head %s does not match current Head %s", ci.HeadSHA, currentHead)})
+	}
+	return ci, warnings
+}
+
 func ciFailed(ci supervisor.CISummary) bool {
 	conclusion := normalizeToken(ci.Conclusion)
 	return oneOf(conclusion, "failure", "failed", "cancelled", "timed_out", "action_required", "startup_failure")
 }
 
-func ciPending(ci supervisor.CISummary) bool {
-	if ci.HeadSHA == "" && ci.Status == "" && ci.Conclusion == "" {
-		return false
-	}
-	status := normalizeToken(ci.Status)
-	conclusion := normalizeToken(ci.Conclusion)
-	return conclusion == "" || oneOf(status, "queued", "in_progress", "pending")
+func ciSucceeded(ci supervisor.CISummary) bool {
+	return normalizeToken(ci.Conclusion) == "success"
 }
 
-func hasUnsafeTerminalEvidence(state WorkUnitState) bool {
-	for _, parsed := range state.ParsedComments {
-		if parsed.Level == ParseLevelEnvelope && (parsed.HardError != nil || !parsed.TransitionSafe) {
-			return true
+func latestTerminalEvidenceUnsafe(state WorkUnitState) bool {
+	for index := len(state.ParsedComments) - 1; index >= 0; index-- {
+		parsed := state.ParsedComments[index]
+		if parsed.Level != ParseLevelEnvelope && parsed.Level != ParseLevelHeading {
+			continue
 		}
+		return parsed.HardError != nil || parsed.Event == nil || !parsed.TransitionSafe
 	}
 	return false
 }
@@ -523,11 +601,20 @@ func deriveAttention(issueState string, state WorkUnitState) Attention {
 }
 
 func qaApprovalInvalidated(state WorkUnitState) bool {
+	if state.CurrentHead == "" {
+		return false
+	}
+	if state.QAApprovedHead == state.CurrentHead {
+		return false
+	}
+	if latest := state.LatestResults.QA; latest != nil && latest.Effective && !latest.Stale && latest.Head == state.CurrentHead {
+		return false
+	}
 	for _, parsed := range state.ParsedComments {
 		if parsed.Event == nil || parsed.Event.Role != "qa" || parsed.Event.Verdict != "approved" {
 			continue
 		}
-		if parsed.Event.Head != "" && state.CurrentHead != "" && parsed.Event.Head != state.CurrentHead {
+		if parsed.Event.Head != "" && parsed.Event.Head != state.CurrentHead {
 			return true
 		}
 	}
@@ -535,13 +622,23 @@ func qaApprovalInvalidated(state WorkUnitState) bool {
 }
 
 func hasProtocolProblem(state WorkUnitState) bool {
-	for _, parsed := range state.ParsedComments {
-		if parsed.HardError != nil || parsed.Level == ParseLevelHeading || !parsed.TransitionSafe && parsed.Event != nil {
+	latestCommentID := int64(0)
+	for index := len(state.ParsedComments) - 1; index >= 0; index-- {
+		parsed := state.ParsedComments[index]
+		if parsed.Level != ParseLevelEnvelope && parsed.Level != ParseLevelHeading {
+			continue
+		}
+		latestCommentID = parsed.CommentID
+		if parsed.HardError != nil || parsed.Level == ParseLevelHeading || parsed.Event == nil || !parsed.TransitionSafe {
 			return true
 		}
+		break
 	}
 	for _, warning := range state.Warnings {
-		if oneOf(warning.Code, "unknown_version", "unknown_event", "unknown_role", "unknown_status", "unknown_verdict", "unresolved_head_prefix", "missing_candidate_head", "missing_current_head", "missing_dispatch_correlation", "role_mismatch") {
+		if warning.CommentID != 0 && warning.CommentID != latestCommentID {
+			continue
+		}
+		if oneOf(warning.Code, "unknown_version", "unknown_event", "unknown_role", "unknown_status", "unknown_verdict", "unresolved_head_prefix", "missing_candidate_head", "missing_current_head", "missing_dispatch_correlation", "role_mismatch", "stale_ci_summary", "unbound_ci_summary", "missing_blocker_resolution", "unmatched_blocker_resolution", "unknown_blocker_resolution") {
 			return true
 		}
 	}

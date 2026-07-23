@@ -36,7 +36,7 @@ QA reviews the exact Candidate Head and publishes one terminal result. A complet
 
 ## Mandatory terminal result
 
-A dispatch never ends only with prose. The final comment contains free-form Markdown plus one `supervisor:event` envelope conforming to [Supervisor Event Contract v1](supervisor-event-contract-v1.md).
+A dispatch never ends only with prose. The final comment contains free-form Markdown plus one live `supervisor:event` envelope conforming to [Supervisor Event Contract v1](supervisor-event-contract-v1.md). The envelope starts on its own line outside fenced examples and block quotes.
 
 `no_op` is a complete outcome. It records what was inspected and advances to the next role; it does not repeat the same route merely because no commit was created.
 
@@ -50,14 +50,19 @@ QA blocked ──────────┘                 └─→ Owner att
 
 Implementor and QA never escalate directly to Owner. Their `blocked` result routes to Lead. Lead may:
 
-- continue or correct with a validated `resume_role`;
+- continue or correct with a validated `resume_role`, identifying the current blocker by stable GitHub comment ID in `resolves`;
 - publish `owner_required` / `escalate_to: owner`, which creates Owner attention and no worker-chat dispatch.
+
+A Lead result that does not correlate `resolves` to the active blocker cannot silently clear it.
 
 ## Exact-Head evidence
 
 - Candidate-bound results use the full PR Head SHA.
 - QA approval applies only to the current exact Head.
 - A changed Head invalidates previous Implementor handoff and QA approval evidence.
+- A fresh QA verdict for the current Head supersedes an older invalidated approval.
+- CI summary affects routing only when its Head equals the current Candidate Head.
+- Implementor completion/no-op waits for successful exact-Head CI before advancing.
 - Stale evidence remains visible for audit but cannot advance the route.
 - Multiple plausible open PRs are ambiguous and require Lead/manual attention; the Supervisor does not guess.
 
@@ -111,14 +116,15 @@ Core transitions:
 
 | Latest safe terminal result | Next route |
 | --- | --- |
-| Implementor `completed` / `no_op` | QA when required, otherwise Lead |
+| Implementor `completed` / `no_op` with successful exact-Head CI | QA when required, otherwise Lead |
+| Implementor `completed` / `no_op` with missing or pending exact-Head CI | wait |
 | Implementor `blocked` | Lead |
 | QA `approved` | Lead |
 | QA `changes_required` | Implementor |
 | QA `inconclusive` / `blocked` | Lead |
 | Lead `continue` / `correct` | validated `resume_role` |
 | Lead `owner_required` | Owner attention; no worker route |
-| malformed, stale or ambiguous result | Lead/manual attention |
+| latest malformed, stale or ambiguous result | Lead/manual attention |
 
 The Stage 3 router does not select browser profiles, tabs, chats or URLs.
 

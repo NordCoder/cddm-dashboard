@@ -127,13 +127,13 @@ The route contains `action`, `target_role`, deterministic `lane_key`, reason, ex
 
 Every dispatched Lead, Implementor and QA worker publishes one terminal `worker_result`, including when no repository change is needed. Supported statuses are `completed`, `no_op` and `blocked`.
 
-- Implementor `completed` / `no_op` advances to QA when required, otherwise Lead.
+- Implementor `completed` / `no_op` advances to QA when required, otherwise Lead, after successful exact-Head CI.
 - Implementor or QA `blocked` advances to Lead first.
 - QA `approved` advances to Lead; `changes_required` to Implementor; `inconclusive` to Lead.
-- Lead may resume a validated role or create Owner attention with `owner_required`.
-- stale, malformed or ambiguous evidence produces Lead/manual attention rather than a guessed transition.
+- Lead may resume a validated role only after `resolves` identifies the active blocker, or create Owner attention with `owner_required`.
+- the latest stale, malformed or ambiguous terminal evidence produces Lead/manual attention rather than a guessed transition.
 
-A changed PR Head invalidates old Candidate-bound handoff and QA approval evidence. Multiple open PRs remain explicitly ambiguous. Unknown optional event fields are preserved without making the parser brittle.
+Operational envelopes are recognized only on their own non-fenced Markdown line, so documentation examples cannot become live events. Historical malformed evidence remains visible but a later valid result can supersede it. A changed PR Head invalidates old Candidate-bound handoff and QA approval evidence; a fresh current-Head QA verdict clears obsolete invalidation attention. CI affects routing only when its Head matches the current Candidate. Multiple open PRs remain explicitly ambiguous. Unknown optional event fields are preserved without making the parser brittle.
 
 See:
 
