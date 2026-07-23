@@ -214,8 +214,8 @@ func classifyHeading(body string) (string, *WorkerEvent) {
 }
 
 // envelopeMarkerPositions returns only operational envelopes: the marker must start
-// its own non-fenced Markdown line. Fenced/quoted examples remain human-readable
-// activity and can never become authoritative workflow evidence.
+// its own non-code Markdown line. Fenced, indented and quoted examples remain
+// human-readable activity and can never become authoritative workflow evidence.
 func envelopeMarkerPositions(body string) []int {
 	positions := make([]int, 0, 1)
 	for _, line := range liveMarkdownLineSpans(body) {
@@ -274,7 +274,7 @@ func liveMarkdownLineSpans(body string) []markdownLineSpan {
 				fenceCharacter = 0
 				fenceLength = 0
 			}
-		} else if !inFence {
+		} else if !inFence && !markdownIndentedCode(line) {
 			spans = append(spans, markdownLineSpan{start: start, end: start + len(line)})
 		}
 		if end == len(body) {
@@ -286,7 +286,11 @@ func liveMarkdownLineSpans(body string) []markdownLineSpan {
 }
 
 func markdownFence(line string) (byte, int, bool) {
-	trimmed := strings.TrimLeft(line, " \t")
+	indent, contentStart := markdownLeadingIndent(line)
+	if indent > 3 {
+		return 0, 0, false
+	}
+	trimmed := line[contentStart:]
 	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
 		return 0, 0, false
 	}
@@ -296,6 +300,29 @@ func markdownFence(line string) (byte, int, bool) {
 		length++
 	}
 	return character, length, length >= 3
+}
+
+func markdownIndentedCode(line string) bool {
+	indent, _ := markdownLeadingIndent(line)
+	return indent >= 4
+}
+
+func markdownLeadingIndent(line string) (int, int) {
+	columns := 0
+	index := 0
+	for index < len(line) {
+		switch line[index] {
+		case ' ':
+			columns++
+			index++
+		case '\t':
+			columns += 4 - columns%4
+			index++
+		default:
+			return columns, index
+		}
+	}
+	return columns, index
 }
 
 func atxHeading(line string) (string, bool) {

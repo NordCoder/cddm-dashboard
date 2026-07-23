@@ -347,21 +347,29 @@ func activeBlocker(results []ResultEvidence) (*ResultEvidence, []Warning) {
 	warnings := make([]Warning, 0)
 	for _, result := range results {
 		if result.Role == "lead" && result.Effective && blocker != nil && leadResolutionIntent(result) {
-			matches, understood := resolvesComment(result.Resolves, blocker.CommentID)
-			switch {
-			case matches:
-				blocker = nil
-			case len(result.Resolves) == 0:
-				warnings = append(warnings, warning(result.CommentID, "missing_blocker_resolution", fmt.Sprintf("Lead result does not identify active blocker comment %d in resolves", blocker.CommentID)))
-			case !understood:
-				warnings = append(warnings, warning(result.CommentID, "unknown_blocker_resolution", "Lead resolves value is preserved but cannot be correlated to the active blocker"))
-			default:
-				warnings = append(warnings, warning(result.CommentID, "unmatched_blocker_resolution", fmt.Sprintf("Lead resolves does not reference active blocker comment %d", blocker.CommentID)))
+			if !leadResolutionActionable(result) {
+				warnings = append(warnings, warning(result.CommentID, "non_actionable_blocker_resolution", "Lead result includes blocker-resolution fields but does not define a safe resume or owner escalation transition"))
+			} else {
+				matches, understood := resolvesComment(result.Resolves, blocker.CommentID)
+				switch {
+				case matches:
+					blocker = nil
+				case len(result.Resolves) == 0:
+					warnings = append(warnings, warning(result.CommentID, "missing_blocker_resolution", fmt.Sprintf("Lead result does not identify active blocker comment %d in resolves", blocker.CommentID)))
+				case !understood:
+					warnings = append(warnings, warning(result.CommentID, "unknown_blocker_resolution", "Lead resolves value is preserved but cannot be correlated to the active blocker"))
+				default:
+					warnings = append(warnings, warning(result.CommentID, "unmatched_blocker_resolution", fmt.Sprintf("Lead resolves does not reference active blocker comment %d", blocker.CommentID)))
+				}
 			}
 		}
 		if result.Status == "blocked" && result.Effective {
-			copy := result
-			blocker = &copy
+			if blocker == nil {
+				copy := result
+				blocker = &copy
+			} else if blocker.CommentID != result.CommentID {
+				warnings = append(warnings, warning(result.CommentID, "additional_unresolved_blocker", fmt.Sprintf("blocked result cannot replace unresolved blocker comment %d without a correlated Lead resolution", blocker.CommentID)))
+			}
 		}
 	}
 	return blocker, warnings
@@ -369,6 +377,17 @@ func activeBlocker(results []ResultEvidence) (*ResultEvidence, []Warning) {
 
 func leadResolutionIntent(result ResultEvidence) bool {
 	return result.Decision != "" || result.ResumeRole != "" || len(result.Resolves) > 0 || result.EscalateTo != ""
+}
+
+func leadResolutionActionable(result ResultEvidence) bool {
+	if result.Role != "lead" || !result.Effective {
+		return false
+	}
+	if result.EscalateTo == "owner" || result.Decision == "owner_required" {
+		return true
+	}
+	return (result.Status == "completed" || result.Status == "no_op") &&
+		result.ResumeRole != "" && oneOf(result.Decision, "continue", "correct", "resume")
 }
 
 func resolvesComment(raw json.RawMessage, commentID int64) (bool, bool) {
@@ -443,11 +462,11 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 		return manualLeadRoute(project, state, "stale_terminal_result", "latest terminal result is bound to a non-current Head")
 	}
 
+	if state.ActiveBlocker != nil && latest.CommentID != state.ActiveBlocker.CommentID {
+		return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead result did not correlate to and safely resolve the active blocker")
+	}
 	if latest.Role == "lead" && (latest.EscalateTo == "owner" || latest.Decision == "owner_required") {
 		return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead requires an Owner decision", ExpectedHead: state.CurrentHead, Guards: []string{"lead_first_blocker_flow", "no_worker_dispatch"}, Warnings: state.Warnings}
-	}
-	if state.ActiveBlocker != nil && latest.CommentID != state.ActiveBlocker.CommentID {
-		return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead result did not correlate to and resolve the active blocker")
 	}
 	if latest.Status == "blocked" {
 		if latest.Role == "implementor" || latest.Role == "qa" {
@@ -493,7 +512,7 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 			return dispatchRoute(project, state, "lead", "qa_inconclusive", "QA could not reach a conclusive verdict")
 		}
 	case "lead":
-		if latest.ResumeRole != "" && oneOf(latest.Decision, "continue", "correct", "resume", "") {
+		if latest.ResumeRole != "" && oneOf(latest.Decision, "continue", "correct", "resume") {
 			return dispatchRoute(project, state, latest.ResumeRole, "lead_resume", "Lead decision resumes the validated worker role")
 		}
 	}
@@ -645,7 +664,7 @@ func hasProtocolProblem(state WorkUnitState) bool {
 		if warning.CommentID != 0 && warning.CommentID != latestCommentID {
 			continue
 		}
-		if oneOf(warning.Code, "unknown_version", "unknown_event", "unknown_role", "unknown_status", "unknown_verdict", "unresolved_head_prefix", "missing_candidate_head", "missing_current_head", "missing_dispatch_correlation", "role_mismatch", "stale_ci_summary", "unbound_ci_summary", "missing_blocker_resolution", "unmatched_blocker_resolution", "unknown_blocker_resolution") {
+		if oneOf(warning.Code, "unknown_version", "unknown_event", "unknown_role", "unknown_status", "unknown_verdict", "unresolved_head_prefix", "missing_candidate_head", "missing_current_head", "missing_dispatch_correlation", "role_mismatch", "stale_ci_summary", "unbound_ci_summary", "missing_blocker_resolution", "unmatched_blocker_resolution", "unknown_blocker_resolution", "non_actionable_blocker_resolution", "additional_unresolved_blocker") {
 			return true
 		}
 	}
