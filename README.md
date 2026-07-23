@@ -1,14 +1,14 @@
 # CDDM Dashboard
 
-Stage 2 provides a persistent read-only GitHub Supervisor Core for multiple repositories. The repository remains a small monorepo:
+Stage 3 adds a deterministic workflow layer over the persistent read-only GitHub Supervisor Core. The repository remains a small monorepo:
 
 ```text
-backend/   Go HTTP API, SQLite persistence and GitHub synchronization
+backend/   Go HTTP API, SQLite persistence, GitHub synchronization and derived workflow state
 web/       React and TypeScript frontend
 .github/   GitHub Actions verification
 ```
 
-The backend stores project configuration and normalized GitHub snapshots in SQLite. GitHub credentials remain process configuration: they are never stored in project rows, returned by the API or required from the frontend.
+The backend stores project configuration and normalized GitHub snapshots in SQLite. GitHub credentials remain process configuration: they are never stored in project rows, returned by the API or required from the frontend. Worker events, state, attention and routes are derived from the persisted snapshots at read time, so the raw GitHub snapshot remains authoritative after restart.
 
 ## Requirements
 
@@ -97,6 +97,48 @@ Delete a Project and its synchronized data:
 ```bash
 curl -X DELETE http://localhost:8080/api/projects/1
 ```
+
+## Derived workflow API
+
+Derived endpoints parse terminal worker comments, correlate exact PR Heads, classify attention and return the next safe role lane. Existing Stage 2 endpoints remain unchanged.
+
+```bash
+# All Projects and work units with derived state and an aggregated attention queue
+curl http://localhost:8080/api/workspace/state
+
+# One Project with deterministic work-unit ordering
+curl http://localhost:8080/api/projects/1/state
+
+# One Issue/work unit
+curl http://localhost:8080/api/projects/1/work-units/6/state
+
+# Workspace attention queue
+curl http://localhost:8080/api/attention
+
+# Project attention queue
+curl http://localhost:8080/api/projects/1/attention
+```
+
+Each work-unit state includes repository and Issue identity, lifecycle label or `unknown`, Candidate/PR identity, current exact Head, CI summary, parsed comments, latest results by role, active blocker, QA reviewed/approved Head, warnings, last meaningful activity, attention and route.
+
+The route contains `action`, `target_role`, deterministic `lane_key`, reason, expected Head, guards and warnings. The lane key is derived only from Project + Issue + role. Stage 3 does not select a browser profile, tab or chat URL.
+
+## Operational model
+
+Every dispatched Lead, Implementor and QA worker publishes one terminal `worker_result`, including when no repository change is needed. Supported statuses are `completed`, `no_op` and `blocked`.
+
+- Implementor `completed` / `no_op` advances to QA when required, otherwise Lead.
+- Implementor or QA `blocked` advances to Lead first.
+- QA `approved` advances to Lead; `changes_required` to Implementor; `inconclusive` to Lead.
+- Lead may resume a validated role or create Owner attention with `owner_required`.
+- stale, malformed or ambiguous evidence produces Lead/manual attention rather than a guessed transition.
+
+A changed PR Head invalidates old Candidate-bound handoff and QA approval evidence. Multiple open PRs remain explicitly ambiguous. Unknown optional event fields are preserved without making the parser brittle.
+
+See:
+
+- [CDDM Minimal](docs/cddm-minimal.md)
+- [Supervisor Event Contract v1](docs/supervisor-event-contract-v1.md)
 
 ## Synchronization model
 

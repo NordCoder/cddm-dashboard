@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/workflow"
 )
 
 type ProjectSyncer interface {
@@ -59,6 +60,8 @@ func New(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollI
 	mux.HandleFunc("/api/projects", server.projects)
 	mux.HandleFunc("/api/projects/", server.project)
 	mux.HandleFunc("/api/workspace", server.workspace)
+	mux.HandleFunc("/api/workspace/state", server.workspaceState)
+	mux.HandleFunc("/api/attention", server.attention)
 	return mux
 }
 
@@ -130,7 +133,7 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 func (s *Server) project(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/projects/"), "/")
 	parts := strings.Split(path, "/")
-	if path == "" || len(parts) > 2 {
+	if path == "" || len(parts) > 4 {
 		http.NotFound(w, r)
 		return
 	}
@@ -139,12 +142,27 @@ func (s *Server) project(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid project id"))
 		return
 	}
-	if len(parts) == 2 {
-		if parts[1] != "sync" {
-			http.NotFound(w, r)
+
+	switch {
+	case len(parts) == 2 && parts[1] == "sync":
+		s.manualSync(w, r, projectID)
+		return
+	case len(parts) == 2 && parts[1] == "state":
+		s.projectState(w, r, projectID)
+		return
+	case len(parts) == 2 && parts[1] == "attention":
+		s.projectAttention(w, r, projectID)
+		return
+	case len(parts) == 4 && parts[1] == "work-units" && parts[3] == "state":
+		issueNumber, err := strconv.Atoi(parts[2])
+		if err != nil || issueNumber <= 0 {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid issue number"))
 			return
 		}
-		s.manualSync(w, r, projectID)
+		s.workUnitState(w, r, projectID, issueNumber)
+		return
+	case len(parts) != 1:
+		http.NotFound(w, r)
 		return
 	}
 
@@ -206,6 +224,87 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, workspace)
+}
+
+func (s *Server) workspaceState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	workspace, err := s.store.WorkspaceSnapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workflow.DeriveWorkspace(workspace))
+}
+
+func (s *Server) attention(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	workspace, err := s.store.WorkspaceSnapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	state := workflow.DeriveWorkspace(workspace)
+	writeJSON(w, http.StatusOK, map[string]any{"attention": state.Attention})
+}
+
+func (s *Server) projectState(w http.ResponseWriter, r *http.Request, projectID int64) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	state, ok := s.readProjectState(w, r, projectID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *Server) projectAttention(w http.ResponseWriter, r *http.Request, projectID int64) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	state, ok := s.readProjectState(w, r, projectID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"project": state.Project, "attention": state.Attention})
+}
+
+func (s *Server) workUnitState(w http.ResponseWriter, r *http.Request, projectID int64, issueNumber int) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	state, ok := s.readProjectState(w, r, projectID)
+	if !ok {
+		return
+	}
+	workUnit, found := workflow.FindWorkUnit(state, issueNumber)
+	if !found {
+		writeError(w, http.StatusNotFound, fmt.Errorf("work unit not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, workUnit)
+}
+
+func (s *Server) readProjectState(w http.ResponseWriter, r *http.Request, projectID int64) (workflow.ProjectState, bool) {
+	snapshot, err := s.store.ProjectSnapshot(r.Context(), projectID)
+	if errors.Is(err, supervisor.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return workflow.ProjectState{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return workflow.ProjectState{}, false
+	}
+	return workflow.DeriveProject(snapshot), true
 }
 
 func decodeJSON(r *http.Request, destination any) error {
