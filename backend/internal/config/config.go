@@ -3,19 +3,38 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
 const (
-	defaultAddress         = ":8080"
-	defaultDatabasePath    = "data/cddm.db"
-	defaultShutdownTimeout = 10 * time.Second
+	defaultAddress                  = ":8080"
+	defaultDatabasePath             = "data/cddm.db"
+	defaultShutdownTimeout          = 10 * time.Second
+	defaultGitHubAPIBaseURL         = "https://api.github.com/"
+	defaultGitHubRequestTimeout     = 15 * time.Second
+	defaultGitHubSyncTimeout        = 2 * time.Minute
+	defaultGitHubPollInterval       = 5 * time.Minute
+	defaultGitHubPollScanInterval   = 15 * time.Second
+	defaultGitHubMaxPages           = 10
+	defaultGitHubMaxItems           = 500
+	defaultGitHubMaxSyncConcurrency = 4
 )
 
 type Config struct {
-	Address         string
-	DatabasePath    string
-	ShutdownTimeout time.Duration
+	Address                   string
+	DatabasePath              string
+	ShutdownTimeout           time.Duration
+	GitHubToken               string
+	GitHubAPIBaseURL          string
+	GitHubRequestTimeout      time.Duration
+	GitHubSyncTimeout         time.Duration
+	GitHubDefaultPollInterval time.Duration
+	GitHubPollScanInterval    time.Duration
+	GitHubMaxPages            int
+	GitHubMaxItems            int
+	GitHubMaxSyncConcurrency  int
 }
 
 func Load() (Config, error) {
@@ -23,23 +42,60 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	requestTimeout, err := durationFromEnv("GITHUB_REQUEST_TIMEOUT", defaultGitHubRequestTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	syncTimeout, err := durationFromEnv("GITHUB_SYNC_TIMEOUT", defaultGitHubSyncTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	pollInterval, err := durationFromEnv("GITHUB_DEFAULT_POLL_INTERVAL", defaultGitHubPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	pollScanInterval, err := durationFromEnv("GITHUB_POLL_SCAN_INTERVAL", defaultGitHubPollScanInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	maxPages, err := positiveIntFromEnv("GITHUB_MAX_PAGES", defaultGitHubMaxPages)
+	if err != nil {
+		return Config{}, err
+	}
+	maxItems, err := positiveIntFromEnv("GITHUB_MAX_ITEMS", defaultGitHubMaxItems)
+	if err != nil {
+		return Config{}, err
+	}
+	maxConcurrency, err := positiveIntFromEnv("GITHUB_MAX_SYNC_CONCURRENCY", defaultGitHubMaxSyncConcurrency)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		Address:         stringFromEnv("APP_ADDR", defaultAddress),
-		DatabasePath:    stringFromEnv("APP_DATABASE_PATH", defaultDatabasePath),
-		ShutdownTimeout: shutdownTimeout,
+		Address:                   stringFromEnv("APP_ADDR", defaultAddress),
+		DatabasePath:              stringFromEnv("APP_DATABASE_PATH", defaultDatabasePath),
+		ShutdownTimeout:           shutdownTimeout,
+		GitHubToken:               strings.TrimSpace(os.Getenv("GITHUB_TOKEN")),
+		GitHubAPIBaseURL:          stringFromEnv("GITHUB_API_BASE_URL", defaultGitHubAPIBaseURL),
+		GitHubRequestTimeout:      requestTimeout,
+		GitHubSyncTimeout:         syncTimeout,
+		GitHubDefaultPollInterval: pollInterval,
+		GitHubPollScanInterval:    pollScanInterval,
+		GitHubMaxPages:            maxPages,
+		GitHubMaxItems:            maxItems,
+		GitHubMaxSyncConcurrency:  maxConcurrency,
 	}, nil
 }
 
 func stringFromEnv(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
 	}
 	return fallback
 }
 
 func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) {
-	value := os.Getenv(key)
+	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
 		return fallback, nil
 	}
@@ -52,4 +108,16 @@ func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) 
 		return 0, fmt.Errorf("parse %s: duration must be positive", key)
 	}
 	return duration, nil
+}
+
+func positiveIntFromEnv(key string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("parse %s: value must be a positive integer", key)
+	}
+	return parsed, nil
 }

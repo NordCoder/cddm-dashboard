@@ -28,6 +28,8 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Test
         run: go test ./...
+      - name: Race detector
+        run: go test -race ./...
 
   frontend:
     name: Frontend
