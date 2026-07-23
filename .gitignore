@@ -1,0 +1,16 @@
+.env
+.DS_Store
+
+# Backend runtime data
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend dependencies and build output
+web/node_modules/
+web/dist/
+
+# Tooling
+.vscode/
+.idea/
