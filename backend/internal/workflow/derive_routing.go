@@ -37,7 +37,7 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 	}
 
 	if leadOwnerEscalation(*latest) {
-		if state.ActiveBlocker != nil {
+		if state.ActiveBlocker != nil && state.ActiveBlocker.CommentID != latest.CommentID {
 			matches, _ := resolvesComment(latest.Resolves, state.ActiveBlocker.CommentID)
 			if !matches {
 				return manualLeadRoute(project, state, "unresolved_active_blocker", "latest Lead escalation did not correlate to the active blocker")
