@@ -1,14 +1,26 @@
 # CDDM Dashboard
 
-Stage 3 adds a deterministic workflow layer over the persistent read-only GitHub Supervisor Core. The repository remains a small monorepo:
+Stage 4 adds a backend-owned Prompt Planning and Policy layer over the persistent read-only GitHub Supervisor Core and deterministic Stage 3 workflow state.
 
 ```text
-backend/   Go HTTP API, SQLite persistence, GitHub synchronization and derived workflow state
+backend/   Go HTTP API, SQLite persistence, GitHub synchronization, workflow derivation and prompt planning
 web/       React and TypeScript frontend
 .github/   GitHub Actions verification
+.opencode/ restricted OpenCode prompt-planner agent configuration
 ```
 
-The backend stores project configuration and normalized GitHub snapshots in SQLite. GitHub credentials remain process configuration: they are never stored in project rows, returned by the API or required from the frontend. Worker events, state, attention and routes are derived from the persisted snapshots at read time, so the raw GitHub snapshot remains authoritative after restart.
+The authoritative flow is:
+
+```text
+persisted GitHub snapshot
+→ deterministic Stage 3 state and route
+→ bounded canonical PromptContext
+→ OpenCode composition or static fallback
+→ deterministic Policy Engine
+→ append-only audit history and API response
+```
+
+Stage 3 remains the routing authority. OpenCode may compose explanation and worker-prompt wording, but it cannot select a different action, role, lane or exact Head. Model output is untrusted until policy approval. The backend never launches a per-request LLM process and does not implement direct OpenAI, Anthropic, Codex or other provider adapters.
 
 ## Requirements
 
@@ -16,10 +28,11 @@ The backend stores project configuration and normalized GitHub snapshots in SQLi
 - Node.js 20.19+ and npm
 - Docker with Docker Compose (optional)
 - a read-only GitHub token for private repositories or higher API limits
+- optionally, a separately managed long-running OpenCode headless server
 
 ## Local development
 
-Copy the environment template and set `GITHUB_TOKEN` when required:
+Copy the environment template:
 
 ```bash
 cp .env.example .env
@@ -32,7 +45,7 @@ cd backend
 APP_DATABASE_PATH=./data/cddm.db GITHUB_TOKEN=... go run ./cmd/server
 ```
 
-The API listens on `http://localhost:8080` by default. The health endpoint is:
+The API listens on `http://localhost:8080` by default.
 
 ```bash
 curl http://localhost:8080/api/health
@@ -48,13 +61,12 @@ npm run dev
 
 Open `http://localhost:5173`. The development server proxies `/api` requests to the backend. Set `API_PROXY_TARGET` to override the default `http://localhost:8080` target.
 
-## Project API
+## Project and synchronization API
 
-A Project is a persistent repository identity plus workflow and polling configuration. Tokens are not accepted in these request bodies.
-
-Create a Project:
+A Project is a persistent repository identity plus workflow and polling configuration. Tokens are not accepted in request bodies.
 
 ```bash
+# Create a Project
 curl -X POST http://localhost:8080/api/projects \
   -H 'Content-Type: application/json' \
   -d '{
@@ -64,105 +76,153 @@ curl -X POST http://localhost:8080/api/projects \
     "polling_enabled": true,
     "poll_interval_seconds": 300
   }'
-```
 
-`workflow_mode` defaults to `pull_request`. `polling_enabled` defaults to `true`, and `poll_interval_seconds` defaults to `GITHUB_DEFAULT_POLL_INTERVAL`.
-
-List Projects:
-
-```bash
+# List Projects
 curl http://localhost:8080/api/projects
-```
 
-Read one Project and its normalized snapshot:
-
-```bash
+# Read one normalized Project snapshot
 curl http://localhost:8080/api/projects/1
-```
 
-Trigger a manual synchronization:
-
-```bash
+# Trigger read-only GitHub synchronization
 curl -X POST http://localhost:8080/api/projects/1/sync
-```
 
-Read the workspace model for all Projects:
-
-```bash
+# Read the workspace snapshot
 curl http://localhost:8080/api/workspace
-```
 
-Delete a Project and its synchronized data:
-
-```bash
+# Delete a Project and its isolated persisted data
 curl -X DELETE http://localhost:8080/api/projects/1
 ```
 
+Each sync is isolated to one Project and transactionally stores open Issues, labels, comments, linked Pull Requests, exact PR Heads and exact-Head CI summaries. GitHub credentials remain process configuration and are not persisted or returned.
+
 ## Derived workflow API
 
-Derived endpoints parse terminal worker comments, correlate exact PR Heads, classify attention and return the next safe role lane. Existing Stage 2 endpoints remain unchanged.
+Stage 3 derives state at read time from persisted snapshots. Existing Stage 2 contracts remain unchanged.
 
 ```bash
-# All Projects and work units with derived state and an aggregated attention queue
 curl http://localhost:8080/api/workspace/state
-
-# One Project with deterministic work-unit ordering
 curl http://localhost:8080/api/projects/1/state
-
-# One Issue/work unit
-curl http://localhost:8080/api/projects/1/work-units/6/state
-
-# Workspace attention queue
+curl http://localhost:8080/api/projects/1/work-units/11/state
 curl http://localhost:8080/api/attention
-
-# Project attention queue
 curl http://localhost:8080/api/projects/1/attention
 ```
 
-Each work-unit state includes repository and Issue identity, lifecycle label or `unknown`, Candidate/PR identity, current exact Head, CI summary, parsed comments, latest results by role, active blocker, QA reviewed/approved Head, warnings, last meaningful activity, attention and route.
+Each work unit includes repository and Issue identity, lifecycle, Candidate identity, current exact Head, exact-Head CI, parsed terminal results, active blocker, warnings, attention and deterministic route. Routes contain `action`, `target_role`, `lane_key`, reason, expected Head and guards. Stage 3 does not select a browser profile, tab or chat URL.
 
-The route contains `action`, `target_role`, deterministic `lane_key`, reason, expected Head, guards and warnings. The lane key is derived only from Project + Issue + role. Stage 3 does not select a browser profile, tab or chat URL.
+## Prompt planning API
 
-## Operational model
+Prompt generation is scoped by Project and Issue/work unit. The frontend selects only `opencode` or `fallback`; it never supplies provider credentials.
 
-Every dispatched Lead, Implementor and QA worker publishes one terminal `worker_result`, including when no repository change is needed. Supported statuses are `completed`, `no_op` and `blocked`.
+```bash
+# Generate with OpenCode when enabled; automatically use fallback according to policy/configuration
+curl -X POST http://localhost:8080/api/projects/1/work-units/11/plans \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"opencode"}'
 
-- Implementor `completed` / `no_op` advances to QA when required, otherwise Lead, after successful exact-Head CI.
-- Implementor or QA `blocked` advances to Lead first.
-- QA `approved` advances to Lead; `changes_required` to Implementor; `inconclusive` to Lead.
-- Lead may resume a validated role only after `resolves` identifies the active blocker, or create Owner attention with `owner_required`.
-- the latest stale, malformed or ambiguous terminal evidence produces Lead/manual attention rather than a guessed transition.
+# Explicit deterministic static fallback
+curl -X POST http://localhost:8080/api/projects/1/work-units/11/plans \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"fallback"}'
 
-Operational envelopes are recognized only on their own non-fenced Markdown line, so documentation examples cannot become live events. Historical malformed evidence remains visible but a later valid result can supersede it. A changed PR Head invalidates old Candidate-bound handoff and QA approval evidence; a fresh current-Head QA verdict clears obsolete invalidation attention. CI affects routing only when its Head matches the current Candidate. Multiple open PRs remain explicitly ambiguous. Unknown optional event fields are preserved without making the parser brittle.
+# Latest plan, append-only history and one historical plan
+curl http://localhost:8080/api/projects/1/work-units/11/plans/latest
+curl 'http://localhost:8080/api/projects/1/work-units/11/plans?limit=20'
+curl http://localhost:8080/api/projects/1/work-units/11/plans/42
 
-See:
+# Current bounded context summary and latest policy decision
+curl http://localhost:8080/api/projects/1/work-units/11/planning/context
+curl http://localhost:8080/api/projects/1/work-units/11/planning/policy
+
+# Configured OpenCode runtime health
+curl http://localhost:8080/api/planner/health
+```
+
+Generation statuses are:
+
+- `approved`: OpenCode produced a structured plan accepted by policy;
+- `rejected`: two bounded attempts were invalid and fallback is disabled;
+- `stale`: context, route or current Head changed;
+- `fallback`: deterministic template passed the same policy checks;
+- `planner_error`: the runtime failed and fallback is disabled.
+
+Concurrent generation requests for the same Project/work unit, context hash and mode are coalesced while in flight. A later regeneration creates a new audit record. Historical plans remain readable but are reported as stale when the authoritative context changes.
+
+### PromptContext
+
+`PromptContext` v1 is built only from the persisted GitHub snapshot and Stage 3 derived state. It includes repository and Issue identity, lifecycle and attention, Candidate, exact Head and CI, latest worker results, active blocker, route, warnings, expected event and bounded evidence. Ordering and JSON serialization are canonical and produce a stable SHA-256 context hash.
+
+Evidence bounds preserve the latest Lead, Implementor and QA terminal events, the active blocker, and relevant Lead dispatch/decision context before filling remaining capacity with recent comments. Credential-like data is redacted. GitHub and OpenCode credentials are never copied into the context, model request log or API response.
+
+Schemas are versioned at:
+
+- `docs/schemas/prompt-context-v1.schema.json`
+- `docs/schemas/prompt-plan-v1.schema.json`
+
+### Policy Engine and repair
+
+Policy deterministically checks version, context hash, Candidate/Head freshness, action, role, lane, route guards, blocker and Owner semantics, required prompt sections and prohibited authority. It rejects malformed JSON, prose outside the structured result, invented Heads, routing changes, unsupported completion claims, missing terminal contracts and authority to merge, write GitHub state, dispatch through a browser, approve scope, accept residual risk or disable required CI.
+
+OpenCode receives at most one repair request containing the exact machine-readable violations. There is no retry loop. A second invalid response uses the static fallback when enabled, otherwise the result remains rejected or a planner error.
+
+### Static fallback
+
+The fallback is a deterministic renderer, not a second LLM engine. It uses the same PromptContext and Policy Engine and includes current objective, authoritative state, required action, constraints, prohibited actions, evidence, stop conditions, Initiative Clause and terminal `worker_result` contract. QA routes also include the verdict contract. Owner-attention and non-dispatch routes do not produce a worker-chat prompt.
+
+Fallback is used when explicitly selected or when OpenCode is disabled, unavailable, times out, exceeds the configured request budget, or remains invalid after one repair.
+
+## OpenCode setup
+
+Run OpenCode as a separately managed long-running headless service. Do not launch it once per request. Configure that service with its provider credentials and mount or copy the versioned restricted agent configuration:
+
+```text
+.opencode/agents/prompt-planner.md
+```
+
+The agent denies shell, file read/edit/write, repository search, web, task and external-directory capabilities. The backend supplies the complete PromptContext and explicitly disables tools at the message boundary as defense in depth.
+
+Example backend configuration:
+
+```bash
+OPENCODE_ENABLED=true
+OPENCODE_ENDPOINT=http://localhost:4096
+OPENCODE_PROVIDER=<configured-provider-id>
+OPENCODE_MODEL=<configured-model-id>
+OPENCODE_AGENT=prompt-planner
+OPENCODE_USERNAME=opencode
+OPENCODE_PASSWORD=<server-basic-auth-password>
+OPENCODE_TIMEOUT=45s
+```
+
+An optional smoke check against a real server may use `/api/planner/health` and one generation request. Real provider credentials and external model network access are not required by CI.
+
+## Audit persistence
+
+SQLite stores append-only planning generations plus equivalent PromptContext, PromptPlan, ModelInvocation and PolicyDecision audit data. Records include context, plan and prompt hashes, source/runtime/provider/model/agent identifiers, mode, latency, status, sanitized error category, timestamps and usage/cost when available. Authorization headers and credentials are never stored.
+
+All planning rows include the Project identity and foreign-key cascade. Reads always filter by Project and Issue, preserving multi-repository isolation.
+
+## Operational responsibility boundary
+
+- **Stage 2:** read-only GitHub synchronization and normalized persistence.
+- **Stage 3:** deterministic workflow state, attention and route authority.
+- **Stage 4 OpenCode:** wording and composition from the supplied context only.
+- **Stage 4 Policy Engine:** deterministic validation, staleness and fallback decision.
+- **Future dashboard/browser stages:** presentation and dispatch, outside this stage.
+
+The application does not read ChatGPT Web responses and does not perform GitHub writes, automatic merge, browser binding, prompt insertion or autonomous execution.
+
+See also:
 
 - [CDDM Minimal](docs/cddm-minimal.md)
 - [Supervisor Event Contract v1](docs/supervisor-event-contract-v1.md)
 
-## Synchronization model
-
-Each sync is isolated to one Project and runs with a context deadline. It stores:
-
-- open Issues and labels;
-- Issue comments with stable GitHub identifiers and timestamps;
-- Pull Requests that reference synchronized Issues, including base/head refs, draft/state, exact Head SHA and mergeability state when GitHub provides it;
-- the latest check-run or combined commit-status summary for the exact PR Head;
-- per-Project sync status, timestamps and actionable error text.
-
-Synchronization uses transactional upserts keyed by Project and GitHub identifiers. Repeating the same sync does not create duplicates; a changed PR Head replaces the stored Head and CI summary. A failed repository is marked `failed` without preventing other Projects from synchronizing.
-
-The polling coordinator scans enabled Projects at `GITHUB_POLL_SCAN_INTERVAL` and honors each Project's `poll_interval_seconds`. All list surfaces are bounded by `GITHUB_MAX_PAGES` and `GITHUB_MAX_ITEMS`.
-
 ## Docker Compose
-
-Build and start both services:
 
 ```bash
 docker compose up --build
 ```
 
-Open `http://localhost:3000`. SQLite data is persisted in the named `cddm_data` volume. Compose passes GitHub configuration from `.env` into the API container without committing secrets.
+Open `http://localhost:3000`. SQLite data is persisted in `cddm_data`. Compose passes GitHub and OpenCode settings from `.env` without committing secrets. `host.docker.internal` is mapped for connecting the API container to a host-managed OpenCode server.
 
 ## Configuration
 
@@ -171,41 +231,42 @@ Open `http://localhost:3000`. SQLite data is persisted in the named `cddm_data` 
 | `APP_ADDR` | `:8080` | Backend listen address |
 | `APP_DATABASE_PATH` | `data/cddm.db` | SQLite database path |
 | `APP_SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown deadline |
-| `GITHUB_TOKEN` | empty | Read-only GitHub credential; required for private repositories |
-| `GITHUB_API_BASE_URL` | `https://api.github.com/` | GitHub REST API base URL, including GitHub Enterprise API roots |
-| `GITHUB_REQUEST_TIMEOUT` | `15s` | Per-request HTTP timeout |
-| `GITHUB_SYNC_TIMEOUT` | `2m` | End-to-end timeout for one repository sync |
+| `GITHUB_TOKEN` | empty | Read-only GitHub credential |
+| `GITHUB_API_BASE_URL` | `https://api.github.com/` | GitHub REST API base URL |
+| `GITHUB_REQUEST_TIMEOUT` | `15s` | Per-request GitHub timeout |
+| `GITHUB_SYNC_TIMEOUT` | `2m` | End-to-end repository sync timeout |
 | `GITHUB_DEFAULT_POLL_INTERVAL` | `5m` | Default interval assigned to new Projects |
-| `GITHUB_POLL_SCAN_INTERVAL` | `15s` | Coordinator scan cadence |
-| `GITHUB_MAX_PAGES` | `10` | Maximum pages per supported GitHub list surface |
-| `GITHUB_MAX_ITEMS` | `500` | Maximum retained items per list surface |
+| `GITHUB_POLL_SCAN_INTERVAL` | `15s` | Polling coordinator scan cadence |
+| `GITHUB_MAX_PAGES` | `10` | Maximum GitHub pages per list surface |
+| `GITHUB_MAX_ITEMS` | `500` | Maximum retained GitHub items per list surface |
 | `GITHUB_MAX_SYNC_CONCURRENCY` | `4` | Maximum Projects synchronized concurrently |
+| `OPENCODE_ENABLED` | `false` | Enable the sole production LLM path |
+| `OPENCODE_ENDPOINT` | `http://localhost:4096` | Long-running OpenCode server URL |
+| `OPENCODE_PROVIDER` | empty | OpenCode provider identifier; required when enabled |
+| `OPENCODE_MODEL` | empty | OpenCode model identifier; required when enabled |
+| `OPENCODE_AGENT` | `prompt-planner` | Restricted agent name |
+| `OPENCODE_USERNAME` | `opencode` | Basic-auth username |
+| `OPENCODE_PASSWORD` | empty | Basic-auth password; process configuration only |
+| `OPENCODE_TIMEOUT` | `45s` | Planning request deadline |
+| `OPENCODE_MAX_REQUEST_BYTES` | `262144` | Context request budget before fallback |
+| `PROMPT_FALLBACK_ENABLED` | `true` | Allow deterministic fallback after runtime/policy failure |
+| `PROMPT_EVIDENCE_LIMIT` | `12` | Maximum retained evidence comments; minimum 8 |
+| `PROMPT_EVIDENCE_CHARS` | `4000` | Per-evidence Markdown character bound |
 | `API_PORT` | `8080` | Host API port in Docker Compose |
 | `WEB_PORT` | `3000` | Host web port in Docker Compose |
 
-The application does not log authorization headers or response bodies. GitHub API errors include only the request path, status code and GitHub's short error message.
-
 ## Verification
-
-Backend formatting, tests and race detector:
 
 ```bash
 cd backend
 test -z "$(gofmt -l .)"
 go test ./...
 go test -race ./...
-```
 
-Frontend clean install and production build:
-
-```bash
-cd web
+cd ../web
 npm ci
 npm run build
-```
 
-Compose configuration:
-
-```bash
+cd ..
 docker compose config --quiet
 ```

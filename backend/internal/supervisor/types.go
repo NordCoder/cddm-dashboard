@@ -68,6 +68,7 @@ type Issue struct {
 	GitHubID     int64         `json:"github_id"`
 	Number       int           `json:"number"`
 	Title        string        `json:"title"`
+	Body         string        `json:"body"`
 	State        string        `json:"state"`
 	URL          string        `json:"url"`
 	Author       string        `json:"author"`

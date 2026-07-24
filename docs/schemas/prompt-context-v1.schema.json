@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cddm.local/schemas/prompt-context-v1.schema.json",
+  "title": "CDDM PromptContext v1",
+  "type": "object",
+  "required": [
+    "v", "repository", "issue", "candidate", "current_head", "ci",
+    "latest_worker_results", "route", "expected_event", "warnings", "evidence", "context_hash"
+  ],
+  "properties": {
+    "v": {"const": 1},
+    "repository": {
+      "type": "object",
+      "required": ["project_id", "owner", "repository", "workflow_mode"],
+      "properties": {
+        "project_id": {"type": "integer", "minimum": 1},
+        "owner": {"type": "string"},
+        "repository": {"type": "string"},
+        "workflow_mode": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "issue": {
+      "type": "object",
+      "required": ["github_id", "number", "title", "body", "url", "lifecycle", "attention"],
+      "properties": {
+        "github_id": {"type": "integer"},
+        "number": {"type": "integer", "minimum": 1},
+        "title": {"type": "string"},
+        "body": {"type": "string"},
+        "url": {"type": "string"},
+        "lifecycle": {"type": "string"},
+        "attention": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "candidate": {"type": "object"},
+    "current_head": {"type": "string"},
+    "ci": {"type": "object"},
+    "latest_worker_results": {"type": "object"},
+    "active_blocker": {"type": "object"},
+    "route": {
+      "type": "object",
+      "required": ["action", "reason_code", "reason", "guards", "warnings"]
+    },
+    "expected_event": {"type": "string"},
+    "warnings": {"type": "array"},
+    "evidence": {"type": "array"},
+    "context_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "additionalProperties": false
+}

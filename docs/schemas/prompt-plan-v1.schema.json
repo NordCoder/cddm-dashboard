@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cddm.local/schemas/prompt-plan-v1.schema.json",
+  "title": "CDDM PromptPlan v1",
+  "type": "object",
+  "required": [
+    "v", "action", "target_role", "lane_key", "summary", "reason", "risk",
+    "requires_owner", "expected_head", "expected_event", "guards",
+    "prohibited_actions", "prompt", "confidence", "source"
+  ],
+  "properties": {
+    "v": {"const": 1},
+    "action": {"type": "string"},
+    "target_role": {"type": "string"},
+    "lane_key": {"type": "string"},
+    "summary": {"type": "string", "minLength": 1},
+    "reason": {"type": "string", "minLength": 1},
+    "risk": {"type": "string", "minLength": 1},
+    "requires_owner": {"type": "boolean"},
+    "expected_head": {"type": "string"},
+    "expected_event": {"type": "string"},
+    "guards": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "prohibited_actions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "prompt": {"type": "string"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "source": {
+      "type": "object",
+      "required": ["kind", "runtime", "mode", "context_hash"],
+      "properties": {
+        "kind": {"enum": ["opencode", "template_fallback"]},
+        "runtime": {"type": "string"},
+        "provider": {"type": "string"},
+        "model": {"type": "string"},
+        "agent": {"type": "string"},
+        "mode": {"enum": ["opencode", "fallback"]},
+        "context_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "extensions": {"type": "object"}
+  },
+  "additionalProperties": true
+}

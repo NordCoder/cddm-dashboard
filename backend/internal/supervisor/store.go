@@ -161,17 +161,18 @@ func (s *Store) ReplaceSnapshot(ctx context.Context, projectID int64, snapshot R
 		issueIDs = append(issueIDs, issue.GitHubID)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO github_issues (
-				project_id, github_id, issue_number, title, state, url, author, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				project_id, github_id, issue_number, title, body, state, url, author, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(project_id, github_id) DO UPDATE SET
 				issue_number = excluded.issue_number,
 				title = excluded.title,
+				body = excluded.body,
 				state = excluded.state,
 				url = excluded.url,
 				author = excluded.author,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
-		`, projectID, issue.GitHubID, issue.Number, issue.Title, issue.State, issue.URL, issue.Author,
+		`, projectID, issue.GitHubID, issue.Number, issue.Title, issue.Body, issue.State, issue.URL, issue.Author,
 			formatTime(issue.CreatedAt), formatTime(issue.UpdatedAt)); err != nil {
 			return fmt.Errorf("upsert issue %d: %w", issue.Number, err)
 		}

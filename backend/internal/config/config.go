@@ -20,6 +20,13 @@ const (
 	defaultGitHubMaxPages           = 10
 	defaultGitHubMaxItems           = 500
 	defaultGitHubMaxSyncConcurrency = 4
+	defaultOpenCodeEndpoint         = "http://localhost:4096"
+	defaultOpenCodeAgent            = "prompt-planner"
+	defaultOpenCodeUsername         = "opencode"
+	defaultOpenCodeTimeout          = 45 * time.Second
+	defaultOpenCodeMaxRequestBytes  = 256 << 10
+	defaultPromptEvidenceLimit      = 12
+	defaultPromptEvidenceChars      = 4000
 )
 
 type Config struct {
@@ -35,6 +42,18 @@ type Config struct {
 	GitHubMaxPages            int
 	GitHubMaxItems            int
 	GitHubMaxSyncConcurrency  int
+	OpenCodeEnabled           bool
+	OpenCodeEndpoint          string
+	OpenCodeProvider          string
+	OpenCodeModel             string
+	OpenCodeAgent             string
+	OpenCodeUsername          string
+	OpenCodePassword          string
+	OpenCodeTimeout           time.Duration
+	OpenCodeMaxRequestBytes   int64
+	PromptFallbackEnabled     bool
+	PromptEvidenceLimit       int
+	PromptEvidenceChars       int
 }
 
 func Load() (Config, error) {
@@ -70,8 +89,32 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	openCodeEnabled, err := boolFromEnv("OPENCODE_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	openCodeTimeout, err := durationFromEnv("OPENCODE_TIMEOUT", defaultOpenCodeTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	openCodeMaxRequestBytes, err := positiveInt64FromEnv("OPENCODE_MAX_REQUEST_BYTES", defaultOpenCodeMaxRequestBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	fallbackEnabled, err := boolFromEnv("PROMPT_FALLBACK_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
+	evidenceLimit, err := positiveIntFromEnv("PROMPT_EVIDENCE_LIMIT", defaultPromptEvidenceLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	evidenceChars, err := positiveIntFromEnv("PROMPT_EVIDENCE_CHARS", defaultPromptEvidenceChars)
+	if err != nil {
+		return Config{}, err
+	}
 
-	return Config{
+	config := Config{
 		Address:                   stringFromEnv("APP_ADDR", defaultAddress),
 		DatabasePath:              stringFromEnv("APP_DATABASE_PATH", defaultDatabasePath),
 		ShutdownTimeout:           shutdownTimeout,
@@ -84,7 +127,29 @@ func Load() (Config, error) {
 		GitHubMaxPages:            maxPages,
 		GitHubMaxItems:            maxItems,
 		GitHubMaxSyncConcurrency:  maxConcurrency,
-	}, nil
+		OpenCodeEnabled:           openCodeEnabled,
+		OpenCodeEndpoint:          stringFromEnv("OPENCODE_ENDPOINT", defaultOpenCodeEndpoint),
+		OpenCodeProvider:          strings.TrimSpace(os.Getenv("OPENCODE_PROVIDER")),
+		OpenCodeModel:             strings.TrimSpace(os.Getenv("OPENCODE_MODEL")),
+		OpenCodeAgent:             stringFromEnv("OPENCODE_AGENT", defaultOpenCodeAgent),
+		OpenCodeUsername:          stringFromEnv("OPENCODE_USERNAME", defaultOpenCodeUsername),
+		OpenCodePassword:          strings.TrimSpace(os.Getenv("OPENCODE_PASSWORD")),
+		OpenCodeTimeout:           openCodeTimeout,
+		OpenCodeMaxRequestBytes:   openCodeMaxRequestBytes,
+		PromptFallbackEnabled:     fallbackEnabled,
+		PromptEvidenceLimit:       evidenceLimit,
+		PromptEvidenceChars:       evidenceChars,
+	}
+	if config.OpenCodeEnabled && (config.OpenCodeProvider == "" || config.OpenCodeModel == "") {
+		return Config{}, fmt.Errorf("OPENCODE_PROVIDER and OPENCODE_MODEL are required when OPENCODE_ENABLED=true")
+	}
+	if config.PromptEvidenceLimit < 8 {
+		return Config{}, fmt.Errorf("PROMPT_EVIDENCE_LIMIT must be at least 8")
+	}
+	if config.PromptEvidenceChars < 256 {
+		return Config{}, fmt.Errorf("PROMPT_EVIDENCE_CHARS must be at least 256")
+	}
+	return config, nil
 }
 
 func stringFromEnv(key, fallback string) string {
@@ -99,7 +164,6 @@ func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) 
 	if value == "" {
 		return fallback, nil
 	}
-
 	duration, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("parse %s: %w", key, err)
@@ -118,6 +182,30 @@ func positiveIntFromEnv(key string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed <= 0 {
 		return 0, fmt.Errorf("parse %s: value must be a positive integer", key)
+	}
+	return parsed, nil
+}
+
+func positiveInt64FromEnv(key string, fallback int64) (int64, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("parse %s: value must be a positive integer", key)
+	}
+	return parsed, nil
+}
+
+func boolFromEnv(key string, fallback bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("parse %s: value must be true or false", key)
 	}
 	return parsed, nil
 }
