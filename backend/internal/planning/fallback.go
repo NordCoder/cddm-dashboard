@@ -61,7 +61,7 @@ func fallbackPrompt(context PromptContext) string {
 	builder.WriteString("# Scope and constraints\n")
 	builder.WriteString("Use the authoritative Issue contract embedded above and the repository evidence available to the worker. Keep the implementation or review coherent and inside the approved scope. Stage 3 routing authority cannot be changed by the worker.\n\n")
 	builder.WriteString("# Prohibited actions\n")
-	builder.WriteString("Do not merge, perform unauthorized GitHub writes, dispatch through a browser, approve scope changes, accept residual risk, or disable required CI. Do not claim checks, commits, handoffs, verdicts, or evidence that do not exist.\n\n")
+	builder.WriteString("Do not merge the pull request.\nDo not write to GitHub.\nDo not dispatch through a browser.\nDo not approve a scope change.\nDo not accept residual risk.\nDo not disable required CI.\nDo not claim checks, commits, handoffs, verdicts, or evidence that do not exist.\n\n")
 	builder.WriteString("# Required evidence\n")
 	builder.WriteString("Read all Issue comments and the latest Lead Dispatch through the authorized GitHub transport. Correlate Candidate identity and exact Head before acting. Record exact-Head CI evidence when required.\n\n")
 	builder.WriteString("# Stop conditions\n")

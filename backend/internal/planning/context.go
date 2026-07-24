@@ -15,14 +15,18 @@ import (
 )
 
 const (
-	defaultEvidenceLimit     = 12
-	defaultEvidenceChars     = 4000
-	minimumSafeEvidenceLimit = 8
+	defaultEvidenceLimit           = 12
+	defaultEvidenceChars           = 4000
+	defaultIssueContractChars      = 64 << 10
+	minimumSafeEvidenceLimit       = 8
+	minimumIssueContractChars      = 1024
+	issueContractIncompleteWarning = "issue_contract_incomplete"
 )
 
 type ContextOptions struct {
-	EvidenceLimit int
-	EvidenceChars int
+	EvidenceLimit      int
+	EvidenceChars      int
+	IssueContractChars int
 }
 
 var (
@@ -47,8 +51,29 @@ func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitSt
 	if chars < 256 {
 		return PromptContext{}, nil, fmt.Errorf("evidence character limit must be at least 256")
 	}
+	issueChars := options.IssueContractChars
+	if issueChars == 0 {
+		issueChars = defaultIssueContractChars
+	}
+	if issueChars < minimumIssueContractChars {
+		return PromptContext{}, nil, fmt.Errorf("Issue contract character limit must be at least %d", minimumIssueContractChars)
+	}
 
 	issue, _ := findSnapshotIssue(snapshot.Issues, state.Identity.IssueGitHubID, state.Identity.IssueNumber)
+	issueBody := redactText(issue.Body)
+	issueBodyComplete := len(issueBody) <= issueChars
+	if !issueBodyComplete {
+		issueBody = truncateUTF8(issueBody, issueChars)
+	}
+
+	warnings := sanitizeWarnings(state.Warnings)
+	if !issueBodyComplete {
+		warnings = append(warnings, workflow.Warning{
+			Code:    issueContractIncompleteWarning,
+			Message: fmt.Sprintf("authoritative Issue body exceeds PromptContext contract budget of %d characters", issueChars),
+		})
+		warnings = sanitizeWarnings(warnings)
+	}
 
 	context := PromptContext{
 		Version: PromptContextVersion,
@@ -62,7 +87,7 @@ func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitSt
 			GitHubID:  state.Identity.IssueGitHubID,
 			Number:    state.Identity.IssueNumber,
 			Title:     redactText(state.Identity.Title),
-			Body:      truncateUTF8(redactText(issue.Body), chars),
+			Body:      issueBody,
 			URL:       redactText(state.Identity.URL),
 			Lifecycle: state.Lifecycle,
 			Attention: redactAttention(state.Attention),
@@ -74,7 +99,7 @@ func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitSt
 		ActiveBlocker: resultSummary(state.ActiveBlocker),
 		Route:         sanitizeRoute(state.Route),
 		ExpectedEvent: expectedEvent(state.Route),
-		Warnings:      sanitizeWarnings(state.Warnings),
+		Warnings:      warnings,
 		Evidence:      boundedEvidence(state, limit, chars),
 	}
 

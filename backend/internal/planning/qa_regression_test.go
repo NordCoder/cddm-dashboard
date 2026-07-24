@@ -55,7 +55,7 @@ func TestPersistedIssueBodyDrivesContextHashAndFallbackObjective(t *testing.T) {
 }
 
 func TestIssueBodyIsBoundedAndRedacted(t *testing.T) {
-	body := "GITHUB_TOKEN=ghp_12345678901234567890\n{\"password\":\"json-secret\"}\n" + strings.Repeat("objective ", 100)
+	body := "GITHUB_TOKEN=ghp_12345678901234567890\n{\"password\":\"json-secret\"}\n" + strings.Repeat("objective ", 300)
 	snapshot := supervisor.ProjectSnapshot{
 		Project: supervisor.Project{ID: 1, Owner: "acme", Repository: "service", WorkflowMode: "pull_request"},
 		Issues:  []supervisor.Issue{{GitHubID: 11, Number: 11, Title: "Stage 4", Body: body}},
@@ -66,7 +66,11 @@ func TestIssueBodyIsBoundedAndRedacted(t *testing.T) {
 		Route:    workflow.Route{Action: "dispatch", TargetRole: "implementor", LaneKey: "acme/service#11:implementor", ReasonCode: "work", Reason: "work", Guards: []string{}, Warnings: []workflow.Warning{}},
 		Warnings: []workflow.Warning{}, ParsedComments: []workflow.ParsedComment{},
 	}
-	contextValue, _, err := BuildContext(snapshot, state, ContextOptions{EvidenceLimit: 8, EvidenceChars: 256})
+	contextValue, _, err := BuildContext(snapshot, state, ContextOptions{
+		EvidenceLimit:      8,
+		EvidenceChars:      256,
+		IssueContractChars: minimumIssueContractChars,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +79,9 @@ func TestIssueBodyIsBoundedAndRedacted(t *testing.T) {
 	}
 	if !strings.Contains(contextValue.Issue.Body, "…[truncated]") {
 		t.Fatalf("Issue body was not bounded: %q", contextValue.Issue.Body)
+	}
+	if !hasWarningCode(contextValue.Warnings, issueContractIncompleteWarning) {
+		t.Fatalf("bounded Issue body did not surface incompleteness: %#v", contextValue.Warnings)
 	}
 }
 

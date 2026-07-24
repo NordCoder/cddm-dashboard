@@ -33,8 +33,8 @@ var requiredPromptSections = []string{
 
 var forbiddenAuthorityPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bmerge\s+(?:the\s+)?(?:pull request|pr|candidate)\b`),
-	regexp.MustCompile(`(?i)\b(?:push|commit|comment|label|close|approve)\s+(?:to|on|the)\s+github\b`),
-	regexp.MustCompile(`(?i)\bdispatch\s+(?:to\s+)?(?:a\s+)?browser\b`),
+	regexp.MustCompile(`(?i)\b(?:write|push|commit|comment|label|close|approve)\s+(?:to|on|the)\s+github\b`),
+	regexp.MustCompile(`(?i)\bdispatch\s+(?:(?:through|to)\s+)?(?:a\s+)?browser\b`),
 	regexp.MustCompile(`(?i)\bapprove\s+(?:a\s+)?scope\s+change\b`),
 	regexp.MustCompile(`(?i)\baccept\s+(?:the\s+)?residual\s+risk\b`),
 	regexp.MustCompile(`(?i)\bdisable\s+(?:the\s+)?required\s+ci\b`),
@@ -51,6 +51,9 @@ func ValidatePlan(context PromptContext, plan PromptPlan, current PromptContext,
 	}
 	if context.CurrentHead != current.CurrentHead || !sameRoute(context.Route, current.Route) {
 		add("stale_route", "expected_head", "current Head or deterministic Stage 3 route changed")
+	}
+	if hasWarningCode(context.Warnings, issueContractIncompleteWarning) {
+		add("incomplete_issue_contract", "issue.body", "authoritative Issue contract exceeded its bounded PromptContext budget")
 	}
 	if plan.Version != PromptPlanVersion {
 		add("wrong_version", "v", fmt.Sprintf("PromptPlan version must be %d", PromptPlanVersion))
@@ -202,16 +205,60 @@ func contains(values []string, expected string) bool {
 	return false
 }
 
+func hasWarningCode(warnings []workflow.Warning, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func grantsForbiddenAuthority(prompt string) bool {
 	for _, line := range strings.Split(prompt, "\n") {
 		lower := strings.ToLower(strings.TrimSpace(line))
-		if lower == "" || strings.Contains(lower, "do not") || strings.Contains(lower, "must not") || strings.Contains(lower, "prohibited") || strings.Contains(lower, "without authorization") {
+		if lower == "" {
 			continue
 		}
 		for _, pattern := range forbiddenAuthorityPatterns {
-			if pattern.MatchString(line) {
-				return true
+			for _, match := range pattern.FindAllStringIndex(lower, -1) {
+				if !matchIsExplicitProhibition(lower, match[0], match[1]) {
+					return true
+				}
 			}
+		}
+	}
+	return false
+}
+
+func matchIsExplicitProhibition(line string, start, end int) bool {
+	prefix := strings.TrimSpace(line[:start])
+	prefix = strings.TrimRight(prefix, " \t:;,-")
+	for _, phrase := range []string{
+		"do not",
+		"must not",
+		"never",
+		"may not",
+		"cannot",
+		"can not",
+		"can't",
+		"forbidden to",
+		"prohibited from",
+	} {
+		if strings.HasSuffix(prefix, phrase) {
+			return true
+		}
+	}
+
+	suffix := strings.TrimSpace(line[end:])
+	for _, phrase := range []string{
+		"is prohibited",
+		"is forbidden",
+		"is not allowed",
+		"is disallowed",
+	} {
+		if strings.HasPrefix(suffix, phrase) {
+			return true
 		}
 	}
 	return false
