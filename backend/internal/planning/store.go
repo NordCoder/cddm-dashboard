@@ -76,10 +76,7 @@ func (s *AuditStore) Save(ctx context.Context, record GenerationRecord) (int64, 
 	}
 
 	for _, invocation := range record.Invocations {
-		output := redactText(invocation.Output)
-		if len(output) > 1<<20 {
-			output = truncateUTF8(output, 1<<20)
-		}
+		responseHash := hashBytes([]byte(invocation.Output))
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO model_invocations (
 				generation_id, attempt, runtime, provider, model, agent, mode,
@@ -91,7 +88,7 @@ func (s *AuditStore) Save(ctx context.Context, record GenerationRecord) (int64, 
 			invocation.Agent, invocation.Mode, invocation.Latency.Milliseconds(), invocation.Status,
 			invocation.ErrorCategory, invocation.Usage.InputTokens, invocation.Usage.OutputTokens,
 			invocation.Usage.ReasoningTokens, invocation.Usage.CacheReadTokens,
-			invocation.Usage.CacheWriteTokens, invocation.Usage.CostMicros, hashBytes([]byte(output)), output,
+			invocation.Usage.CacheWriteTokens, invocation.Usage.CostMicros, responseHash, "",
 			invocation.StartedAt.UTC().Format(time.RFC3339Nano), invocation.CompletedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 			return 0, fmt.Errorf("insert model invocation: %w", err)
 		}

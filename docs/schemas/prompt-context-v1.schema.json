@@ -20,7 +20,20 @@
       },
       "additionalProperties": false
     },
-    "issue": {"type": "object"},
+    "issue": {
+      "type": "object",
+      "required": ["github_id", "number", "title", "body", "url", "lifecycle", "attention"],
+      "properties": {
+        "github_id": {"type": "integer"},
+        "number": {"type": "integer", "minimum": 1},
+        "title": {"type": "string"},
+        "body": {"type": "string"},
+        "url": {"type": "string"},
+        "lifecycle": {"type": "string"},
+        "attention": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
     "candidate": {"type": "object"},
     "current_head": {"type": "string"},
     "ci": {"type": "object"},

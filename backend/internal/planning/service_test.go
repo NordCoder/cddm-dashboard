@@ -174,7 +174,7 @@ func TestServiceOpenCodeRepairFallbackAuditHistoryAndStaleness(t *testing.T) {
 		}
 	})
 
-	t.Run("fallback disabled distinguishes runtime error from rejected plan", func(t *testing.T) {
+	t.Run("fallback disabled returns explicit planner error", func(t *testing.T) {
 		tests := []struct {
 			name       string
 			planner    *fakePlanner
@@ -182,7 +182,7 @@ func TestServiceOpenCodeRepairFallbackAuditHistoryAndStaleness(t *testing.T) {
 			wantStatus string
 		}{
 			{"transport error", &fakePlanner{results: []fakePlannerResult{{err: &PlannerError{Category: "unavailable", Message: "down"}}}}, 1, StatusPlannerError},
-			{"repair exhausted", &fakePlanner{results: []fakePlannerResult{{output: "bad"}, {output: "bad-again"}}}, 2, StatusRejected},
+			{"repair exhausted", &fakePlanner{results: []fakePlannerResult{{output: "bad"}, {output: "bad-again"}}}, 2, StatusPlannerError},
 		}
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
@@ -303,7 +303,8 @@ func seedPlanningSnapshot(t *testing.T, store *supervisor.Store, projectID int64
 	err := store.ReplaceSnapshot(context.Background(), projectID, supervisor.RepositorySnapshot{
 		FetchedAt: now,
 		Issues: []supervisor.Issue{{
-			GitHubID: githubBase + int64(issueNumber), Number: issueNumber, Title: title, State: "open",
+			GitHubID: githubBase + int64(issueNumber), Number: issueNumber, Title: title,
+			Body: "# Outcome\n\nImplement the authoritative Stage 4 contract from the persisted Issue body.", State: "open",
 			URL: "https://example.invalid/issues/11", Author: "owner", CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
 			Labels: []supervisor.Label{{Name: "implementation", Color: "ffffff"}}, Comments: []supervisor.Comment{},
 			PullRequests: []supervisor.PullRequest{{

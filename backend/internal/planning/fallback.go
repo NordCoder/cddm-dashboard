@@ -44,7 +44,13 @@ func fallbackRisk(context PromptContext) string {
 func fallbackPrompt(context PromptContext) string {
 	var builder strings.Builder
 	builder.WriteString("# Current objective\n")
-	builder.WriteString(fmt.Sprintf("Continue Issue #%d — %s — strictly through the current Stage 3 route.\n\n", context.Issue.Number, context.Issue.Title))
+	builder.WriteString(fmt.Sprintf("Issue #%d — %s\n\n", context.Issue.Number, context.Issue.Title))
+	if strings.TrimSpace(context.Issue.Body) != "" {
+		builder.WriteString(context.Issue.Body)
+		builder.WriteString("\n\n")
+	} else {
+		builder.WriteString("The persisted Issue body is empty. Use the Issue title and authoritative evidence below without inventing requirements.\n\n")
+	}
 	builder.WriteString("# Authoritative state\n")
 	builder.WriteString(fmt.Sprintf("Repository: %s/%s\nLifecycle: %s\nAttention: %s (%s)\nCurrent Candidate Head: %s\nCI: %s/%s\nRoute reason: %s\nContext hash: %s\n\n",
 		context.Repository.Owner, context.Repository.Repository, context.Issue.Lifecycle,
@@ -53,11 +59,11 @@ func fallbackPrompt(context PromptContext) string {
 	builder.WriteString("# Required next action\n")
 	builder.WriteString(fmt.Sprintf("Act as %s on lane %s. Preserve action=%s and expected Head=%s.\n\n", context.Route.TargetRole, context.Route.LaneKey, context.Route.Action, printableHead(context.CurrentHead)))
 	builder.WriteString("# Scope and constraints\n")
-	builder.WriteString("Use only the authoritative Issue contract and repository evidence available to the worker. Keep the implementation or review coherent and inside the approved scope. Stage 3 routing authority cannot be changed by the worker.\n\n")
+	builder.WriteString("Use the authoritative Issue contract embedded above and the repository evidence available to the worker. Keep the implementation or review coherent and inside the approved scope. Stage 3 routing authority cannot be changed by the worker.\n\n")
 	builder.WriteString("# Prohibited actions\n")
 	builder.WriteString("Do not merge, perform unauthorized GitHub writes, dispatch through a browser, approve scope changes, accept residual risk, or disable required CI. Do not claim checks, commits, handoffs, verdicts, or evidence that do not exist.\n\n")
 	builder.WriteString("# Required evidence\n")
-	builder.WriteString("Read the full Issue body, all comments and the latest Lead Dispatch through the authorized GitHub transport. Correlate Candidate identity and exact Head before acting. Record exact-Head CI evidence when required.\n\n")
+	builder.WriteString("Read all Issue comments and the latest Lead Dispatch through the authorized GitHub transport. Correlate Candidate identity and exact Head before acting. Record exact-Head CI evidence when required.\n\n")
 	builder.WriteString("# Stop conditions\n")
 	builder.WriteString("Stop with blocked only when continuation requires a real external decision, missing mandatory information, unavailable permissions, or infrastructure. Do not block on ordinary engineering uncertainty that can be resolved by repository reads, tests, standard design choices, or a focused experiment.\n\n")
 	builder.WriteString("# Initiative Clause\n")

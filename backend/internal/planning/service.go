@@ -169,17 +169,17 @@ func (s *Service) generate(ctx context.Context, projectID int64, issueNumber int
 	violations := append([]Violation(nil), lastDecision.Violations...)
 	violations = append(violations, Violation{Code: "repair_exhausted", Field: "response", Message: "OpenCode remained invalid after the single repair attempt"})
 	finalDecision := PolicyDecision{
-		Status: StatusRejected, ContextHash: contextValue.ContextHash, DecidedAt: s.now(), Violations: violations,
+		Status: StatusPlannerError, ContextHash: contextValue.ContextHash, DecidedAt: s.now(), Violations: violations,
 	}
 	id, err := s.audit.Save(ctx, GenerationRecord{
-		ProjectID: projectID, IssueNumber: issueNumber, Mode: mode, Status: StatusRejected,
+		ProjectID: projectID, IssueNumber: issueNumber, Mode: mode, Status: StatusPlannerError,
 		Context: contextValue, ContextJSON: contextJSON, Decision: finalDecision, DecisionHistory: decisionHistory,
 		Invocations: invocations, CreatedAt: createdAt,
 	})
 	if err != nil {
 		return GenerationResult{}, err
 	}
-	return GenerationResult{Status: StatusRejected, Context: contextValue, PolicyDecision: finalDecision, PlanID: id, CreatedAt: createdAt}, nil
+	return GenerationResult{Status: StatusPlannerError, Context: contextValue, PolicyDecision: finalDecision, PlanID: id, CreatedAt: createdAt}, nil
 }
 
 func (s *Service) persistFallback(ctx context.Context, projectID int64, issueNumber int, requestedMode string, contextValue PromptContext, contextJSON []byte, invocations []InvocationRecord, history []PolicyAuditDecision, createdAt time.Time) (GenerationResult, error) {

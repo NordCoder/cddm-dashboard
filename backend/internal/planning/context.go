@@ -26,9 +26,10 @@ type ContextOptions struct {
 }
 
 var (
-	authorizationPattern = regexp.MustCompile(`(?i)(authorization\s*:\s*)([^\r\n]+)`)
-	tokenPattern         = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,})\b`)
-	assignmentPattern    = regexp.MustCompile(`(?i)\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY))\s*[:=]\s*([^\s,;]+)`)
+	authorizationPattern   = regexp.MustCompile(`(?i)(authorization\s*:\s*)([^\r\n]+)`)
+	tokenPattern           = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,})\b`)
+	assignmentPattern      = regexp.MustCompile(`(?i)\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY))\s*[:=]\s*([^\s,;]+)`)
+	credentialValuePattern = regexp.MustCompile(`(?i)(["']?(?:authorization|credential|password|secret|token|api[_-]?key)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}\]]+)`)
 )
 
 func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitState, options ContextOptions) (PromptContext, []byte, error) {
@@ -47,6 +48,8 @@ func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitSt
 		return PromptContext{}, nil, fmt.Errorf("evidence character limit must be at least 256")
 	}
 
+	issue, _ := findSnapshotIssue(snapshot.Issues, state.Identity.IssueGitHubID, state.Identity.IssueNumber)
+
 	context := PromptContext{
 		Version: PromptContextVersion,
 		Repository: RepositoryIdentity{
@@ -59,6 +62,7 @@ func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitSt
 			GitHubID:  state.Identity.IssueGitHubID,
 			Number:    state.Identity.IssueNumber,
 			Title:     redactText(state.Identity.Title),
+			Body:      truncateUTF8(redactText(issue.Body), chars),
 			URL:       redactText(state.Identity.URL),
 			Lifecycle: state.Lifecycle,
 			Attention: redactAttention(state.Attention),
@@ -84,6 +88,15 @@ func BuildContext(snapshot supervisor.ProjectSnapshot, state workflow.WorkUnitSt
 		return PromptContext{}, nil, fmt.Errorf("serialize prompt context: %w", err)
 	}
 	return context, canonical, nil
+}
+
+func findSnapshotIssue(issues []supervisor.Issue, githubID int64, issueNumber int) (supervisor.Issue, bool) {
+	for _, issue := range issues {
+		if issue.GitHubID == githubID && issue.Number == issueNumber {
+			return issue, true
+		}
+	}
+	return supervisor.Issue{}, false
 }
 
 func canonicalContextBytes(context PromptContext) ([]byte, error) {
@@ -359,6 +372,7 @@ func redactText(value string) string {
 	value = authorizationPattern.ReplaceAllString(value, `${1}[REDACTED]`)
 	value = tokenPattern.ReplaceAllString(value, "[REDACTED]")
 	value = assignmentPattern.ReplaceAllString(value, `${1}=[REDACTED]`)
+	value = credentialValuePattern.ReplaceAllString(value, `${1}[REDACTED]`)
 	return value
 }
 
