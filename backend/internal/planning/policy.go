@@ -32,7 +32,7 @@ var requiredPromptSections = []string{
 }
 
 var forbiddenAuthorityPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\bmerge\s+(?:the\s+)?(?:pull request|pr|candidate)\b`),
+	regexp.MustCompile(`(?i)\bmerge\b(?:\s+(?:the|this|that|these|those|current|existing|open|draft|pending|latest|proposed|my|our)){0,4}\s+(?:pull\s+request|pr|candidate|branch|changes|it)\b`),
 	regexp.MustCompile(`(?i)\b(?:write|push|commit|comment|label|close|approve)\s+(?:to|on|the)\s+github\b`),
 	regexp.MustCompile(`(?i)\bdispatch\s+(?:(?:through|to)\s+)?(?:a\s+)?browser\b`),
 	regexp.MustCompile(`(?i)\bapprove\s+(?:a\s+)?scope\s+change\b`),
