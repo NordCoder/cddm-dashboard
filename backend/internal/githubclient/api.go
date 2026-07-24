@@ -31,6 +31,7 @@ type apiIssue struct {
 	ID          int64           `json:"id"`
 	Number      int             `json:"number"`
 	Title       string          `json:"title"`
+	Body        string          `json:"body"`
 	State       string          `json:"state"`
 	HTMLURL     string          `json:"html_url"`
 	User        apiUser         `json:"user"`
@@ -113,7 +114,7 @@ func (c *Client) listIssues(ctx context.Context, owner, repository string) ([]su
 				labels = append(labels, supervisor.Label{Name: label.Name, Color: label.Color, Description: description})
 			}
 			issues = append(issues, supervisor.Issue{
-				GitHubID: item.ID, Number: item.Number, Title: item.Title, State: item.State,
+				GitHubID: item.ID, Number: item.Number, Title: item.Title, Body: item.Body, State: item.State,
 				URL: item.HTMLURL, Author: item.User.Login, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 				Labels: labels, Comments: []supervisor.Comment{}, PullRequests: []supervisor.PullRequest{},
 			})

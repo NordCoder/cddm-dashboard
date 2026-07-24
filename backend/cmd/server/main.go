@@ -15,6 +15,7 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/database"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/githubclient"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/httpapi"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 )
 
@@ -51,12 +52,31 @@ func run() error {
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
 	poller := supervisor.NewPoller(store, syncService, cfg.GitHubPollScanInterval)
 
+	opencodePlanner, err := planning.NewOpenCodePlanner(planning.OpenCodeConfig{
+		Enabled: cfg.OpenCodeEnabled, Endpoint: cfg.OpenCodeEndpoint,
+		Provider: cfg.OpenCodeProvider, Model: cfg.OpenCodeModel, Agent: cfg.OpenCodeAgent,
+		Username: cfg.OpenCodeUsername, Password: cfg.OpenCodePassword,
+		Timeout: cfg.OpenCodeTimeout, MaxRequestBytes: cfg.OpenCodeMaxRequestBytes,
+	})
+	if err != nil {
+		return err
+	}
+	planningService := planning.NewService(store, planning.NewAuditStore(db), opencodePlanner, planning.ServiceConfig{
+		ContextOptions: planning.ContextOptions{
+			EvidenceLimit: cfg.PromptEvidenceLimit,
+			EvidenceChars: cfg.PromptEvidenceChars,
+		},
+		FallbackEnabled: cfg.PromptFallbackEnabled,
+	})
+
 	server := &http.Server{
-		Addr:              cfg.Address,
-		Handler:           httpapi.New(db, store, syncService, cfg.GitHubDefaultPollInterval),
+		Addr: cfg.Address,
+		Handler: httpapi.NewWithPlanning(
+			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService,
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      cfg.GitHubSyncTimeout + 15*time.Second,
+		WriteTimeout:      maxDuration(cfg.GitHubSyncTimeout, cfg.OpenCodeTimeout) + 15*time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -116,4 +136,11 @@ func waitForPoller(ctx context.Context, done <-chan struct{}) error {
 	case <-ctx.Done():
 		return fmt.Errorf("stop polling coordinator: %w", ctx.Err())
 	}
+}
+
+func maxDuration(left, right time.Duration) time.Duration {
+	if right > left {
+		return right
+	}
+	return left
 }

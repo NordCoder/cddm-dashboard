@@ -40,7 +40,7 @@ func (s *Store) WorkspaceSnapshot(ctx context.Context) (WorkspaceSnapshot, error
 
 func (s *Store) readIssues(ctx context.Context, projectID int64) ([]Issue, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT github_id, issue_number, title, state, url, author, created_at, updated_at
+		SELECT github_id, issue_number, title, body, state, url, author, created_at, updated_at
 		FROM github_issues
 		WHERE project_id = ?
 		ORDER BY issue_number
@@ -53,7 +53,7 @@ func (s *Store) readIssues(ctx context.Context, projectID int64) ([]Issue, error
 	for rows.Next() {
 		var issue Issue
 		var createdAt, updatedAt string
-		if err := rows.Scan(&issue.GitHubID, &issue.Number, &issue.Title, &issue.State, &issue.URL, &issue.Author, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&issue.GitHubID, &issue.Number, &issue.Title, &issue.Body, &issue.State, &issue.URL, &issue.Author, &createdAt, &updatedAt); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan issue: %w", err)
 		}
