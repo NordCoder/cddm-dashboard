@@ -2,9 +2,11 @@
   "name": "cddm-dashboard-web",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "build": "npm run clean && tsc && node scripts/copy-assets.mjs",
+    "test": "npm run clean && tsc && node --test tests/*.test.mjs",
     "dev": "npm run build && node scripts/dev-server.mjs"
   },
   "dependencies": {

@@ -1,15 +1,15 @@
 # CDDM Dashboard
 
-Stage 4 adds a backend-owned Prompt Planning and Policy layer over the persistent read-only GitHub Supervisor Core and deterministic Stage 3 workflow state.
+Stage 5 turns the Stage 1–4 foundation into the first usable Supervisor dashboard. The responsive React/TypeScript UI projects canonical backend state for multiple repositories, attention triage, work-unit/Candidate/CI evidence, Prompt Plan generation and history, and local prompt review before manual use in ChatGPT.
 
 ```text
 backend/   Go HTTP API, SQLite persistence, GitHub synchronization, workflow derivation and prompt planning
-web/       React and TypeScript frontend
+web/       Responsive React/TypeScript Supervisor dashboard
 .github/   GitHub Actions verification
-.opencode/ restricted OpenCode prompt-planner agent configuration
+.opencode/ Restricted OpenCode prompt-planner agent configuration
 ```
 
-The authoritative flow is:
+The authoritative flow remains backend-owned:
 
 ```text
 persisted GitHub snapshot
@@ -17,10 +17,11 @@ persisted GitHub snapshot
 → bounded canonical PromptContext
 → OpenCode composition or static fallback
 → deterministic Policy Engine
-→ append-only audit history and API response
+→ append-only audit history
+→ Stage 5 web projection / manual Copy prompt
 ```
 
-Stage 3 remains the routing authority. OpenCode may compose explanation and worker-prompt wording, but it cannot select a different action, role, lane or exact Head. Model output is untrusted until policy approval. The backend never launches a per-request LLM process and does not implement direct OpenAI, Anthropic, Codex or other provider adapters.
+The frontend does not reimplement lifecycle, routing, Candidate validity, QA freshness, blocker routing, or policy approval. It renders those decisions from Stage 2–4 APIs.
 
 ## Requirements
 
@@ -59,7 +60,55 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. The development server proxies `/api` requests to the backend. Set `API_PROXY_TARGET` to override the default `http://localhost:8080` target.
+Open `http://localhost:5173`. The lightweight development server serves the compiled SPA, falls back to `index.html` for deep links, and proxies `/api` to `http://localhost:8080` by default. Set `API_PROXY_TARGET` to override the backend target.
+
+## Web dashboard MVP
+
+The Stage 5 UI has stable deep-linkable routes:
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Workspace across configured Projects and the global Attention Queue |
+| `/projects/:projectID` | Project sync status, work units, Candidate/CI and worker-result summary |
+| `/projects/:projectID/work-units/:issueNumber` | Authoritative work-unit evidence, route, blocker, warnings and planning action |
+| `/projects/:projectID/work-units/:issueNumber/plans` | Latest Prompt Plan and generation history |
+| `/projects/:projectID/work-units/:issueNumber/plans/:planID` | Historical Prompt Plan detail |
+| `/settings` | Backend and planner health summary without credentials |
+
+Workspace and Project views support explicit manual refresh. Data is revalidated on a moderate interval and each Project/work-unit request remains scoped by its backend identity; the UI does not keep a cross-project cache.
+
+### Core user flow
+
+1. Open **Workspace** and triage repository attention.
+2. Open the relevant **Project** and inspect sync status, work units, Candidate PR, exact Head, exact-Head CI and latest Lead/Implementor/QA evidence.
+3. Open a **Work Unit** and review lifecycle, attention reasons, route, guards, warnings, blocker and evidence.
+4. Generate a Prompt Plan in `opencode` or deterministic `fallback` mode when the backend route permits it.
+5. Review status, source, action, target role, lane, exact Head, context hash, risk, confidence, guards, prohibited actions and policy violations.
+6. Optionally edit the prompt text locally. The UI marks this as **Edited locally**; the backend PromptPlan, PolicyDecision and audit record remain unchanged. Use **Reset to generated prompt** to discard local edits.
+7. For an `approved` or `fallback` plan that does not require Owner action, select **Copy prompt**.
+8. Manually paste/send that text in the intended ChatGPT chat.
+
+`stale`, `rejected` and `planner_error` generations are review-only and are not presented as dispatch-ready. `owner_required` remains an Owner decision state rather than a normal worker dispatch.
+
+### Stage 5 delivery boundary
+
+Stage 5 stops at manual clipboard delivery:
+
+```text
+review plan → optionally edit local copy → Copy prompt → manually paste/send in the intended ChatGPT chat
+```
+
+There is no Chrome Extension, browser/tab/chat binding, automatic prompt insertion, automatic send, or ChatGPT DOM/output reading in this stage. Those browser-delivery concerns begin in Stage 6. The web UI never asks for or stores GitHub/OpenCode provider credentials.
+
+### Project management
+
+The existing Stage 2 Project API remains the only frontend GitHub-management surface:
+
+- create a Project by repository identity;
+- trigger read-only synchronization;
+- delete a Project after explicit destructive confirmation.
+
+GitHub credentials remain process configuration. Deleting a Project removes its isolated synchronized and planning data according to the backend contract.
 
 ## Project and synchronization API
 
@@ -93,7 +142,7 @@ curl http://localhost:8080/api/workspace
 curl -X DELETE http://localhost:8080/api/projects/1
 ```
 
-Each sync is isolated to one Project and transactionally stores open Issues, labels, comments, linked Pull Requests, exact PR Heads and exact-Head CI summaries. GitHub credentials remain process configuration and are not persisted or returned.
+Each sync is isolated to one Project and transactionally stores open Issues, labels, comments, linked Pull Requests, exact PR Heads and exact-Head CI summaries. GitHub credentials are not persisted or returned.
 
 ## Derived workflow API
 
@@ -107,78 +156,66 @@ curl http://localhost:8080/api/attention
 curl http://localhost:8080/api/projects/1/attention
 ```
 
-Each work unit includes repository and Issue identity, lifecycle, Candidate identity, current exact Head, exact-Head CI, parsed terminal results, active blocker, warnings, attention and deterministic route. Routes contain `action`, `target_role`, `lane_key`, reason, expected Head and guards. Stage 3 does not select a browser profile, tab or chat URL.
+Each work unit includes repository and Issue identity, lifecycle, Candidate identity, current exact Head, exact-Head CI, parsed terminal results, active blocker, warnings, attention and deterministic route. Routes contain `action`, `target_role`, `lane_key`, reason, expected Head and guards.
 
 ## Prompt planning API
 
-Prompt generation is scoped by Project and Issue/work unit. The frontend selects only `opencode` or `fallback`; it never supplies provider credentials.
+Prompt generation is scoped by Project and Issue/work unit. The frontend selects only `opencode` or `fallback`; it never supplies model/provider credentials.
 
 ```bash
-# Generate with OpenCode when enabled; automatically use fallback according to policy/configuration
+# Generate with OpenCode when enabled
 curl -X POST http://localhost:8080/api/projects/1/work-units/11/plans \
   -H 'Content-Type: application/json' \
   -d '{"mode":"opencode"}'
 
-# Explicit deterministic static fallback
+# Explicit deterministic fallback
 curl -X POST http://localhost:8080/api/projects/1/work-units/11/plans \
   -H 'Content-Type: application/json' \
   -d '{"mode":"fallback"}'
 
-# Latest plan, append-only history and one historical plan
+# Latest, history and one historical generation
 curl http://localhost:8080/api/projects/1/work-units/11/plans/latest
 curl 'http://localhost:8080/api/projects/1/work-units/11/plans?limit=20'
 curl http://localhost:8080/api/projects/1/work-units/11/plans/42
 
-# Current bounded context summary and latest policy decision
+# Current bounded context and latest policy decision
 curl http://localhost:8080/api/projects/1/work-units/11/planning/context
 curl http://localhost:8080/api/projects/1/work-units/11/planning/policy
 
-# Configured OpenCode runtime health
+# OpenCode runtime health
 curl http://localhost:8080/api/planner/health
 ```
 
 Generation statuses are:
 
 - `approved`: OpenCode produced a structured plan accepted by policy;
-- `rejected`: two bounded attempts were invalid and fallback is disabled;
-- `stale`: context, route or current Head changed;
 - `fallback`: deterministic template passed the same policy checks;
-- `planner_error`: the runtime failed and fallback is disabled.
+- `stale`: context, route or current Head changed;
+- `rejected`: bounded model attempts were invalid and fallback is disabled;
+- `planner_error`: runtime failed and fallback is disabled.
 
-Concurrent generation requests for the same Project/work unit, context hash and mode are coalesced while in flight. A later regeneration creates a new audit record. Historical plans remain readable but are reported as stale when the authoritative context changes.
+Concurrent generation requests for the same Project/work unit, context hash and mode are coalesced while in flight. A later regeneration creates a new audit record. Historical plans remain readable and are reported stale when authoritative context changes.
 
-### PromptContext
+### PromptContext and Policy Engine
 
-`PromptContext` v1 is built only from the persisted GitHub snapshot and Stage 3 derived state. It includes repository and Issue identity, lifecycle and attention, Candidate, exact Head and CI, latest worker results, active blocker, route, warnings, expected event and bounded evidence. Ordering and JSON serialization are canonical and produce a stable SHA-256 context hash.
-
-Evidence bounds preserve the latest Lead, Implementor and QA terminal events, the active blocker, and relevant Lead dispatch/decision context before filling remaining capacity with recent comments. Credential-like data is redacted. GitHub and OpenCode credentials are never copied into the context, model request log or API response.
+`PromptContext` v1 is built only from persisted GitHub state and Stage 3 derived state. It includes repository/Issue identity, lifecycle and attention, Candidate, exact Head and CI, latest worker results, active blocker, route, warnings, expected event and bounded evidence. Canonical serialization yields a stable SHA-256 context hash.
 
 Schemas are versioned at:
 
 - `docs/schemas/prompt-context-v1.schema.json`
 - `docs/schemas/prompt-plan-v1.schema.json`
 
-### Policy Engine and repair
-
-Policy deterministically checks version, context hash, Candidate/Head freshness, action, role, lane, route guards, blocker and Owner semantics, required prompt sections and prohibited authority. It rejects malformed JSON, prose outside the structured result, invented Heads, routing changes, unsupported completion claims, missing terminal contracts and authority to merge, write GitHub state, dispatch through a browser, approve scope, accept residual risk or disable required CI.
-
-OpenCode receives at most one repair request containing the exact machine-readable violations. There is no retry loop. A second invalid response uses the static fallback when enabled, otherwise the result remains rejected or a planner error.
-
-### Static fallback
-
-The fallback is a deterministic renderer, not a second LLM engine. It uses the same PromptContext and Policy Engine and includes current objective, authoritative state, required action, constraints, prohibited actions, evidence, stop conditions, Initiative Clause and terminal `worker_result` contract. QA routes also include the verdict contract. Owner-attention and non-dispatch routes do not produce a worker-chat prompt.
-
-Fallback is used when explicitly selected or when OpenCode is disabled, unavailable, times out, exceeds the configured request budget, or remains invalid after one repair.
+The Policy Engine deterministically checks context hash, Candidate/Head freshness, action, role, lane, guards, blocker/Owner semantics, required prompt sections and prohibited authority. OpenCode receives at most one bounded repair request. Static fallback uses the same PromptContext and policy checks; it is not a second routing engine.
 
 ## OpenCode setup
 
-Run OpenCode as a separately managed long-running headless service. Do not launch it once per request. Configure that service with its provider credentials and mount or copy the versioned restricted agent configuration:
+Run OpenCode as a separately managed long-running headless service and use the restricted agent configuration:
 
 ```text
 .opencode/agents/prompt-planner.md
 ```
 
-The agent denies shell, file read/edit/write, repository search, web, task and external-directory capabilities. The backend supplies the complete PromptContext and explicitly disables tools at the message boundary as defense in depth.
+The agent denies shell, repository/file exploration, web and external-directory tools. The backend supplies the complete PromptContext and disables tools at the request boundary as defense in depth.
 
 Example backend configuration:
 
@@ -193,23 +230,22 @@ OPENCODE_PASSWORD=<server-basic-auth-password>
 OPENCODE_TIMEOUT=45s
 ```
 
-An optional smoke check against a real server may use `/api/planner/health` and one generation request. Real provider credentials and external model network access are not required by CI.
+Real provider credentials and external model network access are not required by CI.
 
 ## Audit persistence
 
-SQLite stores append-only planning generations plus equivalent PromptContext, PromptPlan, ModelInvocation and PolicyDecision audit data. Records include context, plan and prompt hashes, source/runtime/provider/model/agent identifiers, mode, latency, status, sanitized error category, timestamps and usage/cost when available. Authorization headers and credentials are never stored.
-
-All planning rows include the Project identity and foreign-key cascade. Reads always filter by Project and Issue, preserving multi-repository isolation.
+SQLite stores append-only planning generations and equivalent PromptContext, PromptPlan, ModelInvocation and PolicyDecision audit data. Records are Project/Issue scoped and include context/plan/prompt hashes, source/runtime/provider/model/agent identifiers, mode, status, sanitized error category, timestamps and usage/cost when available. Credentials and authorization headers are never stored.
 
 ## Operational responsibility boundary
 
 - **Stage 2:** read-only GitHub synchronization and normalized persistence.
-- **Stage 3:** deterministic workflow state, attention and route authority.
-- **Stage 4 OpenCode:** wording and composition from the supplied context only.
+- **Stage 3:** deterministic lifecycle, attention and route authority.
+- **Stage 4 OpenCode:** wording/composition from supplied context only.
 - **Stage 4 Policy Engine:** deterministic validation, staleness and fallback decision.
-- **Future dashboard/browser stages:** presentation and dispatch, outside this stage.
+- **Stage 5 dashboard:** responsive presentation, Project controls, plan review/local editing and manual Copy prompt.
+- **Stage 6+:** browser delivery and later remote/mobile hardening; not implemented here.
 
-The application does not read ChatGPT Web responses and does not perform GitHub writes, automatic merge, browser binding, prompt insertion or autonomous execution.
+The application does not read ChatGPT Web responses, automate merge, or grant the frontend new routing/policy authority.
 
 See also:
 
@@ -265,8 +301,11 @@ go test -race ./...
 
 cd ../web
 npm ci
+npm test
 npm run build
 
 cd ..
 docker compose config --quiet
 ```
+
+GitHub Actions is the authoritative environment for the clean dependency install, backend regression/race suite, frontend tests/build and Docker Compose validation.
