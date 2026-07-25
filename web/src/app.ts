@@ -157,7 +157,7 @@ function WorkspacePage(props: { navigate: Navigate }): unknown {
   return resourceContent(resource, (bundle) => WorkspaceContent({
     bundle,
     navigate: props.navigate,
-    createPanel: CreateProjectPanel({ navigate: props.navigate }),
+    createPanel: h(CreateProjectPanel, { navigate: props.navigate }),
     onRefresh: resource.refresh,
   }), 'Loading workspace…')
 }
@@ -388,24 +388,24 @@ function routeLabel(route: RouteState): string {
   }
 }
 
-function App(): unknown {
+export function App(): unknown {
   const [route, navigate] = useRoute()
   let page: unknown
   switch (route.kind) {
     case 'workspace':
-      page = WorkspacePage({ navigate })
+      page = h(WorkspacePage, { navigate })
       break
     case 'project':
-      page = ProjectPage({ projectID: route.projectID, navigate })
+      page = h(ProjectPage, { projectID: route.projectID, navigate })
       break
     case 'work-unit':
-      page = WorkUnitPage({ projectID: route.projectID, issueNumber: route.issueNumber, navigate })
+      page = h(WorkUnitPage, { projectID: route.projectID, issueNumber: route.issueNumber, navigate })
       break
     case 'plans':
-      page = PlanningPage({ projectID: route.projectID, issueNumber: route.issueNumber, planID: route.planID, navigate })
+      page = h(PlanningPage, { projectID: route.projectID, issueNumber: route.issueNumber, planID: route.planID, navigate })
       break
     case 'settings':
-      page = SettingsPage()
+      page = h(SettingsPage)
       break
     case 'not-found':
       page = h(
@@ -428,9 +428,15 @@ function installFatalFallback(root: HTMLElement): void {
   globalThis.addEventListener('unhandledrejection', show)
 }
 
-const rootElement = document.getElementById('root')
-if (!(rootElement instanceof HTMLElement)) {
-  throw new Error('Missing #root element')
+export function mountApp(root: HTMLElement): void {
+  installFatalFallback(root)
+  ReactDOM.createRoot(root).render(React.createElement(React.StrictMode, null, React.createElement(App)))
 }
-installFatalFallback(rootElement)
-ReactDOM.createRoot(rootElement).render(React.createElement(React.StrictMode, null, React.createElement(App)))
+
+if (typeof document !== 'undefined') {
+  const rootElement = document.getElementById('root')
+  if (!(rootElement instanceof HTMLElement)) {
+    throw new Error('Missing #root element')
+  }
+  mountApp(rootElement)
+}
