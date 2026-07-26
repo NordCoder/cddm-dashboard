@@ -10,13 +10,17 @@ description: Shape or refine one Medium/High CDDM Codex Change before implementa
 3. For High-risk work, resolve material Design decisions before implementation: ownership, contracts/schema, state transitions, failure semantics, persistence/compatibility, rollback or safe-disable behavior as applicable.
 4. Distinguish engineering choices the Implementor may decide later from product/architecture decisions that belong in the contract.
 5. Do not write product code during shaping. Update only the canonical Change/planning artifacts required to make execution unambiguous.
-6. If evidence is insufficient, use bounded investigation or return the exact Decision/Discovery needed; do not invent semantics.
-7. Mark the Change implementation-ready only when material ambiguity is resolved and dependencies permit execution.
+6. If evidence is insufficient, return the exact Decision/Discovery needed; do not invent semantics.
+7. Mark the canonical Change Contract implementation-ready only when material ambiguity is resolved and dependencies permit execution.
+8. Commit and push the shaped contract on the current Change branch. Create or reuse one draft PR for the Change.
+9. Post exactly one final `CDDM Worker Result` comment to that PR. Do not post progress comments.
 
-Return only:
+Result schema:
 
 ```text
+ACTIVITY: SHAPE
 STATUS: READY | DECISION_REQUIRED | DISCOVERY_REQUIRED
+HEAD: <sha>
 CONTRACT: <canonical path>
 DECISIONS: <material decisions fixed>
 DEPENDENCIES: <satisfied / remaining>
