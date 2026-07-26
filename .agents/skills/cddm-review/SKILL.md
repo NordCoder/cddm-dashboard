@@ -9,23 +9,16 @@ description: Independently review one exact CDDM Codex Candidate. Use after a Ca
 2. Read the Active Milestone, current Change contract, exact diff, relevant implementation/tests, and Candidate-bound verification evidence.
 3. Review independently; Implementor reasoning is not evidence.
 4. Prioritize requirement gaps, semantic defects, regressions, failure paths, security, compatibility, persistence/concurrency correctness, test quality, and scope leakage.
-5. Do not spend review effort on formatting or deterministic checks already covered by automation unless their evidence is missing.
-6. Do not edit code in the review session.
+5. Do not spend review effort on formatting or deterministic checks already covered by automation unless evidence is missing.
+6. Do not edit code, commits, branches, or PR state in the review session.
 7. Any Head change invalidates this verdict.
+8. Post exactly one final `CDDM Worker Result` comment to the PR for the reviewed Head. Do not post progress comments.
 
-Approved output:
-
-```text
-VERDICT: APPROVED
-HEAD: <sha>
-FINDINGS: none
-```
-
-Finding output:
+Result schema:
 
 ```text
-VERDICT: BLOCKING_FINDINGS | EVIDENCE_INSUFFICIENT
-HEAD: <sha>
-FINDINGS:
-- <severity> <location>: <precise defect>; impact: <material consequence>; required: <bounded disposition>
+ACTIVITY: REVIEW
+VERDICT: APPROVED | BLOCKING_FINDINGS | EVIDENCE_INSUFFICIENT
+HEAD: <exact reviewed sha>
+FINDINGS: none | <bounded findings with location, impact, and required disposition>
 ```
