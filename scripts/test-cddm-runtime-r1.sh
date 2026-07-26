@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 observer="$repo_root/scripts/cddm-codex-observe.py"
+proxy="$repo_root/scripts/cddm-codex-proxy.py"
 change="$repo_root/scripts/cddm-codex-change.sh"
 worker_shim="$repo_root/scripts/cddm-codex-worker-shim.sh"
 host_tool_shim="$repo_root/scripts/cddm-host-tool-shim.sh"
@@ -18,7 +19,7 @@ tmp="$(mktemp -d)"
 mkdir -p "$runtime" "$results"
 
 cleanup() {
-  rm -f "$state" "$history" "$events" "$v2" "$lock"
+  rm -f "$state" "$history" "$events" "$v2" "$lock" "$results/issue-$issue-proxy.result.json"
   rm -rf "$tmp"
   if [[ -d "$repo_root/.worktrees/host-bin" ]]; then
     rm -f "$repo_root/.worktrees/host-bin/go" "$repo_root/.worktrees/host-bin/gofmt" \
@@ -43,7 +44,7 @@ cat >"$history" <<EOF
 {"turn_key":"$results/issue-$issue-resume-test.result.json","phase":"finish","ended_at":"2026-07-27T00:00:02Z","rc":0,"result_status":"CONTINUE","usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":2}}
 EOF
 
-python3 -m py_compile "$observer"
+python3 -m py_compile "$observer" "$proxy"
 bash -n "$change"
 bash -n "$worker_shim"
 bash -n "$host_tool_shim"
@@ -100,16 +101,35 @@ cat >"$results/issue-$issue-proxy.result.json" <<'EOF'
 EOF
 
 echo "[R1] live proxy preserves raw JSONL and derives pretty activity"
-python3 "$observer" proxy --repo "$repo_root" --issue "$issue" --mode resume --stall-seconds 5 -- \
-  python3 -c 'import sys; print("{\"type\":\"thread.started\",\"thread_id\":\"proxy-thread\"}", flush=True); print("{\"type\":\"item.started\",\"item\":{\"type\":\"file_change\",\"path\":\"x.go\"}}", flush=True)' \
+python3 "$proxy" --repo "$repo_root" --issue "$issue" --mode resume --stall-seconds 5 -- \
+  python3 -c 'print("{\"type\":\"thread.started\",\"thread_id\":\"proxy-thread\"}", flush=True); print("{\"type\":\"item.started\",\"item\":{\"type\":\"file_change\",\"path\":\"x.go\"}}", flush=True)' \
   >"$tmp/proxy.raw" 2>"$tmp/proxy.pretty"
 grep -q 'proxy-thread' "$tmp/proxy.raw"
 grep -q 'THREAD  proxy-thread' "$tmp/proxy.pretty"
 grep -q 'EDIT    x.go' "$tmp/proxy.pretty"
 grep -q 'CODEX   exit=0 · CONTINUE' "$tmp/proxy.pretty"
 
+echo "[R1] observer absence degrades to raw pass-through"
+mkdir -p "$tmp/no-observer"
+python3 "$proxy" --repo "$tmp/no-observer" --issue "$issue" --mode resume --stall-seconds 5 -- \
+  python3 -c 'print("{\"type\":\"turn.completed\"}", flush=True)' \
+  >"$tmp/failopen.raw" 2>"$tmp/failopen.pretty"
+grep -q 'turn.completed' "$tmp/failopen.raw"
+grep -q 'observer unavailable' "$tmp/failopen.pretty"
+grep -q 'CODEX   exit=0' "$tmp/failopen.pretty"
+
+echo "[R1] signal exits normalize to canonical shell status"
+set +e
+python3 "$proxy" --repo "$tmp/no-observer" --issue "$issue" --mode resume --stall-seconds 5 -- \
+  python3 -c 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)' \
+  >"$tmp/signal.raw" 2>"$tmp/signal.pretty"
+signal_rc=$?
+set -e
+[[ $signal_rc -eq 143 ]]
+grep -q 'CODEX   exit=143' "$tmp/signal.pretty"
+
 echo "[R1] stall warning is observational only"
-python3 "$observer" proxy --repo "$repo_root" --issue "$issue" --mode resume --stall-seconds 1 -- \
+python3 "$proxy" --repo "$repo_root" --issue "$issue" --mode resume --stall-seconds 1 -- \
   python3 -c 'import time; time.sleep(2); print("{\"type\":\"turn.completed\"}", flush=True)' \
   >"$tmp/stall.raw" 2>"$tmp/stall.pretty"
 grep -q 'WARN    no Codex events' "$tmp/stall.pretty"
@@ -154,7 +174,7 @@ EOF
 chmod +x "$fake"
 ln -s "$host_tool_shim" "$tmp/go"
 set +e
-CDDM_HOST_V2_UI=1 CDDM_REPO_ROOT="$repo_root" CDDM_REAL_GO="$fake" "$tmp/go" test ./... 2>&1 \
+CDDM_HOST_V2_UI=1 CDDM_V2_TOOL_DEPTH=0 CDDM_REPO_ROOT="$repo_root" CDDM_REAL_GO="$fake" "$tmp/go" test ./... 2>&1 \
   | python3 "$observer" v2-tee --log "$v2" >"$tmp/v2-pass.out"
 pipe_rc=${PIPESTATUS[0]}
 set -e
@@ -164,7 +184,7 @@ grep -q 'raw-v2-output' "$v2"
 ! grep -q 'raw-v2-output' "$tmp/v2-pass.out"
 
 set +e
-FAKE_RC=7 CDDM_HOST_V2_UI=1 CDDM_REPO_ROOT="$repo_root" CDDM_REAL_GO="$fake" "$tmp/go" test ./... 2>&1 \
+FAKE_RC=7 CDDM_HOST_V2_UI=1 CDDM_V2_TOOL_DEPTH=0 CDDM_REPO_ROOT="$repo_root" CDDM_REAL_GO="$fake" "$tmp/go" test ./... 2>&1 \
   | python3 "$observer" v2-tee --log "$v2" >"$tmp/v2-fail.out"
 pipe_rc=${PIPESTATUS[0]}
 set -e
