@@ -19,9 +19,10 @@ real_tool() {
 real="$(real_tool)"
 [[ -n "$real" && -x "$real" ]] || { echo "CDDM Host tool shim cannot resolve real '$tool'." >&2; exit 127; }
 
-# Worker/Codex subprocesses explicitly unset this flag. Outside Host V2 these
-# shims are transparent and preserve the exact tool invocation.
-if [[ "${CDDM_HOST_V2_UI:-0}" != "1" ]]; then
+# Worker/Codex subprocesses explicitly unset this flag. Nested tools launched
+# by a top-level V2 tool inherit depth=1 and remain transparent, preventing
+# `npm test` -> `npm run clean` from being counted as another Host phase.
+if [[ "${CDDM_HOST_V2_UI:-0}" != "1" || "${CDDM_V2_TOOL_DEPTH:-0}" != "0" ]]; then
   exec "$real" "$@"
 fi
 
@@ -48,13 +49,11 @@ printf '@@CDDM_V2@@|START|%s|%s\n' "$phase" "$start_epoch" >&2
 
 if [[ "$tool" == "gofmt" ]]; then
   set +e
-  output="$($real "$@")"
+  output="$(CDDM_V2_TOOL_DEPTH=1 "$real" "$@")"
   rc=$?
   set -e
   [[ -z "$output" ]] || printf '%s\n' "$output"
   semantic_rc="$rc"
-  # The Host checks `test -z "$(gofmt -l .)"`; make the presentation marker
-  # reflect a non-empty formatting result even though gofmt itself exits zero.
   if [[ $semantic_rc -eq 0 && -n "$output" && " $* " == *" -l "* ]]; then
     semantic_rc=1
   fi
@@ -65,7 +64,7 @@ if [[ "$tool" == "gofmt" ]]; then
 fi
 
 set +e
-"$real" "$@"
+CDDM_V2_TOOL_DEPTH=1 "$real" "$@"
 rc=$?
 set -e
 end_epoch="$(date +%s)"
