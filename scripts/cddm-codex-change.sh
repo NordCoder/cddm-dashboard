@@ -9,6 +9,8 @@ mkdir -p "$shim_dir"
 [[ -x "$core" ]] || { echo "Missing Host runtime core: $core" >&2; exit 1; }
 real_codex="$(command -v codex)"
 [[ -n "$real_codex" ]] || { echo "Missing required command: codex" >&2; exit 1; }
+command -v setsid >/dev/null 2>&1 || { echo "Missing required command: setsid" >&2; exit 1; }
+command -v pkill >/dev/null 2>&1 || { echo "Missing required command: pkill" >&2; exit 1; }
 export CDDM_REAL_CODEX="$real_codex"
 ln -sfn "$repo_root/scripts/cddm-codex-worker-shim.sh" "$shim_dir/codex"
 
@@ -78,6 +80,92 @@ align_clean_prethread_orphan() {
   echo "Realigned clean pre-thread orphan worktree for Issue #$issue to $expected_head." >&2
 }
 
+recover_dead_interrupted_turn() {
+  [[ "${1:-}" =~ ^(start|resume|rotate|status)$ && "${2:-}" =~ ^[0-9]+$ ]] || return 0
+  local issue="$2" runtime_dir="$repo_root/.worktrees/runtime" state pid result exit_status events stored_thread found_thread pid_file archive_dir tmp
+  state="$runtime_dir/issue-$issue.json"
+  [[ -f "$state" ]] || return 0
+  jq -e '(.active_mode // "") != "" or (.active_pid // null) != null' "$state" >/dev/null 2>&1 || return 0
+
+  pid="$(jq -r '.active_pid // ""' "$state")"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  result="$(jq -r '.active_result // ""' "$state")"
+  exit_status="$(jq -r '.active_exit_status // ""' "$state")"
+  # Completed/dead turns with durable evidence belong to the core recovery path.
+  [[ -z "$result" || ! -s "$result" ]] || return 0
+  [[ -z "$exit_status" || ! -s "$exit_status" ]] || return 0
+
+  events="$(jq -r '.active_events // ""' "$state")"
+  stored_thread="$(jq -r '.thread_id // ""' "$state")"
+  found_thread=""
+  if [[ -n "$events" && -s "$events" ]]; then
+    found_thread="$(jq -r 'select(.type=="thread.started") | .thread_id // .thread.id // empty' "$events" 2>/dev/null | head -n1)"
+  fi
+  if [[ -n "$found_thread" && -n "$stored_thread" && "$found_thread" != "$stored_thread" ]]; then
+    echo "Refusing interrupted-turn recovery for Issue #$issue: event thread does not match persisted thread." >&2
+    return 1
+  fi
+
+  archive_dir="$runtime_dir/archive"
+  mkdir -p "$archive_dir"
+  cp "$state" "$archive_dir/issue-$issue-interrupted-$(date -u +%Y%m%dT%H%M%SZ).json"
+  pid_file="$(jq -r '.active_pid_file // ""' "$state")"
+  [[ -z "$pid_file" ]] || rm -f "$pid_file"
+
+  tmp="$state.tmp"
+  jq --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    .active_pid=null
+    | .active_pid_file=null
+    | .active_mode=null
+    | .active_events=null
+    | .active_result=null
+    | .active_v2_log=null
+    | .active_exit_status=null
+    | .active_previous_thread=null
+    | .active_rotation_reason=null
+    | .active_model=null
+    | .active_reasoning=null
+    | .updated_at=$updated_at
+  ' "$state" >"$tmp"
+  mv "$tmp" "$state"
+  echo "Recovered dead interrupted turn for Issue #$issue; preserved thread and worktree, archived stale active state." >&2
+}
+
+run_core_isolated() {
+  local session_pid rc signal=""
+
+  terminate_session() {
+    signal="$1"
+    trap - INT TERM
+    if [[ -n "${session_pid:-}" ]] && kill -0 "$session_pid" 2>/dev/null; then
+      # The core runs as a dedicated session leader. Kill the whole session so
+      # Codex/code-mode descendants cannot survive Ctrl+C and retain the lock.
+      pkill -TERM -s "$session_pid" 2>/dev/null || true
+      kill -TERM "$session_pid" 2>/dev/null || true
+    fi
+  }
+
+  PATH="$shim_dir:$PATH" setsid "$core" "$@" &
+  session_pid=$!
+  trap 'terminate_session INT' INT
+  trap 'terminate_session TERM' TERM
+  set +e
+  wait "$session_pid"
+  rc=$?
+  set -e
+  trap - INT TERM
+
+  case "$signal" in
+    INT) return 130 ;;
+    TERM) return 143 ;;
+    *) return "$rc" ;;
+  esac
+}
+
 repair_prethread_start_failure "$@"
 align_clean_prethread_orphan "$@"
-PATH="$shim_dir:$PATH" exec "$core" "$@"
+recover_dead_interrupted_turn "$@"
+run_core_isolated "$@"
