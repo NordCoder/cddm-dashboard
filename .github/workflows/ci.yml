@@ -83,5 +83,9 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
       - name: Verify checkout identity
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Validate Codex worker launcher
+        run: bash -n scripts/cddm-codex-worker.sh
+      - name: Validate Codex project config
+        run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
       - name: Validate configuration
         run: docker compose config --quiet
