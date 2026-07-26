@@ -57,62 +57,12 @@ unset CDDM_HOST_V2_UI
 repo_root="${CDDM_REPO_ROOT:-}"
 issue="${CDDM_RUNTIME_ISSUE:-}"
 mode="${CDDM_RUNTIME_MODE:-unknown}"
-observer="${repo_root:+$repo_root/scripts/cddm-codex-observe.py}"
+proxy="${repo_root:+$repo_root/scripts/cddm-codex-proxy.py}"
 
-if [[ $has_json -eq 1 && -n "$repo_root" && "$issue" =~ ^[0-9]+$ && -f "$observer" ]]; then
-  set +e
+if [[ $has_json -eq 1 && -n "$repo_root" && "$issue" =~ ^[0-9]+$ && -f "$proxy" ]]; then
   CODEX_HOME="$worker_codex_home" CODEX_SQLITE_HOME="$worker_codex_home/sqlite" \
-    python3 "$observer" proxy --repo "$repo_root" --issue "$issue" --mode "$mode" -- \
+    exec python3 "$proxy" --repo "$repo_root" --issue "$issue" --mode "$mode" -- \
       "$real_codex" "${filtered[@]}"
-  proxy_rc=$?
-  set -e
-
-  # Python Popen reports a child killed by a signal as a negative return code;
-  # SystemExit(-15/-2) reaches the shell as 241/254. Normalize the two Host
-  # control signals back to the canonical shell convention so the core writes
-  # durable 143/130 completion evidence.
-  normalized_rc="$proxy_rc"
-  case "$proxy_rc" in
-    241) normalized_rc=143 ;;
-    254) normalized_rc=130 ;;
-  esac
-
-  if [[ "$normalized_rc" != "$proxy_rc" ]]; then
-    python3 - "$repo_root" "$issue" "$normalized_rc" <<'PY' || true
-import datetime as dt
-import fcntl
-import json
-import pathlib
-import sys
-
-repo = pathlib.Path(sys.argv[1])
-issue = int(sys.argv[2])
-rc = int(sys.argv[3])
-state_path = repo / ".worktrees" / "runtime" / f"issue-{issue}.json"
-history_path = repo / ".worktrees" / "runtime" / f"issue-{issue}-turns.jsonl"
-try:
-    state = json.loads(state_path.read_text())
-except Exception:
-    raise SystemExit(0)
-turn_key = state.get("active_result") or state.get("active_events")
-if not turn_key:
-    raise SystemExit(0)
-row = {
-    "turn_key": turn_key,
-    "phase": "finish",
-    "ended_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-    "rc": rc,
-    "signal_normalized": True,
-}
-history_path.parent.mkdir(parents=True, exist_ok=True)
-with history_path.open("a", encoding="utf-8") as handle:
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-    handle.write(json.dumps(row, separators=(",", ":")) + "\n")
-    handle.flush()
-    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-PY
-  fi
-  exit "$normalized_rc"
 fi
 
 CODEX_HOME="$worker_codex_home" CODEX_SQLITE_HOME="$worker_codex_home/sqlite" exec "$real_codex" "${filtered[@]}"
