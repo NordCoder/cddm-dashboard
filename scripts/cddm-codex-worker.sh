@@ -94,7 +94,7 @@ codex login status >/dev/null 2>&1 || {
 
 rules_path="$repo_root/.codex/rules/default.rules"
 [[ -f "$rules_path" ]] || { echo "Missing Codex rules: $rules_path" >&2; exit 1; }
-codex execpolicy check --rules "$rules_path" git status >/dev/null
+codex execpolicy check --rules "$rules_path" -- git status >/dev/null
 
 # The controlling checkout is orchestration state only. Generated worktrees are ignored.
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
