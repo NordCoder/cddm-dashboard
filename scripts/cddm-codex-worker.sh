@@ -52,17 +52,18 @@ codex login status >/dev/null 2>&1 || { echo "Codex CLI is not authenticated. Ru
 git config user.name >/dev/null || { echo "Git user.name is not configured." >&2; exit 1; }
 git config user.email >/dev/null || { echo "Git user.email is not configured." >&2; exit 1; }
 
-git fetch --prune origin --quiet
-git merge --ff-only origin/main --quiet
-local_main="$(git rev-parse HEAD)"
-remote_main="$(git rev-parse origin/main)"
-[[ "$local_main" == "$remote_main" ]] || { echo "Local main differs from origin/main; refusing to launch." >&2; exit 1; }
-
+# Validate the canonical repository before any network fetch can modify host orchestration state.
 origin_url="$(git remote get-url origin)"
 case "$origin_url" in
   "https://github.com/NordCoder/cddm-dashboard"|"https://github.com/NordCoder/cddm-dashboard.git"|"git@github.com:NordCoder/cddm-dashboard.git"|"ssh://git@github.com/NordCoder/cddm-dashboard.git") ;;
   *) echo "Unexpected canonical origin: $origin_url" >&2; exit 1 ;;
 esac
+
+git fetch --prune origin --quiet
+git merge --ff-only origin/main --quiet
+local_main="$(git rev-parse HEAD)"
+remote_main="$(git rev-parse origin/main)"
+[[ "$local_main" == "$remote_main" ]] || { echo "Local main differs from origin/main; refusing to launch." >&2; exit 1; }
 
 rules_path="$repo_root/.codex/rules/default.rules"
 [[ -f "$rules_path" ]] || { echo "Missing Codex rules: $rules_path" >&2; exit 1; }
@@ -75,6 +76,7 @@ worktree=""
 review_head=""
 review_base=""
 cleanup_review=false
+published=false
 
 cleanup() {
   if [[ "$cleanup_review" == true && -n "$worktree" && -d "$worktree" ]]; then
@@ -103,14 +105,13 @@ ensure_pr() {
   printf '%s' "$pr"
 }
 
-append_host_metadata() {
-  local destination="$1" head="${2:-}" pr="${3:-}" reviewed="${4:-}"
+write_evidence() {
+  local destination="$1" head_label="${2:-}" head="${3:-}" pr="${4:-}"
   {
     echo "## CDDM Worker Result"
     echo
     cat "$result_file"
-    [[ -n "$head" ]] && { echo; echo "CANDIDATE: $head"; }
-    [[ -n "$reviewed" ]] && { echo; echo "REVIEWED_HEAD: $reviewed"; }
+    [[ -n "$head_label" && -n "$head" ]] && { echo; echo "$head_label: $head"; }
     [[ -n "$pr" ]] && echo "PR: #$pr"
   } > "$destination"
 }
@@ -128,11 +129,109 @@ commit_changes() {
 
 publish_branch() {
   "$repo_root/scripts/cddm-publish-branch.sh" "$worktree"
+  published=true
+}
+
+field_count() {
+  local name="$1"
+  awk -v prefix="$name:" 'index($0, prefix) == 1 { count++ } END { print count + 0 }' "$result_file"
 }
 
 field() {
   local name="$1"
   sed -n "s/^${name}:[[:space:]]*//p" "$result_file" | head -n 1
+}
+
+require_field() {
+  local name="$1"
+  [[ "$(field_count "$name")" == "1" ]] || { echo "Worker result must contain exactly one '$name:' field." >&2; return 1; }
+  [[ -n "$(field "$name")" ]] || { echo "Worker result field '$name' must not be empty." >&2; return 1; }
+}
+
+validate_result() {
+  local nonempty expected status verdict findings contract
+  nonempty="$(awk 'NF { count++ } END { print count + 0 }' "$result_file")"
+  require_field ACTIVITY
+  [[ "$(field ACTIVITY)" == "$(printf '%s' "$activity" | tr '[:lower:]-' '[:upper:]_')" ]] || { echo "Invalid Worker ACTIVITY." >&2; return 1; }
+
+  case "$activity" in
+    shape)
+      expected=6
+      for name in STATUS CONTRACT DECISIONS DEPENDENCIES NEXT; do require_field "$name"; done
+      status="$(field STATUS)"
+      [[ "$status" =~ ^(READY|DECISION_REQUIRED|DISCOVERY_REQUIRED)$ ]] || { echo "Invalid SHAPE status: $status" >&2; return 1; }
+      contract="$(field CONTRACT)"
+      [[ "$contract" == .delivery/changes/*.md ]] || { echo "Invalid canonical Change Contract path: $contract" >&2; return 1; }
+      ;;
+    implement)
+      expected=5
+      for name in STATUS CHANGED VERIFY BLOCKER; do require_field "$name"; done
+      status="$(field STATUS)"
+      [[ "$status" =~ ^(DONE|BLOCKED|NO-OP)$ ]] || { echo "Invalid IMPLEMENT status: $status" >&2; return 1; }
+      ;;
+    investigate)
+      expected=5
+      for name in STATUS FACTS CONCLUSION NEXT; do require_field "$name"; done
+      status="$(field STATUS)"
+      [[ "$status" =~ ^(RESOLVED|BLOCKED|NO_DEFECT)$ ]] || { echo "Invalid INVESTIGATE status: $status" >&2; return 1; }
+      ;;
+    fix-ci)
+      expected=6
+      for name in STATUS CAUSE CHANGED VERIFY NEXT; do require_field "$name"; done
+      status="$(field STATUS)"
+      [[ "$status" =~ ^(FIXED|INFRA_FAILURE|BLOCKED|INCONCLUSIVE)$ ]] || { echo "Invalid FIX_CI status: $status" >&2; return 1; }
+      ;;
+    review)
+      expected=3
+      for name in VERDICT FINDINGS; do require_field "$name"; done
+      verdict="$(field VERDICT)"
+      findings="$(field FINDINGS)"
+      [[ "$verdict" =~ ^(APPROVED|BLOCKING_FINDINGS|EVIDENCE_INSUFFICIENT)$ ]] || { echo "Invalid REVIEW verdict: $verdict" >&2; return 1; }
+      if [[ "$verdict" == "APPROVED" ]]; then
+        [[ "$findings" == "none" ]] || { echo "APPROVED review must use FINDINGS: none" >&2; return 1; }
+      elif [[ "$verdict" == "BLOCKING_FINDINGS" ]]; then
+        [[ "$findings" != "none" ]] || { echo "BLOCKING_FINDINGS review must contain a bounded finding." >&2; return 1; }
+      fi
+      ;;
+  esac
+
+  [[ "$nonempty" == "$expected" ]] || { echo "Worker result contains unexpected/multiline fields; expected $expected non-empty schema lines, got $nonempty." >&2; return 1; }
+}
+
+sync_change_worktree() {
+  local branch="$1" worktree="$2" local_sha remote_sha
+  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || {
+    echo "Existing worktree $worktree is dirty from unreconciled prior work; refusing to launch." >&2
+    return 1
+  }
+
+  if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    local_sha="$(git -C "$worktree" rev-parse HEAD)"
+    remote_sha="$(git rev-parse "origin/$branch")"
+    if [[ "$local_sha" == "$remote_sha" ]]; then
+      return 0
+    fi
+    if git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+      git -C "$worktree" merge --ff-only "$remote_sha" --quiet
+      return 0
+    fi
+    if git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+      return 0
+    fi
+    echo "Local and remote $branch diverged; Lead reconciliation required." >&2
+    return 1
+  fi
+}
+
+verify_published_pr_head() {
+  local pr="$1" local_head pr_head
+  local_head="$(git -C "$worktree" rev-parse HEAD)"
+  pr_head="$(gh pr view "$pr" --repo "$repo_slug" --json headRefOid --jq '.headRefOid')"
+  [[ "$local_head" == "$pr_head" ]] || {
+    echo "Published PR Head mismatch: local $local_head, GitHub $pr_head" >&2
+    return 1
+  }
+  printf '%s' "$local_head"
 }
 
 if [[ "$activity" == "review" ]]; then
@@ -160,12 +259,15 @@ else
 
   if [[ -d "$worktree" ]]; then
     [[ "$(git -C "$worktree" rev-parse --abbrev-ref HEAD)" == "$branch" ]] || { echo "Unexpected branch in $worktree" >&2; exit 1; }
+    sync_change_worktree "$branch" "$worktree"
   else
     if git show-ref --verify --quiet "refs/heads/$branch"; then
       if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-        if git merge-base --is-ancestor "$branch" "origin/$branch"; then
-          git branch -f "$branch" "origin/$branch" >/dev/null
-        elif ! git merge-base --is-ancestor "origin/$branch" "$branch"; then
+        local_sha="$(git rev-parse "$branch")"
+        remote_sha="$(git rev-parse "origin/$branch")"
+        if git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+          git branch -f "$branch" "$remote_sha" >/dev/null
+        elif ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
           echo "Local and remote $branch diverged; Lead reconciliation required." >&2
           exit 1
         fi
@@ -178,10 +280,26 @@ else
       [[ "$activity" != "fix-ci" ]] || { echo "No existing branch $branch for CI repair." >&2; exit 1; }
       git worktree add -b "$branch" "$worktree" origin/main >/dev/null
     fi
+    [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { echo "New Change worktree is unexpectedly dirty." >&2; exit 1; }
+  fi
+
+  pr="$(find_pr_for_branch "$branch")"
+  if [[ "$activity" == "fix-ci" ]]; then
+    [[ -n "$pr" ]] || { echo "No open PR exists for $branch; cannot bind CI repair to a Candidate." >&2; exit 1; }
+    failing_head="$(gh pr view "$pr" --repo "$repo_slug" --json headRefOid --jq '.headRefOid')"
+    local_head="$(git -C "$worktree" rev-parse HEAD)"
+    remote_head="$(git rev-parse "origin/$branch")"
+    [[ "$local_head" == "$failing_head" && "$remote_head" == "$failing_head" ]] || {
+      echo "CI repair worktree is not the exact PR Candidate: local=$local_head remote=$remote_head PR=$failing_head" >&2
+      exit 1
+    }
   fi
 
   prompt="$(sed "s/{{ISSUE}}/$issue/g" "$repo_root/.codex/prompts/$template")"
   prompt+=$'\n\nHOST ISSUE CONTEXT:\n'"$(issue_context "$issue")"
+  if [[ "$activity" == "fix-ci" ]]; then
+    prompt+=$'\n\nHOST CI REPAIR CONTEXT:\nPR: #'"$pr"$'\nFAILING CANDIDATE HEAD: '"$failing_head"
+  fi
 fi
 
 set +e
@@ -197,22 +315,20 @@ set -e
 
 [[ $worker_rc -eq 0 ]] || { echo "Codex Worker failed with exit code $worker_rc" >&2; [[ -s "$result_file" ]] && cat "$result_file"; exit "$worker_rc"; }
 [[ -s "$result_file" ]] || { echo "Worker produced no final result." >&2; exit 1; }
-expected_activity="$(printf '%s' "$activity" | tr '[:lower:]-' '[:upper:]_')"
-[[ "$(field ACTIVITY)" == "$expected_activity" ]] || { echo "Invalid Worker result activity." >&2; cat "$result_file" >&2; exit 1; }
+validate_result || { cat "$result_file" >&2; exit 1; }
 
 if [[ "$activity" == "review" ]]; then
   [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { echo "Reviewer modified the exact Candidate; verdict discarded." >&2; exit 1; }
   current_base="$(gh pr view "$pr" --repo "$repo_slug" --json baseRefOid --jq '.baseRefOid')"
   current_head="$(gh pr view "$pr" --repo "$repo_slug" --json headRefOid --jq '.headRefOid')"
   [[ "$current_base" == "$review_base" && "$current_head" == "$review_head" ]] || { echo "PR Base/Head changed during review; verdict discarded." >&2; exit 3; }
-  append_host_metadata "$evidence_file" "" "$pr" "$review_head"
+  write_evidence "$evidence_file" "REVIEWED_HEAD" "$review_head" "$pr"
   gh pr comment "$pr" --repo "$repo_slug" --body-file "$evidence_file" >/dev/null
   cat "$result_file"
   exit 0
 fi
 
 status="$(field STATUS)"
-pr="$(find_pr_for_branch "$branch")"
 dirty=false
 [[ -n "$(git -C "$worktree" status --porcelain)" ]] && dirty=true
 
@@ -232,9 +348,14 @@ case "$activity:$status" in
     commit_changes "Implement Issue #$issue"
     publish_branch
     pr="$(ensure_pr "$issue" "$branch")"
-    gh pr ready "$pr" --repo "$repo_slug" >/dev/null
+    if [[ "$(gh pr view "$pr" --repo "$repo_slug" --json isDraft --jq '.isDraft')" == "true" ]]; then
+      gh pr ready "$pr" --repo "$repo_slug" >/dev/null
+    fi
     ;;
   implement:BLOCKED)
+    if [[ "$dirty" == true ]]; then
+      commit_changes "WIP: Issue #$issue blocked"
+    fi
     ;;
   implement:NO-OP)
     [[ "$dirty" == false ]] || { echo "NO-OP result left file changes; refusing persistence." >&2; exit 1; }
@@ -258,13 +379,23 @@ case "$activity:$status" in
     ;;
 esac
 
-candidate=""
+head_label=""
+head_value=""
+if [[ "$published" == true ]]; then
+  [[ -n "$pr" ]] || { echo "Published branch has no PR." >&2; exit 1; }
+  head_value="$(verify_published_pr_head "$pr")"
+  if [[ "$activity" == "shape" ]]; then
+    head_label="HEAD"
+  else
+    head_label="CANDIDATE"
+  fi
+fi
+
 if [[ -n "$pr" ]]; then
-  candidate="$(git -C "$worktree" rev-parse HEAD)"
-  append_host_metadata "$evidence_file" "$candidate" "$pr" ""
+  write_evidence "$evidence_file" "$head_label" "$head_value" "$pr"
   gh pr comment "$pr" --repo "$repo_slug" --body-file "$evidence_file" >/dev/null
 else
-  append_host_metadata "$evidence_file" "" "" ""
+  write_evidence "$evidence_file" "" "" ""
   gh issue comment "$issue" --repo "$repo_slug" --body-file "$evidence_file" >/dev/null
 fi
 
