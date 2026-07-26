@@ -557,17 +557,48 @@ commit_and_publish_candidate() {
   publish_committed_candidate
 }
 
+comment_marker_present() {
+  local target="$1" marker="$2" comments rc
+  set +e
+  comments="$(gh api --paginate "repos/$repo_slug/issues/$target/comments" --jq '.[].body')"
+  rc=$?
+  set -e
+  [[ $rc -eq 0 ]] || return 2
+  grep -Fq "$marker" <<<"$comments"
+}
+
 persist_blocker() {
-  local result_file="$1" pr body
-  body="## CDDM WebLead 3.0 Blocker
+  local result_file="$1" pr target marker body rc
+  marker="<!-- cddm-blocker-result:$(basename "$result_file") -->"
+  body="$marker
+
+## CDDM WebLead 3.0 Blocker
 
 $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
+
+  set +e
+  comment_marker_present "$issue" "$marker"
+  rc=$?
+  set -e
+  case "$rc" in 0) return 0 ;; 1) ;; *) return "$rc" ;; esac
+
   pr="$(find_pr_for_branch)"
-  if [[ -n "$pr" ]]; then gh pr comment "$pr" --repo "$repo_slug" --body "$body" >/dev/null; else gh issue comment "$issue" --repo "$repo_slug" --body "$body" >/dev/null; fi
+  if [[ -n "$pr" ]]; then
+    set +e
+    comment_marker_present "$pr" "$marker"
+    rc=$?
+    set -e
+    case "$rc" in 0) return 0 ;; 1) ;; *) return "$rc" ;; esac
+    target="$pr"
+  else
+    target="$issue"
+  fi
+
+  gh api "repos/$repo_slug/issues/$target/comments" -f body="$body" >/dev/null
 }
 
 dispatch_result_file() {
-  local result_file="$1" v2_log="$2" result_status last_result candidate_result current_status rc=0
+  local result_file="$1" v2_log="$2" result_status last_result candidate_result rc=0
   validate_result "$result_file" || return 13
   result_status="$(jq -r '.status' "$result_file")"
   last_result="$(jq -r '.last_result // ""' "$state_file")"
@@ -599,9 +630,17 @@ dispatch_result_file() {
       cat "$result_file"
       ;;
     BLOCKED)
+      state_patch_status BLOCKER_PENDING_GITHUB
+      set +e
+      persist_blocker "$result_file"
+      rc=$?
+      set -e
+      if [[ $rc -ne 0 ]]; then
+        echo "Blocker publication pending; exact Worker result retained for recovery." >&2
+        return "$rc"
+      fi
       state_patch_status BLOCKED
       state_set_last_result "$result_file"
-      persist_blocker "$result_file"
       cat "$result_file"
       ;;
     NO_OP)
