@@ -118,7 +118,7 @@ state_init() {
   jq -n --argjson version 3 --arg issue "$issue" --arg branch "$branch" --arg worktree "$worktree" \
     --arg model "$model" --arg reasoning "$reasoning" --arg contract "$contract" --arg status "$status" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,updated_at:$updated_at}' >"$tmp"
+    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,updated_at:$updated_at}' >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -154,11 +154,12 @@ state_set_execution() {
 }
 
 state_set_active_intent() {
-  local mode="$1" events="$2" pid_file="$3" previous_thread="$4" rotation_reason="$5" model="$6" reasoning="$7" tmp="$state_file.tmp"
-  jq --arg mode "$mode" --arg events "$events" --arg pid_file "$pid_file" --arg previous_thread "$previous_thread" \
+  local mode="$1" events="$2" result="$3" v2_log="$4" pid_file="$5" previous_thread="$6" rotation_reason="$7" model="$8" reasoning="$9" tmp="$state_file.tmp"
+  jq --arg mode "$mode" --arg events "$events" --arg result "$result" --arg v2_log "$v2_log" --arg pid_file "$pid_file" --arg previous_thread "$previous_thread" \
     --arg rotation_reason "$rotation_reason" --arg model "$model" --arg reasoning "$reasoning" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '.active_pid=null | .active_pid_file=$pid_file | .active_mode=$mode | .active_events=$events
+     | .active_result=$result | .active_v2_log=$v2_log
      | .active_previous_thread=$previous_thread | .active_rotation_reason=$rotation_reason
      | .active_model=$model | .active_reasoning=$reasoning | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
@@ -175,6 +176,7 @@ state_clear_active() {
   local tmp="$state_file.tmp"
   jq --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '.active_pid=null | .active_pid_file=null | .active_mode=null | .active_events=null
+     | .active_result=null | .active_v2_log=null
      | .active_previous_thread=null | .active_rotation_reason=null | .active_model=null | .active_reasoning=null
      | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
@@ -255,10 +257,12 @@ thread_from_events() {
 
 recover_active_turn_state() {
   [[ -f "$state_file" ]] || return 0
-  local mode events previous rotation_reason active_model active_reasoning found stored pid pid_file
+  local mode events result v2_log previous rotation_reason active_model active_reasoning found stored pid pid_file
   mode="$(jq -r '.active_mode // ""' "$state_file")"
   events="$(jq -r '.active_events // ""' "$state_file")"
-  [[ -n "$mode" || -n "$events" ]] || return 0
+  result="$(jq -r '.active_result // ""' "$state_file")"
+  v2_log="$(jq -r '.active_v2_log // ""' "$state_file")"
+  [[ -n "$mode" || -n "$events" || -n "$result" ]] || return 0
   previous="$(jq -r '.active_previous_thread // ""' "$state_file")"
   rotation_reason="$(jq -r '.active_rotation_reason // ""' "$state_file")"
   active_model="$(jq -r '.active_model // .model // "gpt-5.6-terra"' "$state_file")"
@@ -298,6 +302,18 @@ recover_active_turn_state() {
     echo "A prior Codex turn is still active for Issue #$issue (pid=$pid)." >&2
     return 3
   fi
+
+  # A completed Codex turn may have written a valid structured result before the
+  # host crashed. Recover that exact result instead of replaying the instruction.
+  if [[ -n "$result" && -s "$result" ]]; then
+    if ! validate_result "$result"; then
+      state_patch_status INVALID_RESULT
+      echo "Recovered completed turn has an invalid structured result: $result" >&2
+      return 4
+    fi
+    dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
+  fi
+
   [[ -z "$pid_file" ]] || rm -f "$pid_file"
   state_clear_active
   return 0
@@ -462,6 +478,51 @@ $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
   if [[ -n "$pr" ]]; then gh pr comment "$pr" --repo "$repo_slug" --body "$body" >/dev/null; else gh issue comment "$issue" --repo "$repo_slug" --body "$body" >/dev/null; fi
 }
 
+dispatch_result_file() {
+  local result_file="$1" v2_log="$2" result_status current_status tmp
+  validate_result "$result_file" || return 13
+  result_status="$(jq -r '.status' "$result_file")"
+  current_status="$(jq -r '.status // ""' "$state_file")"
+
+  # If a prior host attempt already moved this result into its durable state,
+  # recovery must not replay the Worker instruction or duplicate the transition.
+  case "$result_status:$current_status" in
+    CANDIDATE_READY:CANDIDATE|CANDIDATE_READY:V2_FAILED|CANDIDATE_READY:COMMIT_PREPARED|CANDIDATE_READY:COMMITTED_PENDING_PUSH|CANDIDATE_READY:PUBLISH_CONFIRMATION_PENDING|CANDIDATE_READY:PUSHED_PENDING_GITHUB|CANDIDATE_READY:PUBLISH_INCONCLUSIVE)
+      return 0
+      ;;
+    CONTINUE:CONTINUE|BLOCKED:BLOCKED|NO_OP:NO_OP)
+      return 0
+      ;;
+  esac
+
+  tmp="$state_file.tmp"
+  jq --arg result "$result_file" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
+  mv "$tmp" "$state_file"
+
+  case "$result_status" in
+    CANDIDATE_READY)
+      commit_and_publish_candidate "$result_file" "$v2_log"
+      ;;
+    CONTINUE)
+      state_patch_status CONTINUE
+      cat "$result_file"
+      ;;
+    BLOCKED)
+      # Mark locally before the external comment so a crash never replays the
+      # Worker turn. GitHub comment persistence is best-effort operational I/O.
+      state_patch_status BLOCKED
+      persist_blocker "$result_file"
+      cat "$result_file"
+      ;;
+    NO_OP)
+      [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { state_patch_status INVALID_NO_OP; echo "NO_OP returned with file changes." >&2; return 14; }
+      state_patch_status NO_OP
+      cat "$result_file"
+      ;;
+  esac
+}
+
 codex_command() {
   local mode="$1" thread_id="$2" model="$3" reasoning="$4" result="$5" codex_home
   codex_home="${CODEX_HOME:-$HOME/.codex}"
@@ -502,16 +563,17 @@ persist_live_thread_event() {
 
 run_codex_turn() {
   local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5" rotation_reason="${6:-}"
-  local stamp events result prompt_file pid_file pid rc=0 status event_rc
+  local stamp events result v2_log prompt_file pid_file pid rc=0 event_rc
   stamp="$(date +%s)-$$"
   events="$results_dir/issue-$issue-$mode-$stamp.jsonl"
   result="$results_dir/issue-$issue-$mode-$stamp.result.json"
+  v2_log="$results_dir/issue-$issue-v2-$stamp.log"
   prompt_file="$results_dir/issue-$issue-$mode-$stamp.prompt.txt"
   pid_file="$results_dir/issue-$issue-$mode-$stamp.pid"
   printf '%s\n' "$prompt" >"$prompt_file"
   : >"$events"
   rm -f "$pid_file"
-  state_set_active_intent "$mode" "$events" "$pid_file" "$thread_id" "$rotation_reason" "$model" "$reasoning"
+  state_set_active_intent "$mode" "$events" "$result" "$v2_log" "$pid_file" "$thread_id" "$rotation_reason" "$model" "$reasoning"
 
   (
     printf '%s\n' "$BASHPID" >"$pid_file"
@@ -529,27 +591,18 @@ run_codex_turn() {
   set +e; wait "$pid"; rc=$?; set -e
   set +e; persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
   rm -f "$prompt_file" "$pid_file"
-  state_clear_active
-  [[ $event_rc -ne 2 ]] || { state_patch_status THREAD_MISMATCH; return 11; }
+  [[ $event_rc -ne 2 ]] || { state_patch_status THREAD_MISMATCH; state_clear_active; return 11; }
 
-  if [[ "$mode" == start && -z "$(jq -r '.thread_id // ""' "$state_file")" ]]; then state_patch_status START_FAILED_NO_THREAD; echo "No thread.started event." >&2; return 10; fi
-  if [[ "$mode" == rotate && "$(jq -r '.thread_id // ""' "$state_file")" == "$thread_id" ]]; then state_patch_status ROTATE_FAILED_NO_THREAD; echo "Rotation did not establish a fresh thread." >&2; return 11; fi
+  if [[ "$mode" == start && -z "$(jq -r '.thread_id // ""' "$state_file")" ]]; then state_patch_status START_FAILED_NO_THREAD; state_clear_active; echo "No thread.started event." >&2; return 10; fi
+  if [[ "$mode" == rotate && "$(jq -r '.thread_id // ""' "$state_file")" == "$thread_id" ]]; then state_patch_status ROTATE_FAILED_NO_THREAD; state_clear_active; echo "Rotation did not establish a fresh thread." >&2; return 11; fi
 
   state_record_turn
-  if [[ $rc -ne 0 ]]; then state_patch_status TURN_FAILED; echo "Codex turn failed; worktree/session preserved." >&2; return "$rc"; fi
-  [[ -s "$result" ]] || { state_patch_status EMPTY_RESULT; echo "Codex produced no final result." >&2; return 12; }
-  validate_result "$result" || { state_patch_status INVALID_RESULT; cat "$result" >&2; return 13; }
+  if [[ $rc -ne 0 ]]; then state_patch_status TURN_FAILED; state_clear_active; echo "Codex turn failed; worktree/session preserved." >&2; return "$rc"; fi
+  [[ -s "$result" ]] || { state_patch_status EMPTY_RESULT; state_clear_active; echo "Codex produced no final result." >&2; return 12; }
+  validate_result "$result" || { state_patch_status INVALID_RESULT; cat "$result" >&2; state_clear_active; return 13; }
 
-  status="$(jq -r '.status' "$result")"
-  case "$status" in
-    CANDIDATE_READY) commit_and_publish_candidate "$result" "$results_dir/issue-$issue-v2-$stamp.log" ;;
-    CONTINUE) state_patch_status CONTINUE; cat "$result" ;;
-    BLOCKED) state_patch_status BLOCKED; persist_blocker "$result"; cat "$result" ;;
-    NO_OP)
-      [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { state_patch_status INVALID_NO_OP; echo "NO_OP returned with file changes." >&2; return 14; }
-      state_patch_status NO_OP; cat "$result"
-      ;;
-  esac
+  dispatch_result_file "$result" "$v2_log"
+  state_clear_active
 }
 
 if [[ -f "$state_file" ]]; then
