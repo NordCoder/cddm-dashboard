@@ -7,7 +7,7 @@ Repository development follows CDDM Codex Minimal 3.0 — WebLead.
 - **Owner** owns WHY, Milestone approval, material authority decisions, and product acceptance.
 - **ChatGPT Web Lead** owns WHAT, HARD HOW, Change shaping, dependency/parallelism decisions, model routing, Candidate/CI reconciliation, QA, and correction specification.
 - **Codex Change Worker** owns GOAL execution, private Tasks, LITE HOW, implementation, tests, and local debugging inside one persistent Change session.
-- **Trusted Host Runtime** owns worktrees, Codex thread persistence, Git metadata, network-capable V2, branch/PR publication, and exact-Candidate persistence.
+- **Trusted Host Runtime** owns worktrees, Codex thread persistence/rotation, Git metadata, network-capable V2, branch/PR publication, and exact-Candidate persistence.
 - **GitHub** is the canonical delivery record.
 
 The Worker MUST NOT redefine WHAT or HARD HOW. A conflict with approved architecture is returned to the Web Lead as a bounded blocker.
@@ -42,7 +42,7 @@ Before changing shared interfaces, approved state semantics, persistence design,
 
 ## Persistent Change session
 
-One Change uses one persistent Codex thread across implementation and bounded corrections.
+One Change normally uses one persistent Codex thread across implementation and bounded corrections.
 
 On the first turn:
 
@@ -66,6 +66,8 @@ A Goal MUST consider either of these valid stopping outcomes:
 
 Do not loop indefinitely on blocked operations.
 
+Persistent context is an optimization, not a dogma. The Host/Web Lead MAY rotate to a fresh thread in the same owned worktree when accumulated context becomes more expensive or misleading than reconstruction from the current contract/diff. Rotation does not change canonical Change authority.
+
 ## Worker authority
 
 Workers MAY:
@@ -83,12 +85,12 @@ Workers MUST NOT:
 - fetch, pull, push, delete, or rewrite remote refs;
 - modify Git remotes;
 - use `gh` or GitHub APIs;
-- retrieve GitHub credentials/tokens;
+- retrieve GitHub credentials/tokens or host authentication files;
 - modify another Change worktree;
 - change repository settings, secrets, branch protection, or Actions permissions;
 - publish progress/heartbeat state.
 
-The Worker sandbox has no shell-network access. The trusted Host supplies bounded GitHub context and owns networked delivery operations.
+The Worker sandbox has no shell-network access. The Host launches Codex with a restricted permission profile, a non-login shell policy, a sanitized shell environment, and an isolated Worker `HOME`. The trusted Host supplies bounded GitHub context and owns networked delivery operations.
 
 ## Implementation loop
 
@@ -133,7 +135,7 @@ cd ..
 docker compose config --quiet
 ```
 
-If V2 fails, no Candidate is published. The Web Lead may resume the same Change session with the bounded failure evidence.
+If V2 fails, no Candidate is published. The Web Lead may resume the same Change session with bounded failure evidence.
 
 ### V3 — exact-Head CI
 

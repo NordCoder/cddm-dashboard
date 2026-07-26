@@ -2,22 +2,32 @@
 set -euo pipefail
 
 repo_slug="NordCoder/cddm-dashboard"
+permission_profile="cddm-worker"
 
 usage() {
   cat <<'EOF'
 Usage:
   scripts/cddm-codex-change.sh start  <issue> [model] [reasoning]
   scripts/cddm-codex-change.sh resume <issue> <instruction-file|-> [model] [reasoning]
+  scripts/cddm-codex-change.sh rotate <issue> <instruction-file|-> [model] [reasoning]
   scripts/cddm-codex-change.sh status <issue>
 
 Defaults:
   model     gpt-5.6-terra
   reasoning medium
 
+Meaning:
+  start   create the Change worktree and first persistent Codex thread
+  resume  continue the same thread and worktree
+  rotate  keep the worktree but intentionally start a fresh thread
+  status  show local runtime/session/Candidate state
+
 Examples:
   scripts/cddm-codex-change.sh start 17
   printf '%s\n' 'Fix QA finding F1 without changing the approved contract.' \
     | scripts/cddm-codex-change.sh resume 17 -
+  printf '%s\n' 'Continue implementation from the current diff; prior thread context is too large.' \
+    | scripts/cddm-codex-change.sh rotate 17 -
   scripts/cddm-codex-change.sh status 17
 EOF
 }
@@ -29,11 +39,11 @@ shift 2
 
 [[ "$issue" =~ ^[0-9]+$ ]] || { echo "Issue must be numeric." >&2; exit 2; }
 case "$command_name" in
-  start|resume|status) ;;
+  start|resume|rotate|status) ;;
   *) echo "Unsupported command: $command_name" >&2; usage >&2; exit 2 ;;
 esac
 
-for command in git gh codex jq; do
+for command in git gh codex jq python3; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -80,14 +90,17 @@ remote_main="$(git rev-parse origin/main)"
 
 runtime_dir="$repo_root/.worktrees/runtime"
 results_dir="$repo_root/.worktrees/results"
-mkdir -p "$runtime_dir" "$results_dir"
+worker_homes_dir="$repo_root/.worktrees/worker-homes"
+mkdir -p "$runtime_dir" "$results_dir" "$worker_homes_dir"
 
 state_file="$runtime_dir/issue-$issue.json"
 branch="change/$issue"
 worktree="$repo_root/.worktrees/issue-$issue"
+worker_home="$worker_homes_dir/issue-$issue"
 schema="$repo_root/.codex/schemas/change-turn-result.json"
 start_template="$repo_root/.codex/prompts/change-start.md"
 resume_template="$repo_root/.codex/prompts/change-resume.md"
+rotate_template="$repo_root/.codex/prompts/change-rotate.md"
 
 [[ -f "$schema" ]] || { echo "Missing result schema: $schema" >&2; exit 1; }
 
@@ -132,7 +145,7 @@ ensure_pr() {
 
 Canonical Change Contract: \`$contract\`
 
-CDDM WebLead 3.0: implementation uses one persistent Codex Change session. Web Lead owns WHAT + HARD HOW + QA; Worker owns GOAL + private Tasks + LITE HOW." \
+CDDM WebLead 3.0: Web Lead owns WHAT + HARD HOW + QA; implementation uses one persistent Codex Change session unless explicitly rotated." \
       >/dev/null
     found="$(find_pr_for_branch)"
   fi
@@ -152,9 +165,8 @@ verify_pr_head() {
   }
 }
 
-write_state() {
-  local thread_id="$1" model="$2" reasoning="$3" contract="$4" status="$5"
-  local candidate_head="${6:-}" pr="${7:-}" tmp
+write_initial_state() {
+  local thread_id="$1" model="$2" reasoning="$3" contract="$4" status="$5" tmp
   tmp="$state_file.tmp"
   jq -n \
     --argjson version 3 \
@@ -166,8 +178,6 @@ write_state() {
     --arg reasoning "$reasoning" \
     --arg contract "$contract" \
     --arg status "$status" \
-    --arg candidate_head "$candidate_head" \
-    --arg pr "$pr" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{
       version:$version,
@@ -179,8 +189,12 @@ write_state() {
       reasoning:$reasoning,
       contract:$contract,
       status:$status,
-      candidate_head:(if $candidate_head == "" then null else $candidate_head end),
-      pr:(if $pr == "" then null else ($pr|tonumber) end),
+      thread_turn_count:0,
+      total_turn_count:0,
+      thread_generation:1,
+      thread_history:[],
+      candidate_head:null,
+      pr:null,
       updated_at:$updated_at
     }' > "$tmp"
   mv "$tmp" "$state_file"
@@ -214,9 +228,42 @@ update_state_execution() {
   mv "$tmp" "$state_file"
 }
 
+record_turn() {
+  local tmp
+  tmp="$state_file.tmp"
+  jq \
+    --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.thread_turn_count=((.thread_turn_count // 0) + 1)
+     | .total_turn_count=((.total_turn_count // 0) + 1)
+     | .updated_at=$updated_at' \
+    "$state_file" > "$tmp"
+  mv "$tmp" "$state_file"
+}
+
+rotate_thread_state() {
+  local new_thread="$1" model="$2" reasoning="$3" reason="$4" tmp
+  tmp="$state_file.tmp"
+  jq \
+    --arg new_thread "$new_thread" \
+    --arg model "$model" \
+    --arg reasoning "$reasoning" \
+    --arg reason "$reason" \
+    --arg rotated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.thread_history=((.thread_history // []) + [{thread_id:.thread_id,model:.model,reasoning:.reasoning,turn_count:(.thread_turn_count // 0),rotated_at:$rotated_at,reason:$reason}])
+     | .thread_id=$new_thread
+     | .model=$model
+     | .reasoning=$reasoning
+     | .thread_turn_count=0
+     | .thread_generation=((.thread_generation // 1) + 1)
+     | .status="ROTATED"
+     | .updated_at=$rotated_at' \
+    "$state_file" > "$tmp"
+  mv "$tmp" "$state_file"
+}
+
 ensure_start_worktree() {
   [[ ! -f "$state_file" ]] || {
-    echo "Persistent session already exists for Issue #$issue. Use resume/status." >&2
+    echo "Persistent session already exists for Issue #$issue. Use resume/rotate/status." >&2
     return 1
   }
   [[ ! -d "$worktree" ]] || {
@@ -247,9 +294,10 @@ ensure_start_worktree() {
     echo "New Change worktree is unexpectedly dirty." >&2
     return 1
   }
+  mkdir -p "$worker_home/.config/gh" "$worker_home/.cache" "$worker_home/.local/share"
 }
 
-ensure_resume_worktree() {
+ensure_owned_worktree() {
   [[ -f "$state_file" ]] || {
     echo "No persistent session state for Issue #$issue. Use start." >&2
     return 1
@@ -272,6 +320,7 @@ ensure_resume_worktree() {
       return 1
     }
   fi
+  mkdir -p "$worker_home/.config/gh" "$worker_home/.cache" "$worker_home/.local/share"
 }
 
 render_template() {
@@ -287,6 +336,20 @@ text = text.replace("{{ISSUE_CONTEXT}}", issue_ctx)
 text = text.replace("{{LEAD_INSTRUCTION}}", instruction)
 print(text)
 PY
+}
+
+read_instruction() {
+  local source="$1"
+  case "$source" in
+    -) cat ;;
+    *)
+      [[ -f "$source" ]] || {
+        echo "Instruction must be '-' for stdin or an existing file." >&2
+        return 1
+      }
+      cat "$source"
+      ;;
+  esac
 }
 
 validate_result() {
@@ -336,7 +399,7 @@ commit_and_publish_candidate() {
 
   if ! run_candidate_v2 "$v2_log"; then
     update_state_status "V2_FAILED"
-    echo "Host V2 failed; no Candidate was committed or published." >&2
+    echo "Host V2 failed; no Candidate was committed or published. Resume the same thread with bounded V2 evidence." >&2
     return 4
   fi
 
@@ -345,7 +408,13 @@ commit_and_publish_candidate() {
   git -C "$worktree" diff --cached --check
   git -C "$worktree" commit -m "Implement Issue #$issue" >/dev/null
 
-  "$repo_root/scripts/cddm-publish-branch.sh" "$worktree"
+  if ! "$repo_root/scripts/cddm-publish-branch.sh" "$worktree"; then
+    git -C "$worktree" reset --mixed HEAD^ >/dev/null
+    update_state_status "PUBLISH_FAILED"
+    echo "Candidate publication failed; local commit was converted back to Working State." >&2
+    return 5
+  fi
+
   head="$(git -C "$worktree" rev-parse HEAD)"
   pr="$(ensure_pr "$contract")"
   verify_pr_head "$pr" "$head"
@@ -382,37 +451,66 @@ $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")" >/d
   fi
 }
 
+codex_command() {
+  local mode="$1" thread_id="$2" model="$3" reasoning="$4" result="$5"
+  local codex_home
+  codex_home="${CODEX_HOME:-$HOME/.codex}"
+
+  local -a base_env=(
+    env
+    -u GH_TOKEN
+    -u GITHUB_TOKEN
+    -u GITHUB_ENTERPRISE_TOKEN
+    -u SSH_AUTH_SOCK
+    -u GIT_ASKPASS
+    -u SSH_ASKPASS
+    "HOME=$worker_home"
+    "XDG_CONFIG_HOME=$worker_home/.config"
+    "XDG_CACHE_HOME=$worker_home/.cache"
+    "XDG_DATA_HOME=$worker_home/.local/share"
+    "GH_CONFIG_DIR=$worker_home/.config/gh"
+    "GIT_CONFIG_GLOBAL=/dev/null"
+    "CODEX_HOME=$codex_home"
+  )
+
+  if [[ "$mode" == "resume" ]]; then
+    "${base_env[@]}" codex exec \
+      --strict-config \
+      --json \
+      -C "$worktree" \
+      -m "$model" \
+      -c "model_reasoning_effort=\"$reasoning\"" \
+      -c "default_permissions=\"$permission_profile\"" \
+      --output-schema "$schema" \
+      --output-last-message "$result" \
+      resume "$thread_id" -
+  else
+    "${base_env[@]}" codex exec \
+      --strict-config \
+      --json \
+      -C "$worktree" \
+      -m "$model" \
+      -c "model_reasoning_effort=\"$reasoning\"" \
+      -c "default_permissions=\"$permission_profile\"" \
+      --output-schema "$schema" \
+      --output-last-message "$result" \
+      -
+  fi
+}
+
 run_codex_turn() {
-  local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5"
+  local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5" rotation_reason="${6:-}"
   local stamp events result rc observed_thread status
   stamp="$(date +%s)-$$"
   events="$results_dir/issue-$issue-$mode-$stamp.jsonl"
   result="$results_dir/issue-$issue-$mode-$stamp.result.json"
 
   set +e
-  if [[ "$mode" == "start" ]]; then
-    printf '%s\n' "$prompt" | codex exec \
-      --json \
-      -C "$worktree" \
-      -m "$model" \
-      -c "model_reasoning_effort=\"$reasoning\"" \
-      --output-schema "$schema" \
-      --output-last-message "$result" \
-      - > "$events"
-  else
-    printf '%s\n' "$prompt" | codex exec \
-      --json \
-      -C "$worktree" \
-      -m "$model" \
-      -c "model_reasoning_effort=\"$reasoning\"" \
-      --output-schema "$schema" \
-      --output-last-message "$result" \
-      resume "$thread_id" - > "$events"
-  fi
+  printf '%s\n' "$prompt" | codex_command "$mode" "$thread_id" "$model" "$reasoning" "$result" > "$events"
   rc=$?
   set -e
 
-  observed_thread="$(jq -r 'select(.type == "thread.started") | .thread_id // empty' "$events" | head -n 1)"
+  observed_thread="$(jq -r 'select(.type == "thread.started") | .thread_id // .thread.id // empty' "$events" | head -n 1)"
 
   if [[ "$mode" == "start" ]]; then
     [[ -n "$observed_thread" ]] || {
@@ -420,44 +518,42 @@ run_codex_turn() {
       return 10
     }
     thread_id="$observed_thread"
+    write_initial_state "$thread_id" "$model" "$reasoning" "$contract" "RUNNING"
+  elif [[ "$mode" == "rotate" ]]; then
+    [[ -n "$observed_thread" ]] || {
+      echo "Codex did not emit a new thread.started during rotation." >&2
+      return 10
+    }
+    [[ "$observed_thread" != "$thread_id" ]] || {
+      echo "Rotation unexpectedly reused the previous thread id." >&2
+      return 11
+    }
+    thread_id="$observed_thread"
+    rotate_thread_state "$thread_id" "$model" "$reasoning" "$rotation_reason"
   elif [[ -n "$observed_thread" && "$observed_thread" != "$thread_id" ]]; then
     echo "Resume returned unexpected thread id: expected=$thread_id observed=$observed_thread" >&2
     return 11
   fi
 
+  [[ -f "$state_file" ]] && record_turn
+
   if [[ $rc -ne 0 ]]; then
-    if [[ "$mode" == "start" && -n "$thread_id" ]]; then
-      write_state "$thread_id" "$model" "$reasoning" "$contract" "TURN_FAILED"
-    else
-      update_state_status "TURN_FAILED"
-    fi
-    echo "Codex turn failed with exit code $rc. Worktree/session preserved for Lead inspection." >&2
+    update_state_status "TURN_FAILED"
+    echo "Codex turn failed with exit code $rc. Worktree/session preserved for Web Lead inspection." >&2
     return "$rc"
   fi
 
   [[ -s "$result" ]] || {
-    if [[ "$mode" == "start" ]]; then
-      write_state "$thread_id" "$model" "$reasoning" "$contract" "EMPTY_RESULT"
-    else
-      update_state_status "EMPTY_RESULT"
-    fi
+    update_state_status "EMPTY_RESULT"
     echo "Codex produced no final result. Worktree/session preserved." >&2
     return 12
   }
 
   if ! validate_result "$result"; then
-    if [[ "$mode" == "start" ]]; then
-      write_state "$thread_id" "$model" "$reasoning" "$contract" "INVALID_RESULT"
-    else
-      update_state_status "INVALID_RESULT"
-    fi
+    update_state_status "INVALID_RESULT"
     echo "Invalid Worker result schema. Worktree/session preserved but no Candidate may be published." >&2
     cat "$result" >&2
     return 13
-  fi
-
-  if [[ "$mode" == "start" ]]; then
-    write_state "$thread_id" "$model" "$reasoning" "$contract" "RUNNING"
   fi
 
   status="$(jq -r '.status' "$result")"
@@ -503,11 +599,12 @@ case "$command_name" in
     [[ $# -ge 1 ]] || { usage >&2; exit 2; }
     instruction_source="$1"
     shift
-    stored_thread="$(jq -r '.thread_id' "$state_file" 2>/dev/null || true)"
-    stored_model="$(jq -r '.model' "$state_file" 2>/dev/null || true)"
-    stored_reasoning="$(jq -r '.reasoning' "$state_file" 2>/dev/null || true)"
-    stored_contract="$(jq -r '.contract' "$state_file" 2>/dev/null || true)"
+    ensure_owned_worktree
 
+    stored_thread="$(jq -r '.thread_id' "$state_file")"
+    stored_model="$(jq -r '.model' "$state_file")"
+    stored_reasoning="$(jq -r '.reasoning' "$state_file")"
+    stored_contract="$(jq -r '.contract' "$state_file")"
     [[ -n "$stored_thread" && "$stored_thread" != "null" ]] || {
       echo "Persistent thread_id missing for Issue #$issue." >&2
       exit 1
@@ -516,23 +613,32 @@ case "$command_name" in
     model="${1:-$stored_model}"
     reasoning="${2:-$stored_reasoning}"
     contract="${stored_contract:-$contract}"
-
-    case "$instruction_source" in
-      -) lead_instruction="$(cat)" ;;
-      *)
-        [[ -f "$instruction_source" ]] || {
-          echo "Resume instruction must be '-' for stdin or an existing file." >&2
-          exit 2
-        }
-        lead_instruction="$(cat "$instruction_source")"
-        ;;
-    esac
+    lead_instruction="$(read_instruction "$instruction_source")"
     [[ -n "$lead_instruction" ]] || { echo "Resume instruction is empty." >&2; exit 2; }
 
-    ensure_resume_worktree
     update_state_execution "$model" "$reasoning"
     prompt="$(render_template "$resume_template" "$contract" "" "$lead_instruction")"
     run_codex_turn "resume" "$stored_thread" "$model" "$reasoning" "$prompt"
+    ;;
+
+  rotate)
+    [[ $# -ge 1 ]] || { usage >&2; exit 2; }
+    instruction_source="$1"
+    shift
+    ensure_owned_worktree
+
+    old_thread="$(jq -r '.thread_id' "$state_file")"
+    stored_model="$(jq -r '.model' "$state_file")"
+    stored_reasoning="$(jq -r '.reasoning' "$state_file")"
+    stored_contract="$(jq -r '.contract' "$state_file")"
+    model="${1:-$stored_model}"
+    reasoning="${2:-$stored_reasoning}"
+    contract="${stored_contract:-$contract}"
+    lead_instruction="$(read_instruction "$instruction_source")"
+    [[ -n "$lead_instruction" ]] || { echo "Rotate instruction is empty." >&2; exit 2; }
+
+    prompt="$(render_template "$rotate_template" "$contract" "" "$lead_instruction")"
+    run_codex_turn "rotate" "$old_thread" "$model" "$reasoning" "$prompt" "$lead_instruction"
     ;;
 
   status)
@@ -544,6 +650,11 @@ case "$command_name" in
     echo
     echo "WORKTREE_STATUS:"
     git -C "$worktree" status --short
+    turn_count="$(jq -r '.thread_turn_count // 0' "$state_file")"
+    if (( turn_count >= 6 )); then
+      echo
+      echo "CONTEXT_BUDGET: current thread has $turn_count turns; Web Lead should compare resume value against rotation cost."
+    fi
     pr="$(find_pr_for_branch)"
     if [[ -n "$pr" ]]; then
       echo
