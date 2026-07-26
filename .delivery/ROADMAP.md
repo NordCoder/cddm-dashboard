@@ -14,9 +14,9 @@
 
 #### Owner Approval
 
-Status: **Pending**.
+Status: **Approved — 2026-07-26**.
 
-Product-code development for M6 MUST NOT begin until the Owner approves this Milestone Outcome, bounded Change set, dependencies/parallel plan, key risks, and Exit Gate. Technical preparation of the WebLead 3.0 runtime is independent of this approval.
+The Owner approved the M6 Outcome, bounded Change set, dependency/parallel plan, key risks, and Exit Gate. Product implementation may proceed only through shaped Change Contracts under the WebLead 3.0 role boundary.
 
 #### Outcome
 
@@ -42,23 +42,24 @@ A user can take a current policy-approved Prompt Plan, inspect the intended brow
 
 #### Changes
 
-| Change | Depends on | Risk | State before Owner approval |
+| Change | Depends on | Risk | Current state |
 | --- | --- | --- | --- |
-| #17 — Delivery command contract | process bootstrap #16 | High | Planned — Web Lead shaping after approval |
-| #18 — Browser identity and lane binding | process bootstrap #16 | High | Planned — Web Lead shaping after approval |
+| #17 — Delivery command contract | Stage 3 routing + Stage 4 planning; integrates #18 binding snapshot | High | Shaped — Ready for persistent implementation |
+| #18 — Browser identity and lane binding | Stage 3 routing | High | Shaped — Ready for persistent implementation |
 | #19 — Chrome extension execution | #17, #18 | High | Blocked |
 | #20 — Confirmed delivery UX | #17; integrates #18 binding | High | Blocked |
 | #21 — End-to-end hardening | #18, #19, #20 | High | Blocked |
 
-After Owner approval, the Web Lead shapes #17 and #18: WHAT and material HARD HOW are fixed in each canonical Change Contract. Only then does each Change start one persistent Codex implementation session.
+#17 and #18 WHAT + material HARD HOW are fixed in their canonical Change Contracts. Shared semantics are reconciled before Worker execution: Stage 3 remains lane authority; #18 provides versioned binding + ephemeral presence proof; #17 snapshots that exact binding and uses a one-way at-most-once command lifecycle where a claimed command is never automatically requeued.
 
 #### Parallel Plan
 
 ```text
-Owner approval
+Owner approval — complete
 ↓
-Web Lead shaping:       #17 + #18
-Lead reconciliation
+Web Lead shaping:       #17 + #18 — complete
+Lead reconciliation — complete
+↓
 Implementation Wave 1:  #17 + #18 persistent Codex sessions
 Downstream Wave 2:      #19 + #20 after dependencies
 Integration Wave 3:     #21
