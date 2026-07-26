@@ -563,13 +563,12 @@ commit_and_publish_candidate() {
 }
 
 comment_marker_present() {
-  local target="$1" marker="$2" comments rc
-  set +e
-  comments="$(gh api --paginate "repos/$repo_slug/issues/$target/comments" --jq '.[].body')"
-  rc=$?
-  set -e
-  [[ $rc -eq 0 ]] || return 2
-  grep -Fq "$marker" <<<"$comments"
+  local target="$1" marker="$2" comments
+  comments="$(gh api --paginate "repos/$repo_slug/issues/$target/comments" --jq '.[].body')" || return 2
+  if grep -Fq "$marker" <<<"$comments"; then
+    return 0
+  fi
+  return 1
 }
 
 persist_blocker() {
@@ -581,19 +580,21 @@ persist_blocker() {
 
 $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
 
-  set +e
-  comment_marker_present "$issue" "$marker"
-  rc=$?
-  set -e
-  case "$rc" in 0) return 0 ;; 1) ;; *) return "$rc" ;; esac
+  if comment_marker_present "$issue" "$marker"; then
+    return 0
+  else
+    rc=$?
+  fi
+  [[ $rc -eq 1 ]] || return "$rc"
 
   pr="$(find_pr_for_branch)"
   if [[ -n "$pr" ]]; then
-    set +e
-    comment_marker_present "$pr" "$marker"
-    rc=$?
-    set -e
-    case "$rc" in 0) return 0 ;; 1) ;; *) return "$rc" ;; esac
+    if comment_marker_present "$pr" "$marker"; then
+      return 0
+    else
+      rc=$?
+    fi
+    [[ $rc -eq 1 ]] || return "$rc"
     target="$pr"
   else
     target="$issue"
