@@ -408,6 +408,7 @@ ensure_start_runtime() {
     fi
   else
     recover_active_turn_state || return $?
+    [[ "$recovered_turn_dispatched" == 0 ]] || return 0
     local thread
     thread="$(jq -r '.thread_id // ""' "$state_file")"
     [[ -z "$thread" ]] || { echo "Persistent thread already exists for Issue #$issue; use resume/status." >&2; return 1; }
