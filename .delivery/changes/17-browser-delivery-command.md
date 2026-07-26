@@ -3,7 +3,7 @@
 Milestone: M6 — Browser Prompt Delivery
 Risk: High
 Issue: #17
-Execution state: Ready for shaping; not implementation-ready
+Execution state: Planned — Ready for shaping after M6 Owner approval
 
 ## Outcome
 
@@ -29,7 +29,7 @@ Introduce the backend-owned delivery-command contract required to deliver one cu
 
 ## Design
 
-Status: **Pending shaping.** Product-code implementation MUST NOT begin until the canonical contract fixes the material decisions below.
+Status: **Pending shaping.** Product-code implementation MUST NOT begin until M6 is Owner-approved and the canonical contract fixes the material decisions below.
 
 Shaping must determine:
 
@@ -49,10 +49,11 @@ Shaping must determine:
 - restart/persistence behavior where applicable;
 - backend regression and race suite;
 - exact-Head CI;
-- fresh independent review plus human review because Risk is High.
+- fresh independent review and Web Lead acceptance because Risk is High.
 
 ## Dependencies
 
 Product dependencies: none.
-Operational dependency: bootstrap #16 merged.
-Parallel-eligible with #18 for shaping unless investigation discovers a shared mutable surface.
+Operational dependency: WebLead worker runtime #25 merged.
+Approval dependency: M6 Owner approval.
+Parallel-eligible with #18 for shaping after approval unless investigation discovers a shared mutable surface.
