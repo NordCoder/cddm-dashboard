@@ -41,5 +41,43 @@ repair_prethread_start_failure() {
   echo "Recovered pre-thread failed start for Issue #$issue; archived stale runtime state." >&2
 }
 
+align_clean_prethread_orphan() {
+  [[ "${1:-}" == "start" && "${2:-}" =~ ^[0-9]+$ ]] || return 0
+  local issue="$2" state branch worktree actual_branch actual_head expected_head
+  state="$repo_root/.worktrees/runtime/issue-$issue.json"
+  [[ ! -f "$state" ]] || return 0
+
+  branch="change/$issue"
+  worktree="$repo_root/.worktrees/issue-$issue"
+  [[ -d "$worktree" ]] || return 0
+
+  actual_branch="$(git -C "$worktree" branch --show-current)"
+  [[ "$actual_branch" == "$branch" ]] || {
+    echo "Refusing to realign Issue #$issue: orphan worktree is on '$actual_branch', expected '$branch'." >&2
+    return 1
+  }
+  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || {
+    echo "Refusing to realign Issue #$issue: orphan worktree is dirty." >&2
+    return 1
+  }
+
+  git fetch --prune origin --quiet
+  if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    expected_head="$(git rev-parse "origin/$branch")"
+  else
+    expected_head="$(git rev-parse origin/main)"
+  fi
+  actual_head="$(git -C "$worktree" rev-parse HEAD)"
+  [[ "$actual_head" != "$expected_head" ]] || return 0
+
+  git merge-base --is-ancestor "$actual_head" "$expected_head" || {
+    echo "Refusing to realign Issue #$issue: orphan Head has unique/divergent history (actual=$actual_head expected=$expected_head)." >&2
+    return 1
+  }
+  git -C "$worktree" reset --hard "$expected_head" >/dev/null
+  echo "Realigned clean pre-thread orphan worktree for Issue #$issue to $expected_head." >&2
+}
+
 repair_prethread_start_failure "$@"
+align_clean_prethread_orphan "$@"
 PATH="$shim_dir:$PATH" exec "$core" "$@"
