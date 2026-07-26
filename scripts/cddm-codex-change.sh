@@ -116,10 +116,10 @@ remote_branch_head() {
 
 state_init() {
   local model="$1" reasoning="$2" status="$3" tmp="$state_file.tmp"
-  jq -n --argjson version 3 --arg issue "$issue" --arg branch "$branch" --arg worktree "$worktree" \
+  jq -n --argjson version 4 --arg issue "$issue" --arg branch "$branch" --arg worktree "$worktree" \
     --arg model "$model" --arg reasoning "$reasoning" --arg contract "$contract" --arg status "$status" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,candidate_result:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,last_result_rc:null,last_counted_result:null,updated_at:$updated_at}' >"$tmp"
+    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,candidate_result:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_exit_status:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,last_result_rc:null,last_counted_result:null,updated_at:$updated_at}' >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -155,12 +155,12 @@ state_set_execution() {
 }
 
 state_set_active_intent() {
-  local mode="$1" events="$2" result="$3" v2_log="$4" pid_file="$5" previous_thread="$6" rotation_reason="$7" model="$8" reasoning="$9" tmp="$state_file.tmp"
-  jq --arg mode "$mode" --arg events "$events" --arg result "$result" --arg v2_log "$v2_log" --arg pid_file "$pid_file" --arg previous_thread "$previous_thread" \
-    --arg rotation_reason "$rotation_reason" --arg model "$model" --arg reasoning "$reasoning" \
+  local mode="$1" events="$2" result="$3" v2_log="$4" pid_file="$5" previous_thread="$6" rotation_reason="$7" model="$8" reasoning="$9" exit_status="${10}" tmp="$state_file.tmp"
+  jq --arg mode "$mode" --arg events "$events" --arg result "$result" --arg v2_log "$v2_log" --arg pid_file "$pid_file" --arg exit_status "$exit_status" \
+    --arg previous_thread "$previous_thread" --arg rotation_reason "$rotation_reason" --arg model "$model" --arg reasoning "$reasoning" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '.active_pid=null | .active_pid_file=$pid_file | .active_mode=$mode | .active_events=$events
-     | .active_result=$result | .active_v2_log=$v2_log
+     | .active_result=$result | .active_v2_log=$v2_log | .active_exit_status=$exit_status
      | .active_previous_thread=$previous_thread | .active_rotation_reason=$rotation_reason
      | .active_model=$model | .active_reasoning=$reasoning | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
@@ -177,7 +177,7 @@ state_clear_active() {
   local tmp="$state_file.tmp"
   jq --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '.active_pid=null | .active_pid_file=null | .active_mode=null | .active_events=null
-     | .active_result=null | .active_v2_log=null
+     | .active_result=null | .active_v2_log=null | .active_exit_status=null
      | .active_previous_thread=null | .active_rotation_reason=null | .active_model=null | .active_reasoning=null
      | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
@@ -268,6 +268,15 @@ thread_from_events() {
   jq -r 'select(.type=="thread.started") | .thread_id // .thread.id // empty' "$events" 2>/dev/null | head -n1
 }
 
+read_turn_exit_status() {
+  local file="$1" value
+  [[ -n "$file" && -s "$file" ]] || return 1
+  value="$(tr -d '\r\n' <"$file")"
+  [[ "$value" =~ ^[0-9]+$ ]] || return 2
+  (( value >= 0 && value <= 255 )) || return 2
+  printf '%s' "$value"
+}
+
 run_strict() (
   set -e
   "$@"
@@ -328,11 +337,12 @@ reconcile_completed_turn_thread() {
 
 recover_active_turn_state() {
   [[ -f "$state_file" ]] || return 0
-  local mode events result v2_log previous rotation_reason active_model active_reasoning found stored pid pid_file dispatch_rc consumed thread_rc
+  local mode events result v2_log exit_status previous rotation_reason active_model active_reasoning found stored pid pid_file dispatch_rc consumed thread_rc codex_rc exit_read_rc
   mode="$(jq -r '.active_mode // ""' "$state_file")"
   events="$(jq -r '.active_events // ""' "$state_file")"
   result="$(jq -r '.active_result // ""' "$state_file")"
   v2_log="$(jq -r '.active_v2_log // ""' "$state_file")"
+  exit_status="$(jq -r '.active_exit_status // ""' "$state_file")"
   [[ -n "$mode" || -n "$events" || -n "$result" ]] || return 0
   previous="$(jq -r '.active_previous_thread // ""' "$state_file")"
   rotation_reason="$(jq -r '.active_rotation_reason // ""' "$state_file")"
@@ -374,44 +384,63 @@ recover_active_turn_state() {
     return 3
   fi
 
-  # A completed Codex turn is accepted only with the exact result path and the
-  # thread.started identity that belongs to this recorded turn.
-  if [[ -n "$result" && -s "$result" ]]; then
-    set +e
-    run_strict reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason"
-    thread_rc=$?
-    set -e
-    [[ $thread_rc -eq 0 ]] || return 4
-
-    state_record_turn_for_result "$result"
-    if ! validate_result "$result"; then
-      state_patch_status INVALID_RESULT
-      state_set_result_disposition "$result" 13
-      [[ -z "$pid_file" ]] || rm -f "$pid_file"
-      state_clear_active
-      echo "Recovered completed turn has an invalid structured result: $result" >&2
-      return 13
-    fi
-
-    set +e
-    run_strict dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
-    dispatch_rc=$?
-    set -e
-    consumed="$(jq -r '.last_result // ""' "$state_file")"
-    if [[ "$consumed" == "$result" ]]; then
-      recovered_turn_dispatched=1
-      [[ -z "$pid_file" ]] || rm -f "$pid_file"
-      state_clear_active
-    else
-      echo "Recovered result was not durably consumed: $result" >&2
-      return "${dispatch_rc:-4}"
-    fi
-    return "$dispatch_rc"
+  [[ -n "$result" ]] || { state_patch_status TURN_RESULT_IDENTITY_MISSING; echo "Dead active turn has no durable result identity." >&2; return 15; }
+  set +e
+  codex_rc="$(read_turn_exit_status "$exit_status")"
+  exit_read_rc=$?
+  set -e
+  if [[ $exit_read_rc -ne 0 ]]; then
+    state_patch_status TURN_COMPLETION_UNKNOWN
+    echo "Dead active turn has no valid durable Codex completion status." >&2
+    return 15
   fi
 
-  [[ -z "$pid_file" ]] || rm -f "$pid_file"
-  state_clear_active
-  return 0
+  set +e
+  run_strict reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason"
+  thread_rc=$?
+  set -e
+  [[ $thread_rc -eq 0 ]] || return 4
+  state_record_turn_for_result "$result"
+
+  if [[ $codex_rc -ne 0 ]]; then
+    state_patch_status TURN_FAILED
+    state_set_result_disposition "$result" "$codex_rc"
+    [[ -z "$pid_file" ]] || rm -f "$pid_file"
+    state_clear_active
+    echo "Recovered Codex turn completed with rc=$codex_rc; result was not dispatched." >&2
+    return "$codex_rc"
+  fi
+  if [[ ! -s "$result" ]]; then
+    state_patch_status EMPTY_RESULT
+    state_set_result_disposition "$result" 12
+    [[ -z "$pid_file" ]] || rm -f "$pid_file"
+    state_clear_active
+    echo "Recovered Codex turn completed successfully but produced no final result." >&2
+    return 12
+  fi
+  if ! validate_result "$result"; then
+    state_patch_status INVALID_RESULT
+    state_set_result_disposition "$result" 13
+    [[ -z "$pid_file" ]] || rm -f "$pid_file"
+    state_clear_active
+    echo "Recovered completed turn has an invalid structured result: $result" >&2
+    return 13
+  fi
+
+  set +e
+  run_strict dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
+  dispatch_rc=$?
+  set -e
+  consumed="$(jq -r '.last_result // ""' "$state_file")"
+  if [[ "$consumed" == "$result" ]]; then
+    recovered_turn_dispatched=1
+    [[ -z "$pid_file" ]] || rm -f "$pid_file"
+    state_clear_active
+  else
+    echo "Recovered result was not durably consumed: $result" >&2
+    return "${dispatch_rc:-4}"
+  fi
+  return "$dispatch_rc"
 }
 
 ensure_start_runtime() {
@@ -708,21 +737,28 @@ persist_live_thread_event() {
 
 run_codex_turn() {
   local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5" rotation_reason="${6:-}"
-  local stamp events result v2_log prompt_file pid_file pid rc=0 event_rc dispatch_rc consumed thread_rc
+  local stamp events result v2_log prompt_file pid_file exit_status pid rc=0 event_rc dispatch_rc consumed thread_rc durable_rc exit_read_rc
   stamp="$(date +%s)-$$"
   events="$results_dir/issue-$issue-$mode-$stamp.jsonl"
   result="$results_dir/issue-$issue-$mode-$stamp.result.json"
   v2_log="$results_dir/issue-$issue-v2-$stamp.log"
   prompt_file="$results_dir/issue-$issue-$mode-$stamp.prompt.txt"
   pid_file="$results_dir/issue-$issue-$mode-$stamp.pid"
+  exit_status="$results_dir/issue-$issue-$mode-$stamp.exit-status"
   printf '%s\n' "$prompt" >"$prompt_file"
   : >"$events"
-  rm -f "$pid_file"
-  state_set_active_intent "$mode" "$events" "$result" "$v2_log" "$pid_file" "$thread_id" "$rotation_reason" "$model" "$reasoning"
+  rm -f "$pid_file" "$exit_status" "$exit_status.tmp"
+  state_set_active_intent "$mode" "$events" "$result" "$v2_log" "$pid_file" "$thread_id" "$rotation_reason" "$model" "$reasoning" "$exit_status"
 
   (
     printf '%s\n' "$BASHPID" >"$pid_file"
+    set +e
     codex_command "$mode" "$thread_id" "$model" "$reasoning" "$result" <"$prompt_file" >"$events"
+    child_rc=$?
+    set -e
+    printf '%s\n' "$child_rc" >"$exit_status.tmp"
+    mv "$exit_status.tmp" "$exit_status"
+    exit "$child_rc"
   ) &
   pid=$!
   state_attach_active_pid "$pid"
@@ -747,6 +783,22 @@ run_codex_turn() {
     echo "No valid thread.started event for completed $mode turn." >&2
     return 10
   fi
+
+  set +e
+  durable_rc="$(read_turn_exit_status "$exit_status")"
+  exit_read_rc=$?
+  set -e
+  if [[ $exit_read_rc -ne 0 ]]; then
+    state_patch_status TURN_COMPLETION_UNKNOWN
+    echo "Completed turn has no valid durable Codex completion status." >&2
+    return 15
+  fi
+  if [[ "$durable_rc" != "$rc" ]]; then
+    state_patch_status TURN_COMPLETION_MISMATCH
+    echo "Durable Codex completion status disagrees with wrapper wait status: durable=$durable_rc wait=$rc" >&2
+    return 15
+  fi
+  rc="$durable_rc"
 
   state_record_turn_for_result "$result"
   if [[ $rc -ne 0 ]]; then
