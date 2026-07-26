@@ -98,6 +98,13 @@ jobs:
           grep -q 'resume "$thread_id"' scripts/cddm-codex-change.sh
           grep -q 'thread.started' scripts/cddm-codex-change.sh
           grep -q 'thread_history' scripts/cddm-codex-change.sh
+          grep -q 'START_FAILED_NO_THREAD' scripts/cddm-codex-change.sh
+          grep -q 'PUSHED_PENDING_GITHUB' scripts/cddm-codex-change.sh
+          grep -q 'Pending Candidate reconciliation must succeed before another Codex turn' scripts/cddm-codex-change.sh
+          for prompt in .codex/prompts/change-start.md .codex/prompts/change-resume.md .codex/prompts/change-rotate.md; do
+            grep -q 'Stable Change Goal:' "$prompt"
+            grep -q 'Implement approved Change #{{ISSUE}} to locally candidate-ready state' "$prompt"
+          done
           test -f .codex/prompts/change-start.md
           test -f .codex/prompts/change-resume.md
           test -f .codex/prompts/change-rotate.md

@@ -6,8 +6,8 @@ Repository development follows CDDM Codex Minimal 3.0 — WebLead.
 
 - **Owner** owns WHY, Milestone approval, material authority decisions, and product acceptance.
 - **ChatGPT Web Lead** owns WHAT, HARD HOW, Change shaping, dependency/parallelism decisions, model routing, Candidate/CI reconciliation, QA, and correction specification.
-- **Codex Change Worker** owns GOAL execution, private Tasks, LITE HOW, implementation, tests, and local debugging inside one persistent Change session.
-- **Trusted Host Runtime** owns worktrees, Codex thread persistence/rotation, Git metadata, network-capable V2, branch/PR publication, and exact-Candidate persistence.
+- **Codex Change Worker** owns the stable Change Goal, private Tasks, LITE HOW, implementation, tests, and local debugging inside one persistent Change session.
+- **Trusted Host Runtime** owns worktrees, Codex thread persistence/rotation, deterministic V2, Git metadata, branch/PR publication, exact-Candidate persistence, and publication reconciliation.
 - **GitHub** is the canonical delivery record.
 
 The Worker MUST NOT redefine WHAT or HARD HOW. A conflict with approved architecture is returned to the Web Lead as a bounded blocker.
@@ -44,29 +44,30 @@ Before changing shared interfaces, approved state semantics, persistence design,
 
 One Change normally uses one persistent Codex thread across implementation and bounded corrections.
 
-On the first turn:
+The Host prompt defines one deterministic stable Change Goal from the Issue identity and canonical Change Contract. The exact same Goal is used for initial implementation, resumes, and thread rotation. The persistent thread retains that Goal context; a rotated thread reconstructs the same Goal from the same canonical inputs.
 
-- treat the approved Change Contract as authoritative;
-- if goal tools are available, create a persistent Goal for the current implementation phase;
-- Goal creation is an execution aid, not a delivery gate;
-- maintain a private implementation Task plan and revise it as needed;
-- do not mirror Goal/Task state to GitHub.
+If goal tools are available, the Worker SHOULD create/adopt that exact Goal. Goal-tool failure is not a delivery blocker.
 
-On resumed turns:
+The Goal remains stable across:
 
-- preserve the existing Change mental model;
-- follow the bounded Web Lead instruction;
-- reuse existing Tasks when useful;
-- update/recreate the Goal only when needed for the new bounded correction phase.
+- initial implementation;
+- implementation continuation;
+- Web Lead QA corrections;
+- implementation-related CI corrections;
+- intentional thread rotation.
 
-A Goal MUST consider either of these valid stopping outcomes:
+Bounded corrections become private Tasks/instructions under the same Goal; they do not replace WHAT or HARD HOW.
 
-1. the worktree is locally candidate-ready for host V2; or
-2. a material HARD HOW conflict/blocker has been identified and reported.
+Codex Tasks are private execution state. The Worker MAY create, reorder, complete, or discard Tasks as useful and MUST NOT mirror them to GitHub.
+
+A Goal MUST allow either valid stopping outcome:
+
+1. the worktree is locally candidate-ready for Host V2; or
+2. a material HARD HOW/dependency blocker has been identified and reported.
 
 Do not loop indefinitely on blocked operations.
 
-Persistent context is an optimization, not a dogma. The Host/Web Lead MAY rotate to a fresh thread in the same owned worktree when accumulated context becomes more expensive or misleading than reconstruction from the current contract/diff. Rotation does not change canonical Change authority.
+Persistent context is an optimization, not a dogma. The Host/Web Lead MAY rotate to a fresh thread in the same owned worktree when accumulated context becomes more expensive or misleading than reconstruction from the current contract/diff. Rotation recreates the same stable Goal and does not change canonical Change authority.
 
 ## Worker authority
 
@@ -100,7 +101,7 @@ Within the persistent session:
 
 ```text
 approved contract
-→ Goal
+→ stable Goal
 → private Tasks
 → implementation
 → cheapest relevant V1
@@ -143,6 +144,12 @@ GitHub CI independently confirms the published exact Candidate.
 
 Any new commit creates a new Candidate and invalidates prior final CI/QA evidence.
 
+## Candidate publication recovery
+
+Candidate publication and PR bookkeeping are deterministic Host operations. The Host reconciles ambiguous push outcomes against the canonical remote and persists pending publication state before allowing another Codex turn.
+
+If publication or PR bookkeeping is pending, the Host must reconcile that state first. The Worker is not rerun merely to repair transport/bookkeeping.
+
 ## Web Lead QA
 
 Web Lead QA is the default review layer.
@@ -162,7 +169,7 @@ The final response MUST satisfy the host-provided JSON schema and contain:
 
 Meaning:
 
-- `CANDIDATE_READY` — implementation is locally coherent and ready for host V2.
+- `CANDIDATE_READY` — implementation is locally coherent and ready for Host V2.
 - `CONTINUE` — useful progress exists but another turn is required.
 - `BLOCKED` — a material dependency/HARD HOW conflict prevents safe progress.
 - `NO_OP` — approved Change requires no file modification.
