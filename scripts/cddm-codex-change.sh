@@ -89,16 +89,16 @@ find_pr_for_branch() {
 
 ensure_pr() {
   local found title
-  found="$(find_pr_for_branch)"
+  found="$(find_pr_for_branch)" || return 1
   if [[ -z "$found" ]]; then
-    title="$(gh issue view "$issue" --repo "$repo_slug" --json title --jq '.title')"
+    title="$(gh issue view "$issue" --repo "$repo_slug" --json title --jq '.title')" || return 1
     gh pr create --repo "$repo_slug" --draft --base main --head "$branch" --title "$title" \
       --body "Closes #$issue
 
 Canonical Change Contract: \`$contract\`
 
-CDDM WebLead 3.0: Web Lead owns WHAT + HARD HOW + QA; implementation uses one persistent Codex Change session unless explicitly rotated." >/dev/null
-    found="$(find_pr_for_branch)"
+CDDM WebLead 3.0: Web Lead owns WHAT + HARD HOW + QA; implementation uses one persistent Codex Change session unless explicitly rotated." >/dev/null || return 1
+    found="$(find_pr_for_branch)" || return 1
   fi
   [[ -n "$found" ]] || { echo "Unable to resolve/create PR for $branch." >&2; return 1; }
   printf '%s' "$found"
@@ -323,7 +323,7 @@ reconcile_completed_turn_thread() {
 
 recover_active_turn_state() {
   [[ -f "$state_file" ]] || return 0
-  local mode events result v2_log previous rotation_reason active_model active_reasoning found stored pid pid_file dispatch_rc consumed
+  local mode events result v2_log previous rotation_reason active_model active_reasoning found stored pid pid_file dispatch_rc consumed thread_rc
   mode="$(jq -r '.active_mode // ""' "$state_file")"
   events="$(jq -r '.active_events // ""' "$state_file")"
   result="$(jq -r '.active_result // ""' "$state_file")"
@@ -377,7 +377,11 @@ recover_active_turn_state() {
       echo "Recovered completed turn has an invalid structured result: $result" >&2
       return 4
     fi
-    reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason" || return 4
+    set +e
+    run_strict reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason"
+    thread_rc=$?
+    set -e
+    [[ $thread_rc -eq 0 ]] || return 4
 
     set +e
     run_strict dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
@@ -412,7 +416,7 @@ ensure_start_runtime() {
       state_patch_status "INITIALIZING"
     fi
   else
-    recover_active_turn_state || return $?
+    recover_active_turn_state
     [[ "$recovered_turn_dispatched" == 0 ]] || return 0
     local thread
     thread="$(jq -r '.thread_id // ""' "$state_file")"
@@ -689,7 +693,7 @@ persist_live_thread_event() {
 
 run_codex_turn() {
   local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5" rotation_reason="${6:-}"
-  local stamp events result v2_log prompt_file pid_file pid rc=0 event_rc dispatch_rc consumed
+  local stamp events result v2_log prompt_file pid_file pid rc=0 event_rc dispatch_rc consumed thread_rc
   stamp="$(date +%s)-$$"
   events="$results_dir/issue-$issue-$mode-$stamp.jsonl"
   result="$results_dir/issue-$issue-$mode-$stamp.result.json"
@@ -709,15 +713,15 @@ run_codex_turn() {
   state_attach_active_pid "$pid"
 
   while kill -0 "$pid" 2>/dev/null; do
-    set +e; persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
+    set +e; run_strict persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
     [[ $event_rc -ne 2 ]] || { kill "$pid" 2>/dev/null || true; break; }
     [[ $event_rc -eq 0 ]] && break
     sleep 0.1
   done
   set +e; wait "$pid"; rc=$?; set -e
-  set +e; persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
+  set +e; run_strict persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
   rm -f "$prompt_file" "$pid_file"
-  [[ $event_rc -ne 2 ]] || { state_patch_status THREAD_MISMATCH; state_clear_active; return 11; }
+  [[ $event_rc -ne 2 ]] || { state_patch_status THREAD_MISMATCH; return 11; }
 
   if [[ $event_rc -ne 0 ]]; then
     case "$mode" in
@@ -725,7 +729,6 @@ run_codex_turn() {
       rotate) state_patch_status ROTATE_FAILED_NO_THREAD ;;
       *) state_patch_status THREAD_MISMATCH ;;
     esac
-    state_clear_active
     echo "No valid thread.started event for completed $mode turn." >&2
     return 10
   fi
@@ -734,7 +737,12 @@ run_codex_turn() {
   if [[ $rc -ne 0 ]]; then state_patch_status TURN_FAILED; state_clear_active; echo "Codex turn failed; worktree/session preserved." >&2; return "$rc"; fi
   [[ -s "$result" ]] || { state_patch_status EMPTY_RESULT; state_clear_active; echo "Codex produced no final result." >&2; return 12; }
   validate_result "$result" || { state_patch_status INVALID_RESULT; cat "$result" >&2; state_clear_active; return 13; }
-  reconcile_completed_turn_thread "$mode" "$events" "$thread_id" "$model" "$reasoning" "$rotation_reason" || { state_clear_active; return 11; }
+
+  set +e
+  run_strict reconcile_completed_turn_thread "$mode" "$events" "$thread_id" "$model" "$reasoning" "$rotation_reason"
+  thread_rc=$?
+  set -e
+  [[ $thread_rc -eq 0 ]] || return 11
 
   set +e
   run_strict dispatch_result_file "$result" "$v2_log"
@@ -759,7 +767,14 @@ if [[ -f "$state_file" ]]; then
   pending_status="$(jq -r '.status // ""' "$state_file")"
   case "$pending_status" in
     COMMIT_PREPARED|COMMITTED_PENDING_PUSH|PUBLISH_CONFIRMATION_PENDING|PUSHED_PENDING_GITHUB|PUBLISH_INCONCLUSIVE)
-      if ! reconcile_pending_candidate; then [[ "$command_name" == status ]] || { echo "Pending Candidate reconciliation must succeed before another Codex turn." >&2; exit 1; }; fi
+      set +e
+      run_strict reconcile_pending_candidate
+      pending_rc=$?
+      set -e
+      if [[ $pending_rc -ne 0 && "$command_name" != status ]]; then
+        echo "Pending Candidate reconciliation must succeed before another Codex turn." >&2
+        exit 1
+      fi
       ;;
   esac
 fi
