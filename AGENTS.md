@@ -1,35 +1,94 @@
-# CDDM Dashboard — Codex Instructions
+# CDDM Dashboard — Codex Worker Instructions
 
-## Authority
+## Role boundary
 
-For repository development, use the following canonical context in order:
+Repository development follows CDDM Codex Minimal 2.0 — WebLead.
+
+- **Owner** approves Milestone scope and resolves only material product/risk decisions.
+- **ChatGPT Web Lead** owns planning, Change decomposition, shaping orchestration, worker/model routing, Candidate/CI/review reconciliation, corrections, and merge preparation.
+- **Codex Worker** executes one bounded activity for one Change in one isolated worktree.
+- **GitHub** is the canonical delivery record.
+
+Workers MUST NOT ask the Owner to operate the pipeline or make ordinary engineering decisions. Material decisions are returned to the Web Lead as bounded blockers.
+
+## Canonical authority
+
+Read only the context needed for the current activity, in this order:
 
 1. `.delivery/PRODUCT.md` — product purpose and durable boundaries.
 2. `.delivery/PRINCIPLES.md` — architecture, security, and delivery invariants.
-3. `.delivery/ROADMAP.md` — Active Milestone, dependencies, and Exit Gate.
-4. The current GitHub Issue and, for Medium/High work, `.delivery/changes/<issue>-<change>.md` when present.
+3. `.delivery/ROADMAP.md` — Active Milestone, dependencies, approval state, and Exit Gate.
+4. Current GitHub Issue and `.delivery/changes/<issue>-<change>.md` when present.
 5. Current code, tests, migrations, and configuration — implementation facts.
 
-`docs/cddm-minimal.md` and the Supervisor event schemas describe workflow behavior implemented by the product. They are not the operating methodology for developing this repository. Do not remove or reinterpret that runtime protocol unless the current Change explicitly targets it.
+Chat history is not authoritative. `docs/cddm-minimal.md` describes Supervisor behavior implemented by the product; it is not the repository-development methodology.
 
-## Change execution
+## Git and GitHub authority
 
-- Work on one Change in one non-default branch/worktree with one primary Implementor.
-- Never modify `main` directly.
-- Read only the repository surfaces needed for the current Change; expand context when evidence requires it.
-- High-risk work with unresolved material Design is Ready for shaping, not implementation. Shape the canonical Change Contract before product-code writes.
-- Implement the smallest maintainable solution that satisfies the current Change and preserves the Active Milestone.
-- Future Roadmap work is context, not Scope. Do not implement it speculatively.
-- Resolve ordinary engineering choices from code, tests, conventions, and standard practice. Stop only for material ambiguity that changes Outcome, Scope, architecture, security, persistence semantics, compatibility, or authority.
-- Do not weaken tests, policy checks, exact-Head semantics, or security boundaries to make verification pass.
-- Never add credentials, tokens, local `.env` contents, or ChatGPT response data to source, fixtures, logs, or model-facing artifacts.
+`git` and `gh` are normal Worker tools for the current Change.
+
+Workers MAY:
+
+- inspect repository/history and fetch remote state;
+- read the current Issue/PR/checks/runs;
+- edit files inside the current worktree;
+- commit coherent in-scope work;
+- push the current Change branch;
+- create or update the current Change draft PR;
+- mark the PR ready only after Candidate-ready verification;
+- post one compact final activity result to the current Issue/PR.
+
+Workers MUST NOT:
+
+- push or commit directly to `main`;
+- force-push or rewrite published history;
+- merge or close PRs;
+- close, relabel, reassign, or change milestones on Issues;
+- modify another Change branch/worktree;
+- change repository settings, secrets, branch protection, or Actions permissions;
+- use `gh api` for side effects that bypass these boundaries;
+- publish progress/heartbeat comments.
+
+External writes are limited to the current Change and only when the activity authorizes them.
+
+## Activity rules
+
+### Shape
+
+- Resolve material Design needed for implementation readiness.
+- Do not write product implementation code.
+- Update only the canonical Change Contract and directly necessary planning metadata.
+- Commit/push the shaped contract and create/reuse one draft PR for the Change.
+
+### Implement
+
+- Start only when the Change Contract is implementation-ready and dependencies are satisfied.
+- Implement the smallest maintainable solution inside Scope.
+- Continue the same Change branch/PR created during shaping when one exists.
+- Do not implement future Roadmap work.
+
+### Investigate
+
+- Establish facts/root cause before proposing writes.
+- Do not modify product code unless a later implementation/fix activity explicitly authorizes it.
+
+### Fix CI
+
+- Work only on the exact failing Candidate branch.
+- Classify the failure before editing.
+- Do not change product code for infrastructure-only failures.
+
+### Review
+
+- Review one exact Candidate independently.
+- Do not modify files, commits, or the Candidate branch.
+- Any Head change invalidates the verdict.
 
 ## Parallel work
 
-- Parallelize independent Ready Changes, not one Change across multiple Implementors.
-- Before parallel work, confirm no material dependency or competing ownership of a shared mutable contract.
-- A shared contract must be fixed before dependent branches implement it in parallel.
-- Relevant upstream contract or semantic drift requires integration with the current target followed by revalidation.
+- Parallelize independent Changes, never multiple primary Implementors inside one Change.
+- Shared mutable contracts must be fixed before dependent implementations run in parallel.
+- Relevant upstream semantic/contract drift requires integration with current target and revalidation.
 
 ## Verification
 
@@ -37,11 +96,11 @@ Use the cheapest relevant verifier first.
 
 ### V1 — fast local verification
 
-Run focused formatting, tests, type checks, builds, or integration checks for the surface just changed.
+Run focused formatting, tests, type checks, builds, or integration checks for the changed surface.
 
 ### V2 — local Candidate verification
 
-Before publishing a Candidate, run every practical repository check affected by the Change. The current full baseline is:
+Before Candidate publication, run every practical affected check. Full baseline:
 
 ```bash
 cd backend
@@ -58,42 +117,36 @@ cd ..
 docker compose config --quiet
 ```
 
-If a check is irrelevant or unavailable locally, report that fact; do not claim it passed.
+If a check is irrelevant or unavailable, report it explicitly. Inspect the final diff for scope leakage, unrelated refactoring, accidental deletion, temporary/debug code, secrets, disabled tests, and weakened assertions.
 
-Inspect the final diff for scope leakage, unrelated refactoring, accidental deletion, temporary/debug code, secrets, disabled tests, and weakened assertions.
+### V3 — exact-Head CI
 
-### V3 — Candidate verification
+GitHub CI confirms the published Candidate. Candidate evidence is valid only for the exact current PR Head. Any new commit creates a new Candidate and invalidates prior final CI/review evidence.
 
-GitHub CI is an independent clean-environment gate, not the primary debugging loop. Candidate-bound evidence applies only to the exact current PR Head. Any new commit creates a new Candidate and invalidates prior final CI/review authority.
+## Review depth
 
-## Review and merge
+- Low: self-review + deterministic verification.
+- Medium: exact-Head CI + fresh independent review.
+- High: exact-Head CI + fresh independent review + Web Lead acceptance.
 
-- Low: self-review plus deterministic verification.
-- Medium: fresh independent Codex review plus exact-Head CI.
-- High: fresh independent review, exact-Head CI, and human review.
-- Do not merge unless the user explicitly requests or the active Change grants merge authority.
-- Do not transfer approval from one Head to another.
+High Risk does not automatically require Owner code review. Owner involvement is reserved for Owner-authority decisions and Milestone acceptance.
+
+## Result persistence
+
+At activity completion, persist exactly one compact result so the Web Lead can resume from GitHub without chat transport.
+
+- `shape`, `implement`, `fix-ci`: one PR comment on the current Change PR.
+- `review`: one PR comment containing the exact-Head verdict.
+- material `investigate`: one Issue comment only when the conclusion must persist for later work.
+
+Use the corresponding repository skill result schema. Do not post internal reasoning, full logs, or repeated canonical context.
 
 ## Reusable workflows
 
-Use repository skills when applicable:
+- `$cddm-shape`
+- `$cddm-implement`
+- `$cddm-review`
+- `$cddm-investigate`
+- `$cddm-fix-ci`
 
-- `$cddm-shape` — resolve a Medium/High Change contract and material Design before implementation.
-- `$cddm-implement` — execute an implementation-ready Change.
-- `$cddm-review` — independently review an exact Candidate.
-- `$cddm-investigate` — resolve an uncertain defect or contract question without speculative writes.
-- `$cddm-fix-ci` — diagnose a failed Candidate check and reproduce locally before correction.
-
-## Output
-
-Keep task output decision-oriented. For implementation work, default to:
-
-```text
-STATUS: DONE | BLOCKED | NO-OP
-CHANGED: <bounded summary>
-VERIFY: <checks and results>
-CANDIDATE: <Head/PR if published, otherwise not published>
-BLOCKER: <only when applicable>
-```
-
-Do not repeat the Issue, canonical documents, successful logs, or internal reasoning in the final report.
+Stop when the activity contract is satisfied. Do not perform unrelated cleanup.
