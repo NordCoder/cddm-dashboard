@@ -50,6 +50,10 @@ func New(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollI
 }
 
 func NewWithBindingTTL(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollInterval, bindingTTL time.Duration) http.Handler {
+	return NewWithBindingService(db, store, syncer, defaultPollInterval, browserbinding.New(db, bindingTTL))
+}
+
+func NewWithBindingService(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollInterval time.Duration, bindings *browserbinding.Service) http.Handler {
 	seconds := int64(defaultPollInterval / time.Second)
 	if seconds <= 0 {
 		seconds = 300
@@ -67,7 +71,7 @@ func NewWithBindingTTL(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer
 	mux.HandleFunc("/api/workspace", server.workspace)
 	mux.HandleFunc("/api/workspace/state", server.workspaceState)
 	mux.HandleFunc("/api/attention", server.attention)
-	return withBrowserBinding(mux, server, browserbinding.New(db, bindingTTL))
+	return withBrowserBinding(mux, server, bindings)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

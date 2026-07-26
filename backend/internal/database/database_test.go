@@ -18,14 +18,14 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("user_version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("user_version = %d, want 6", version)
 	}
 
 	for _, table := range []string{
 		"projects", "github_issues", "github_issue_comments", "github_pull_requests", "github_ci_summaries",
 		"planning_generations", "model_invocations", "prompt_plans", "policy_decisions",
-		"browser_workers", "browser_lane_bindings",
+		"browser_workers", "browser_lane_bindings", "delivery_commands",
 	} {
 		var name string
 		if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
@@ -57,7 +57,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	if err := second.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 5 {
-		t.Fatalf("migration count = %d, want 5", count)
+	if count != 6 {
+		t.Fatalf("migration count = %d, want 6", count)
 	}
 }

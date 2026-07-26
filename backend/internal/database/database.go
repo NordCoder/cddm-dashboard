@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -18,17 +19,29 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+var memoryDatabaseSequence atomic.Uint64
+
 func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if err := ensureParentDirectory(path); err != nil {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	dsn := sqliteDSN(path)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
+	// File-backed delivery claims hold SQLite's write lock while they revalidate
+	// authoritative planning and binding state through read-only collaborators. A
+	// small pool keeps that revalidation on a separate read connection. In-memory
+	// test databases intentionally retain one connection: SQLite shared-memory
+	// databases otherwise expose lock races to existing concurrent supervisor tests.
+	if path == ":memory:" {
+		db.SetMaxOpenConns(1)
+	} else {
+		db.SetMaxOpenConns(4)
+	}
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
@@ -41,6 +54,17 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func sqliteDSN(path string) string {
+	if path == ":memory:" {
+		path = fmt.Sprintf("file:cddm-memory-%d?mode=memory&cache=shared", memoryDatabaseSequence.Add(1))
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
 }
 
 func ensureParentDirectory(path string) error {

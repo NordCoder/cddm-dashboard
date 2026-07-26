@@ -28,6 +28,8 @@ const (
 	defaultPromptEvidenceLimit      = 12
 	defaultPromptEvidenceChars      = 4000
 	defaultBrowserBindingTTL        = 30 * time.Second
+	defaultDeliveryPendingTTL       = 5 * time.Minute
+	defaultDeliveryClaimTTL         = time.Minute
 )
 
 type Config struct {
@@ -56,6 +58,9 @@ type Config struct {
 	PromptEvidenceLimit       int
 	PromptEvidenceChars       int
 	BrowserBindingTTL         time.Duration
+	BrowserDeliveryEnabled    bool
+	BrowserDeliveryPendingTTL time.Duration
+	BrowserDeliveryClaimTTL   time.Duration
 }
 
 func Load() (Config, error) {
@@ -119,6 +124,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	deliveryEnabled, err := boolFromEnv("BROWSER_DELIVERY_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	deliveryPendingTTL, err := durationFromEnv("BROWSER_DELIVERY_PENDING_TTL", defaultDeliveryPendingTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	deliveryClaimTTL, err := durationFromEnv("BROWSER_DELIVERY_CLAIM_TTL", defaultDeliveryClaimTTL)
+	if err != nil {
+		return Config{}, err
+	}
 
 	config := Config{
 		Address:                   stringFromEnv("APP_ADDR", defaultAddress),
@@ -146,6 +163,9 @@ func Load() (Config, error) {
 		PromptEvidenceLimit:       evidenceLimit,
 		PromptEvidenceChars:       evidenceChars,
 		BrowserBindingTTL:         browserBindingTTL,
+		BrowserDeliveryEnabled:    deliveryEnabled,
+		BrowserDeliveryPendingTTL: deliveryPendingTTL,
+		BrowserDeliveryClaimTTL:   deliveryClaimTTL,
 	}
 	if config.OpenCodeEnabled && (config.OpenCodeProvider == "" || config.OpenCodeModel == "") {
 		return Config{}, fmt.Errorf("OPENCODE_PROVIDER and OPENCODE_MODEL are required when OPENCODE_ENABLED=true")
