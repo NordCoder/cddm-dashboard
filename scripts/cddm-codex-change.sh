@@ -76,6 +76,7 @@ resolve_contract() {
 }
 
 contract="$(resolve_contract)"
+recovered_turn_dispatched=0
 
 issue_context() {
   gh issue view "$issue" --repo "$repo_slug" --json title,body \
@@ -311,7 +312,23 @@ recover_active_turn_state() {
       echo "Recovered completed turn has an invalid structured result: $result" >&2
       return 4
     fi
+
+    # Recovery must enforce the same thread-identity gates as normal completion.
+    stored="$(jq -r '.thread_id // ""' "$state_file")"
+    case "$mode" in
+      start)
+        [[ -n "$stored" ]] || { state_patch_status START_FAILED_NO_THREAD; echo "Recovered start result has no established thread." >&2; return 4; }
+        ;;
+      rotate)
+        [[ -n "$stored" && "$stored" != "$previous" ]] || { state_patch_status ROTATE_FAILED_NO_THREAD; echo "Recovered rotate result has no fresh established thread." >&2; return 4; }
+        ;;
+      resume)
+        [[ -z "$previous" || "$stored" == "$previous" ]] || { state_patch_status THREAD_MISMATCH; echo "Recovered resume result is bound to the wrong thread." >&2; return 4; }
+        ;;
+    esac
+
     dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
+    recovered_turn_dispatched=1
   fi
 
   [[ -z "$pid_file" ]] || rm -f "$pid_file"
@@ -479,47 +496,53 @@ $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
 }
 
 dispatch_result_file() {
-  local result_file="$1" v2_log="$2" result_status current_status tmp
+  local result_file="$1" v2_log="$2" result_status last_result rc=0 durable_status tmp
   validate_result "$result_file" || return 13
   result_status="$(jq -r '.status' "$result_file")"
-  current_status="$(jq -r '.status // ""' "$state_file")"
+  last_result="$(jq -r '.last_result // ""' "$state_file")"
 
-  # If a prior host attempt already moved this result into its durable state,
-  # recovery must not replay the Worker instruction or duplicate the transition.
-  case "$result_status:$current_status" in
-    CANDIDATE_READY:CANDIDATE|CANDIDATE_READY:V2_FAILED|CANDIDATE_READY:COMMIT_PREPARED|CANDIDATE_READY:COMMITTED_PENDING_PUSH|CANDIDATE_READY:PUBLISH_CONFIRMATION_PENDING|CANDIDATE_READY:PUSHED_PENDING_GITHUB|CANDIDATE_READY:PUBLISH_INCONCLUSIVE)
-      return 0
-      ;;
-    CONTINUE:CONTINUE|BLOCKED:BLOCKED|NO_OP:NO_OP)
-      return 0
-      ;;
-  esac
-
-  tmp="$state_file.tmp"
-  jq --arg result "$result_file" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
-  mv "$tmp" "$state_file"
+  # Result paths are unique per Codex turn. Only this exact identity proves that
+  # this exact turn has already been consumed; ambient session statuses repeat.
+  [[ "$last_result" != "$result_file" ]] || return 0
 
   case "$result_status" in
     CANDIDATE_READY)
+      set +e
       commit_and_publish_candidate "$result_file" "$v2_log"
+      rc=$?
+      set -e
+      durable_status="$(jq -r '.status // ""' "$state_file")"
+      case "$durable_status" in
+        CANDIDATE|V2_FAILED|COMMIT_PREPARED|COMMITTED_PENDING_PUSH|PUBLISH_CONFIRMATION_PENDING|PUSHED_PENDING_GITHUB|PUBLISH_INCONCLUSIVE)
+          tmp="$state_file.tmp"
+          jq --arg result "$result_file" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
+          mv "$tmp" "$state_file"
+          ;;
+      esac
+      return "$rc"
       ;;
     CONTINUE)
       state_patch_status CONTINUE
-      cat "$result_file"
       ;;
     BLOCKED)
-      # Mark locally before the external comment so a crash never replays the
-      # Worker turn. GitHub comment persistence is best-effort operational I/O.
+      # Consume locally before best-effort external comment persistence so the
+      # Worker turn itself is never replayed after a host crash.
       state_patch_status BLOCKED
-      persist_blocker "$result_file"
-      cat "$result_file"
       ;;
     NO_OP)
       [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { state_patch_status INVALID_NO_OP; echo "NO_OP returned with file changes." >&2; return 14; }
       state_patch_status NO_OP
-      cat "$result_file"
       ;;
+  esac
+
+  tmp="$state_file.tmp"
+  jq --arg result "$result_file" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
+  mv "$tmp" "$state_file"
+
+  case "$result_status" in
+    CONTINUE) cat "$result_file" ;;
+    BLOCKED) persist_blocker "$result_file"; cat "$result_file" ;;
+    NO_OP) cat "$result_file" ;;
   esac
 }
 
@@ -605,6 +628,12 @@ run_codex_turn() {
   state_clear_active
 }
 
+exit_after_recovered_turn() {
+  if [[ "$recovered_turn_dispatched" == 1 ]]; then
+    exit 0
+  fi
+}
+
 if [[ -f "$state_file" ]]; then
   stored_contract="$(jq -r '.contract // ""' "$state_file")"
   [[ -z "$stored_contract" ]] || contract="$stored_contract"
@@ -620,6 +649,7 @@ case "$command_name" in
   start)
     model="${1:-gpt-5.6-terra}"; reasoning="${2:-medium}"
     ensure_start_runtime "$model" "$reasoning"
+    exit_after_recovered_turn
     thread_now="$(jq -r '.thread_id // ""' "$state_file")"
     [[ -z "$thread_now" ]] || { echo "Initial thread already established; use resume/status." >&2; exit 1; }
     prompt="$(render_template "$start_template" "$(issue_context)" "")"
@@ -628,6 +658,7 @@ case "$command_name" in
   resume)
     [[ $# -ge 1 ]] || { usage >&2; exit 2; }
     source="$1"; shift; ensure_owned_worktree
+    exit_after_recovered_turn
     thread_id="$(jq -r '.thread_id // ""' "$state_file")"; [[ -n "$thread_id" ]] || { echo "Persistent thread_id missing." >&2; exit 1; }
     stored_model="$(jq -r '.model' "$state_file")"; stored_reasoning="$(jq -r '.reasoning' "$state_file")"
     model="${1:-$stored_model}"; reasoning="${2:-$stored_reasoning}"; instruction="$(read_instruction "$source")"; [[ -n "$instruction" ]] || { echo "Resume instruction is empty." >&2; exit 2; }
@@ -637,6 +668,7 @@ case "$command_name" in
   rotate)
     [[ $# -ge 1 ]] || { usage >&2; exit 2; }
     source="$1"; shift; ensure_owned_worktree
+    exit_after_recovered_turn
     thread_id="$(jq -r '.thread_id // ""' "$state_file")"; [[ -n "$thread_id" ]] || { echo "Persistent thread_id missing." >&2; exit 1; }
     stored_model="$(jq -r '.model' "$state_file")"; stored_reasoning="$(jq -r '.reasoning' "$state_file")"
     model="${1:-$stored_model}"; reasoning="${2:-$stored_reasoning}"; instruction="$(read_instruction "$source")"; [[ -n "$instruction" ]] || { echo "Rotate instruction is empty." >&2; exit 2; }
