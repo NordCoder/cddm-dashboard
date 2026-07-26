@@ -119,7 +119,7 @@ state_init() {
   jq -n --argjson version 3 --arg issue "$issue" --arg branch "$branch" --arg worktree "$worktree" \
     --arg model "$model" --arg reasoning "$reasoning" --arg contract "$contract" --arg status "$status" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,updated_at:$updated_at}' >"$tmp"
+    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,candidate_result:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,updated_at:$updated_at}' >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -134,9 +134,9 @@ state_patch_status() {
 }
 
 state_set_prepared_candidate() {
-  local head="$1" parent="$2" remote_before="$3" tmp="$state_file.tmp"
-  jq --arg head "$head" --arg parent "$parent" --arg remote_before "$remote_before" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.status="COMMIT_PREPARED" | .candidate_head=$head | .candidate_parent=$parent | .candidate_remote_before=$remote_before | .updated_at=$updated_at' "$state_file" >"$tmp"
+  local result="$1" head="$2" parent="$3" remote_before="$4" tmp="$state_file.tmp"
+  jq --arg result "$result" --arg head "$head" --arg parent "$parent" --arg remote_before "$remote_before" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.status="COMMIT_PREPARED" | .candidate_result=$result | .candidate_head=$head | .candidate_parent=$parent | .candidate_remote_before=$remote_before | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -180,6 +180,13 @@ state_clear_active() {
      | .active_result=null | .active_v2_log=null
      | .active_previous_thread=null | .active_rotation_reason=null | .active_model=null | .active_reasoning=null
      | .updated_at=$updated_at' "$state_file" >"$tmp"
+  mv "$tmp" "$state_file"
+}
+
+state_set_last_result() {
+  local result="$1" tmp="$state_file.tmp"
+  jq --arg result "$result" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -256,9 +263,62 @@ thread_from_events() {
   jq -r 'select(.type=="thread.started") | .thread_id // .thread.id // empty' "$events" 2>/dev/null | head -n1
 }
 
+reconcile_completed_turn_thread() {
+  local mode="$1" events="$2" previous="$3" model="$4" reasoning="$5" rotation_reason="$6"
+  local found stored
+  found="$(thread_from_events "$events")"
+  [[ -n "$found" ]] || {
+    case "$mode" in
+      start) state_patch_status START_FAILED_NO_THREAD ;;
+      rotate) state_patch_status ROTATE_FAILED_NO_THREAD ;;
+      *) state_patch_status THREAD_MISMATCH ;;
+    esac
+    echo "Completed $mode turn has no valid thread.started identity." >&2
+    return 1
+  }
+  stored="$(jq -r '.thread_id // ""' "$state_file")"
+  case "$mode" in
+    start)
+      if [[ -z "$stored" ]]; then
+        state_set_thread "$found" RUNNING
+      elif [[ "$stored" != "$found" ]]; then
+        state_patch_status THREAD_MISMATCH
+        echo "Completed start turn thread identity does not match persisted state." >&2
+        return 2
+      fi
+      ;;
+    resume)
+      if [[ -z "$previous" || "$found" != "$previous" || "$stored" != "$previous" ]]; then
+        state_patch_status THREAD_MISMATCH
+        echo "Completed resume turn is not bound to the expected thread." >&2
+        return 2
+      fi
+      ;;
+    rotate)
+      if [[ -z "$previous" || "$found" == "$previous" ]]; then
+        state_patch_status ROTATE_FAILED_NO_THREAD
+        echo "Completed rotate turn did not establish a fresh thread." >&2
+        return 2
+      fi
+      if [[ "$stored" == "$previous" ]]; then
+        state_rotate_thread "$found" "$model" "$reasoning" "$rotation_reason"
+      elif [[ "$stored" != "$found" ]]; then
+        state_patch_status THREAD_MISMATCH
+        echo "Completed rotate turn thread identity does not match persisted state." >&2
+        return 2
+      fi
+      ;;
+    *)
+      state_patch_status THREAD_MISMATCH
+      echo "Unknown active turn mode: $mode" >&2
+      return 2
+      ;;
+  esac
+}
+
 recover_active_turn_state() {
   [[ -f "$state_file" ]] || return 0
-  local mode events result v2_log previous rotation_reason active_model active_reasoning found stored pid pid_file
+  local mode events result v2_log previous rotation_reason active_model active_reasoning found stored pid pid_file dispatch_rc consumed
   mode="$(jq -r '.active_mode // ""' "$state_file")"
   events="$(jq -r '.active_events // ""' "$state_file")"
   result="$(jq -r '.active_result // ""' "$state_file")"
@@ -304,31 +364,30 @@ recover_active_turn_state() {
     return 3
   fi
 
-  # A completed Codex turn may have written a valid structured result before the
-  # host crashed. Recover that exact result instead of replaying the instruction.
+  # A completed Codex turn is accepted only with the exact result path and the
+  # thread.started identity that belongs to this recorded turn.
   if [[ -n "$result" && -s "$result" ]]; then
     if ! validate_result "$result"; then
       state_patch_status INVALID_RESULT
       echo "Recovered completed turn has an invalid structured result: $result" >&2
       return 4
     fi
+    reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason" || return 4
 
-    # Recovery must enforce the same thread-identity gates as normal completion.
-    stored="$(jq -r '.thread_id // ""' "$state_file")"
-    case "$mode" in
-      start)
-        [[ -n "$stored" ]] || { state_patch_status START_FAILED_NO_THREAD; echo "Recovered start result has no established thread." >&2; return 4; }
-        ;;
-      rotate)
-        [[ -n "$stored" && "$stored" != "$previous" ]] || { state_patch_status ROTATE_FAILED_NO_THREAD; echo "Recovered rotate result has no fresh established thread." >&2; return 4; }
-        ;;
-      resume)
-        [[ -z "$previous" || "$stored" == "$previous" ]] || { state_patch_status THREAD_MISMATCH; echo "Recovered resume result is bound to the wrong thread." >&2; return 4; }
-        ;;
-    esac
-
+    set +e
     dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
-    recovered_turn_dispatched=1
+    dispatch_rc=$?
+    set -e
+    consumed="$(jq -r '.last_result // ""' "$state_file")"
+    if [[ "$consumed" == "$result" ]]; then
+      recovered_turn_dispatched=1
+      [[ -z "$pid_file" ]] || rm -f "$pid_file"
+      state_clear_active
+    else
+      echo "Recovered result was not durably consumed: $result" >&2
+      return "${dispatch_rc:-4}"
+    fi
+    return "$dispatch_rc"
   fi
 
   [[ -z "$pid_file" ]] || rm -f "$pid_file"
@@ -470,8 +529,18 @@ reconcile_pending_candidate() {
 
 commit_and_publish_candidate() {
   local result_file="$1" v2_log="$2" head parent tree remote_before
-  [[ -n "$(git -C "$worktree" status --porcelain)" ]] || { echo "CANDIDATE_READY produced no file changes; use NO_OP." >&2; return 1; }
-  run_candidate_v2 "$v2_log" || { state_patch_status V2_FAILED; echo "Host V2 failed; no Candidate published." >&2; return 4; }
+  if [[ -z "$(git -C "$worktree" status --porcelain)" ]]; then
+    state_patch_status INVALID_CANDIDATE_READY
+    state_set_last_result "$result_file"
+    echo "CANDIDATE_READY produced no file changes; use NO_OP." >&2
+    return 1
+  fi
+  if ! run_candidate_v2 "$v2_log"; then
+    state_patch_status V2_FAILED
+    state_set_last_result "$result_file"
+    echo "Host V2 failed; no Candidate published." >&2
+    return 4
+  fi
   git -C "$worktree" diff --check
   git -C "$worktree" add -A
   git -C "$worktree" diff --cached --check
@@ -480,7 +549,8 @@ commit_and_publish_candidate() {
   head="$(printf 'Implement Issue #%s\n' "$issue" | git -C "$worktree" commit-tree "$tree" -p "$parent")"
   remote_before=""
   if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then remote_before="$(git rev-parse "origin/$branch")"; fi
-  state_set_prepared_candidate "$head" "$parent" "$remote_before"
+  state_set_prepared_candidate "$result_file" "$head" "$parent" "$remote_before"
+  state_set_last_result "$result_file"
   git -C "$worktree" reset --hard "$head" >/dev/null
   state_patch_status COMMITTED_PENDING_PUSH "$head"
   publish_committed_candidate
@@ -496,53 +566,54 @@ $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
 }
 
 dispatch_result_file() {
-  local result_file="$1" v2_log="$2" result_status last_result rc=0 durable_status tmp
+  local result_file="$1" v2_log="$2" result_status last_result candidate_result current_status rc=0
   validate_result "$result_file" || return 13
   result_status="$(jq -r '.status' "$result_file")"
   last_result="$(jq -r '.last_result // ""' "$state_file")"
 
-  # Result paths are unique per Codex turn. Only this exact identity proves that
-  # this exact turn has already been consumed; ambient session statuses repeat.
+  # A result path is the durable identity of one Worker turn. Repeated statuses
+  # are never evidence that a different result has already been consumed.
   [[ "$last_result" != "$result_file" ]] || return 0
 
   case "$result_status" in
     CANDIDATE_READY)
+      candidate_result="$(jq -r '.candidate_result // ""' "$state_file")"
+      if [[ "$candidate_result" == "$result_file" ]]; then
+        set +e
+        reconcile_pending_candidate
+        rc=$?
+        set -e
+        state_set_last_result "$result_file"
+        return "$rc"
+      fi
       set +e
       commit_and_publish_candidate "$result_file" "$v2_log"
       rc=$?
       set -e
-      durable_status="$(jq -r '.status // ""' "$state_file")"
-      case "$durable_status" in
-        CANDIDATE|V2_FAILED|COMMIT_PREPARED|COMMITTED_PENDING_PUSH|PUBLISH_CONFIRMATION_PENDING|PUSHED_PENDING_GITHUB|PUBLISH_INCONCLUSIVE)
-          tmp="$state_file.tmp"
-          jq --arg result "$result_file" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
-          mv "$tmp" "$state_file"
-          ;;
-      esac
       return "$rc"
       ;;
     CONTINUE)
       state_patch_status CONTINUE
+      state_set_last_result "$result_file"
+      cat "$result_file"
       ;;
     BLOCKED)
-      # Consume locally before best-effort external comment persistence so the
-      # Worker turn itself is never replayed after a host crash.
       state_patch_status BLOCKED
+      state_set_last_result "$result_file"
+      persist_blocker "$result_file"
+      cat "$result_file"
       ;;
     NO_OP)
-      [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { state_patch_status INVALID_NO_OP; echo "NO_OP returned with file changes." >&2; return 14; }
+      if [[ -n "$(git -C "$worktree" status --porcelain)" ]]; then
+        state_patch_status INVALID_NO_OP
+        state_set_last_result "$result_file"
+        echo "NO_OP returned with file changes." >&2
+        return 14
+      fi
       state_patch_status NO_OP
+      state_set_last_result "$result_file"
+      cat "$result_file"
       ;;
-  esac
-
-  tmp="$state_file.tmp"
-  jq --arg result "$result_file" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
-  mv "$tmp" "$state_file"
-
-  case "$result_status" in
-    CONTINUE) cat "$result_file" ;;
-    BLOCKED) persist_blocker "$result_file"; cat "$result_file" ;;
-    NO_OP) cat "$result_file" ;;
   esac
 }
 
@@ -586,7 +657,7 @@ persist_live_thread_event() {
 
 run_codex_turn() {
   local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5" rotation_reason="${6:-}"
-  local stamp events result v2_log prompt_file pid_file pid rc=0 event_rc
+  local stamp events result v2_log prompt_file pid_file pid rc=0 event_rc dispatch_rc consumed
   stamp="$(date +%s)-$$"
   events="$results_dir/issue-$issue-$mode-$stamp.jsonl"
   result="$results_dir/issue-$issue-$mode-$stamp.result.json"
@@ -616,16 +687,32 @@ run_codex_turn() {
   rm -f "$prompt_file" "$pid_file"
   [[ $event_rc -ne 2 ]] || { state_patch_status THREAD_MISMATCH; state_clear_active; return 11; }
 
-  if [[ "$mode" == start && -z "$(jq -r '.thread_id // ""' "$state_file")" ]]; then state_patch_status START_FAILED_NO_THREAD; state_clear_active; echo "No thread.started event." >&2; return 10; fi
-  if [[ "$mode" == rotate && "$(jq -r '.thread_id // ""' "$state_file")" == "$thread_id" ]]; then state_patch_status ROTATE_FAILED_NO_THREAD; state_clear_active; echo "Rotation did not establish a fresh thread." >&2; return 11; fi
+  if [[ $event_rc -ne 0 ]]; then
+    case "$mode" in
+      start) state_patch_status START_FAILED_NO_THREAD ;;
+      rotate) state_patch_status ROTATE_FAILED_NO_THREAD ;;
+      *) state_patch_status THREAD_MISMATCH ;;
+    esac
+    state_clear_active
+    echo "No valid thread.started event for completed $mode turn." >&2
+    return 10
+  fi
 
   state_record_turn
   if [[ $rc -ne 0 ]]; then state_patch_status TURN_FAILED; state_clear_active; echo "Codex turn failed; worktree/session preserved." >&2; return "$rc"; fi
   [[ -s "$result" ]] || { state_patch_status EMPTY_RESULT; state_clear_active; echo "Codex produced no final result." >&2; return 12; }
   validate_result "$result" || { state_patch_status INVALID_RESULT; cat "$result" >&2; state_clear_active; return 13; }
+  reconcile_completed_turn_thread "$mode" "$events" "$thread_id" "$model" "$reasoning" "$rotation_reason" || { state_clear_active; return 11; }
 
+  set +e
   dispatch_result_file "$result" "$v2_log"
-  state_clear_active
+  dispatch_rc=$?
+  set -e
+  consumed="$(jq -r '.last_result // ""' "$state_file")"
+  if [[ "$consumed" == "$result" ]]; then
+    state_clear_active
+  fi
+  return "$dispatch_rc"
 }
 
 exit_after_recovered_turn() {
