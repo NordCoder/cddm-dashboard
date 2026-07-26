@@ -215,7 +215,7 @@ func (s *Service) ClaimNext(ctx context.Context, in ClaimRequest) (*Execution, e
 				}
 				return
 			}
-			if checkErr := s.current(ctx, candidate, in.WorkerSessionID); checkErr != nil {
+			if checkErr := s.current(ctx, candidate); checkErr != nil {
 				if !errors.Is(checkErr, ErrConflict) && !errors.Is(checkErr, ErrUnavailable) {
 					err = checkErr
 					return
@@ -225,6 +225,13 @@ func (s *Service) ClaimNext(ctx context.Context, in ClaimRequest) (*Execution, e
 					err = commitImmediate(ctx, conn)
 					committed = err == nil
 				}
+				return
+			}
+			// The claimant is not part of authoritative command currentness. A
+			// stale session must be rejected without destroying the pending right
+			// held by the session captured in the command snapshot.
+			if in.WorkerID != candidate.WorkerID || in.WorkerSessionID != candidate.WorkerSessionID {
+				err = ErrConflict
 				return
 			}
 			candidate.Status = StatusClaimed
@@ -419,7 +426,7 @@ func (s *Service) Cancel(ctx context.Context, commandID string) (Command, error)
 	return command, nil
 }
 
-func (s *Service) current(ctx context.Context, c Command, session string) error {
+func (s *Service) current(ctx context.Context, c Command) error {
 	result, err := s.planning.Get(ctx, c.ProjectID, c.IssueNumber, c.PlanID)
 	if err != nil {
 		return err
@@ -435,7 +442,7 @@ func (s *Service) current(ctx context.Context, c Command, session string) error 
 	if err != nil {
 		return err
 	}
-	if b.WorkerSessionID != session || b.BindingID != c.BindingID || b.BindingVersion != c.BindingVersion || b.WorkerID != c.WorkerID || b.TargetKind != c.TargetKind || b.TargetRef != c.TargetRef || b.PresenceToken != c.PresenceToken {
+	if b.BindingID != c.BindingID || b.BindingVersion != c.BindingVersion || b.WorkerID != c.WorkerID || b.WorkerSessionID != c.WorkerSessionID || b.TargetKind != c.TargetKind || b.TargetRef != c.TargetRef || b.PresenceToken != c.PresenceToken {
 		return ErrConflict
 	}
 	return nil

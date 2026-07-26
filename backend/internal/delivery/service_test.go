@@ -17,14 +17,22 @@ import (
 )
 
 type fakePlans struct {
-	result  planning.GenerationResult
-	summary planning.ContextSummary
+	result     planning.GenerationResult
+	summary    planning.ContextSummary
+	getErr     error
+	summaryErr error
 }
 
 func (f fakePlans) Get(context.Context, int64, int, int64) (planning.GenerationResult, error) {
+	if f.getErr != nil {
+		return planning.GenerationResult{}, f.getErr
+	}
 	return f.result, nil
 }
 func (f fakePlans) ContextSummary(context.Context, int64, int) (planning.ContextSummary, error) {
+	if f.summaryErr != nil {
+		return planning.ContextSummary{}, f.summaryErr
+	}
 	return f.summary, nil
 }
 
@@ -144,6 +152,83 @@ func TestDeliveryFallbackRequiresFinalApprovedPolicy(t *testing.T) {
 	plans.result.PolicyDecision.Status = planning.StatusRejected
 	if _, err := service.Create(context.Background(), projectID, 7, fixtureConfirmation("fallback-rejected")); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rejected fallback error = %v", err)
+	}
+}
+
+func TestDeliveryRejectsInvalidPlanCreationInputs(t *testing.T) {
+	ctx := context.Background()
+	_, service, plans, _, projectID := deliveryFixture(t)
+
+	plans.result.Status = planning.StatusRejected
+	if _, err := service.Create(ctx, projectID, 7, fixtureConfirmation("rejected-plan")); !errors.Is(err, ErrConflict) {
+		t.Fatalf("rejected plan error = %v", err)
+	}
+
+	plans.result.Status = planning.StatusApproved
+	plans.getErr = errors.New("planner read failed")
+	if _, err := service.Create(ctx, projectID, 7, fixtureConfirmation("planner-error")); !errors.Is(err, plans.getErr) {
+		t.Fatalf("planner read error = %v", err)
+	}
+
+	plans.getErr = nil
+	plans.summary.Route.Action = "manual_attention"
+	if _, err := service.Create(ctx, projectID, 7, fixtureConfirmation("non-dispatchable")); !errors.Is(err, ErrConflict) {
+		t.Fatalf("non-dispatchable plan error = %v", err)
+	}
+}
+
+func TestClaimRejectsWrongSessionWithoutInvalidatingPendingCommand(t *testing.T) {
+	ctx := context.Background()
+	_, service, _, _, projectID := deliveryFixture(t)
+	command, err := service.Create(ctx, projectID, 7, fixtureConfirmation("wrong-session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution, err := service.ClaimNext(ctx, ClaimRequest{WorkerID: "worker", WorkerSessionID: "session-b", ClaimRequestID: "wrong-session-claim"}); !errors.Is(err, ErrConflict) || execution != nil {
+		t.Fatalf("wrong-session claim = %#v, %v", execution, err)
+	}
+	var status string
+	if err := service.db.QueryRowContext(ctx, "SELECT status FROM delivery_commands WHERE id=?", command.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != StatusPending {
+		t.Fatalf("wrong-session mutated command to %q", status)
+	}
+	execution, err := service.ClaimNext(ctx, ClaimRequest{WorkerID: "worker", WorkerSessionID: "session", ClaimRequestID: "correct-session-claim"})
+	if err != nil || execution == nil {
+		t.Fatalf("correct-session claim = %#v, %v", execution, err)
+	}
+	if execution.Command.Status != StatusClaimed {
+		t.Fatalf("claimed status = %q", execution.Command.Status)
+	}
+}
+
+func TestDeliveryIsolatesSameProjectWorkUnits(t *testing.T) {
+	ctx := context.Background()
+	_, service, plans, binding, projectID := deliveryFixture(t)
+	first, err := service.Create(ctx, projectID, 7, fixtureConfirmation("work-unit"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans.result.Plan.LaneKey = "acme/service#8:implementor"
+	plans.summary.Route.LaneKey = "acme/service#8:implementor"
+	binding.value.LaneKey = "acme/service#8:implementor"
+	secondInput := fixtureConfirmation("work-unit")
+	secondInput.ExpectedLaneKey = "acme/service#8:implementor"
+	second, err := service.Create(ctx, projectID, 8, secondInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID || second.IssueNumber != 8 {
+		t.Fatalf("work-unit commands = %#v, %#v", first, second)
+	}
+	firstList, err := service.List(ctx, projectID, 7)
+	if err != nil || len(firstList) != 1 || firstList[0].ID != first.ID {
+		t.Fatalf("work-unit 7 list = %#v, %v", firstList, err)
+	}
+	secondList, err := service.List(ctx, projectID, 8)
+	if err != nil || len(secondList) != 1 || secondList[0].ID != second.ID {
+		t.Fatalf("work-unit 8 list = %#v, %v", secondList, err)
 	}
 }
 
