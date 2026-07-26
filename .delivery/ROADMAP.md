@@ -36,23 +36,26 @@ A user can take a current policy-approved Prompt Plan, inspect the intended brow
 
 #### Changes
 
-| Change | Depends on | Risk | Activation |
+| Change | Depends on | Risk | State after bootstrap |
 | --- | --- | --- | --- |
-| #17 — Delivery command contract | process bootstrap #16 | High | Ready on bootstrap merge |
-| #18 — Browser identity and lane binding | process bootstrap #16 | High | Ready on bootstrap merge |
+| #17 — Delivery command contract | process bootstrap #16 | High | Ready for shaping |
+| #18 — Browser identity and lane binding | process bootstrap #16 | High | Ready for shaping |
 | #19 — Chrome extension execution | #17, #18 | High | Blocked |
 | #20 — Confirmed delivery UX | #17; integrates #18 binding | High | Blocked |
 | #21 — End-to-end hardening | #18, #19, #20 | High | Blocked |
 
+`Ready for shaping` means the Change may begin contract/design work in an isolated worktree. Product-code implementation starts only after the canonical Change Contract resolves its material Design decisions and becomes implementation-ready.
+
 #### Parallel Plan
 
 ```text
-Wave 1:  #17 + #18
-Wave 2:  #19 + #20
-Wave 3:  #21
+Shaping Wave 1:        #17 + #18
+Implementation Wave 1: #17 + #18 after each contract is independently ready
+Downstream Wave 2:     #19 + #20 after dependencies
+Integration Wave 3:    #21
 ```
 
-Wave membership is descriptive, not a lifecycle state. A Change starts only when its material dependencies are satisfied and no shared-contract conflict is unresolved.
+Wave membership is descriptive, not a lifecycle state. A Change starts only when its current activity's material dependencies are satisfied and no shared-contract conflict is unresolved.
 
 #### Exit Gate
 

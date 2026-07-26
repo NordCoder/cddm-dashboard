@@ -3,6 +3,7 @@
 Milestone: M6 — Browser Prompt Delivery
 Risk: High
 Issue: #17
+Execution state: Ready for shaping; not implementation-ready
 
 ## Outcome
 
@@ -28,7 +29,17 @@ Introduce the backend-owned delivery-command contract required to deliver one cu
 
 ## Design
 
-This Change owns a shared downstream contract. Command schema, idempotency identity, lifecycle, expiry/retry semantics, and persistence boundary must be explicit before #19/#20 rely on them.
+Status: **Pending shaping.** Product-code implementation MUST NOT begin until the canonical contract fixes the material decisions below.
+
+Shaping must determine:
+
+- command schema and stable/idempotency identity;
+- lifecycle and legal state transitions;
+- expiry, cancellation, retry, acknowledgement, and duplicate semantics;
+- persistence/restart boundary;
+- API ownership and authorization/confirmation boundary;
+- compatibility boundary consumed by #19 and #20;
+- rollback or safe-disable behavior.
 
 ## Verification
 
@@ -44,4 +55,4 @@ This Change owns a shared downstream contract. Command schema, idempotency ident
 
 Product dependencies: none.
 Operational dependency: bootstrap #16 merged.
-Parallel-eligible with #18 unless investigation discovers a shared mutable surface.
+Parallel-eligible with #18 for shaping unless investigation discovers a shared mutable surface.

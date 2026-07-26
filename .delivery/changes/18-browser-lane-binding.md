@@ -3,6 +3,7 @@
 Milestone: M6 — Browser Prompt Delivery
 Risk: High
 Issue: #18
+Execution state: Ready for shaping; not implementation-ready
 
 ## Outcome
 
@@ -28,7 +29,20 @@ Provide an explicit backend-owned binding between a deterministic workflow lane 
 
 ## Design
 
-This Change owns browser identity and binding semantics but must not redefine Stage 3 lane routing authority. Define identity, liveness/staleness, target representation, rebinding semantics, and persistence boundary explicitly before #19 depends on them.
+Status: **Pending shaping.** Product-code implementation MUST NOT begin until the canonical contract fixes the material decisions below.
+
+Shaping must determine:
+
+- browser worker identity and registration model;
+- lane/binding key and target representation;
+- liveness, stale, unavailable, and conflict semantics;
+- explicit rebind behavior and interaction with existing delivery intents;
+- persistence/restart boundary;
+- minimum credential/secret exposure;
+- API ownership consumed by dashboard and #19;
+- rollback or safe-disable behavior.
+
+The design must preserve Stage 3 lane routing authority rather than creating a second router.
 
 ## Verification
 
@@ -44,4 +58,4 @@ This Change owns browser identity and binding semantics but must not redefine St
 
 Product dependencies: none.
 Operational dependency: bootstrap #16 merged.
-Parallel-eligible with #17 unless investigation discovers a shared mutable surface.
+Parallel-eligible with #17 for shaping unless investigation discovers a shared mutable surface.

@@ -17,6 +17,7 @@ For repository development, use the following canonical context in order:
 - Work on one Change in one non-default branch/worktree with one primary Implementor.
 - Never modify `main` directly.
 - Read only the repository surfaces needed for the current Change; expand context when evidence requires it.
+- High-risk work with unresolved material Design is Ready for shaping, not implementation. Shape the canonical Change Contract before product-code writes.
 - Implement the smallest maintainable solution that satisfies the current Change and preserves the Active Milestone.
 - Future Roadmap work is context, not Scope. Do not implement it speculatively.
 - Resolve ordinary engineering choices from code, tests, conventions, and standard practice. Stop only for material ambiguity that changes Outcome, Scope, architecture, security, persistence semantics, compatibility, or authority.
@@ -77,7 +78,8 @@ GitHub CI is an independent clean-environment gate, not the primary debugging lo
 
 Use repository skills when applicable:
 
-- `$cddm-implement` — execute a Ready Change.
+- `$cddm-shape` — resolve a Medium/High Change contract and material Design before implementation.
+- `$cddm-implement` — execute an implementation-ready Change.
 - `$cddm-review` — independently review an exact Candidate.
 - `$cddm-investigate` — resolve an uncertain defect or contract question without speculative writes.
 - `$cddm-fix-ci` — diagnose a failed Candidate check and reproduce locally before correction.
