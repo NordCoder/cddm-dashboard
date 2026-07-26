@@ -27,6 +27,7 @@ const (
 	defaultOpenCodeMaxRequestBytes  = 256 << 10
 	defaultPromptEvidenceLimit      = 12
 	defaultPromptEvidenceChars      = 4000
+	defaultBrowserBindingTTL        = 30 * time.Second
 )
 
 type Config struct {
@@ -54,6 +55,7 @@ type Config struct {
 	PromptFallbackEnabled     bool
 	PromptEvidenceLimit       int
 	PromptEvidenceChars       int
+	BrowserBindingTTL         time.Duration
 }
 
 func Load() (Config, error) {
@@ -113,6 +115,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	browserBindingTTL, err := durationFromEnv("BROWSER_BINDING_TTL", defaultBrowserBindingTTL)
+	if err != nil {
+		return Config{}, err
+	}
 
 	config := Config{
 		Address:                   stringFromEnv("APP_ADDR", defaultAddress),
@@ -139,6 +145,7 @@ func Load() (Config, error) {
 		PromptFallbackEnabled:     fallbackEnabled,
 		PromptEvidenceLimit:       evidenceLimit,
 		PromptEvidenceChars:       evidenceChars,
+		BrowserBindingTTL:         browserBindingTTL,
 	}
 	if config.OpenCodeEnabled && (config.OpenCodeProvider == "" || config.OpenCodeModel == "") {
 		return Config{}, fmt.Errorf("OPENCODE_PROVIDER and OPENCODE_MODEL are required when OPENCODE_ENABLED=true")
@@ -148,6 +155,9 @@ func Load() (Config, error) {
 	}
 	if config.PromptEvidenceChars < 256 {
 		return Config{}, fmt.Errorf("PROMPT_EVIDENCE_CHARS must be at least 256")
+	}
+	if config.BrowserBindingTTL < 5*time.Second || config.BrowserBindingTTL > 5*time.Minute {
+		return Config{}, fmt.Errorf("BROWSER_BINDING_TTL must be between 5s and 5m")
 	}
 	return config, nil
 }

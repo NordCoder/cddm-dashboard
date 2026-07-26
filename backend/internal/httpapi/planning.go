@@ -35,8 +35,12 @@ type generatePlanRequest struct {
 }
 
 func NewWithPlanning(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollInterval time.Duration, planningService PlanningService) http.Handler {
+	return NewWithPlanningAndBindingTTL(db, store, syncer, defaultPollInterval, planningService, 30*time.Second)
+}
+
+func NewWithPlanningAndBindingTTL(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollInterval time.Duration, planningService PlanningService, bindingTTL time.Duration) http.Handler {
 	return &planningHandler{
-		legacy:   New(db, store, syncer, defaultPollInterval),
+		legacy:   NewWithBindingTTL(db, store, syncer, defaultPollInterval, bindingTTL),
 		planning: planningService,
 	}
 }
