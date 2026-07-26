@@ -13,6 +13,11 @@ prefix_rule(
     justification="Workers may refresh remote state for the current Change.",
 )
 prefix_rule(
+    pattern=["git", "push"],
+    decision="allow",
+    justification="Workers may publish the current Change branch/Candidate; stricter destructive push rules below override this allow.",
+)
+prefix_rule(
     pattern=["gh", "issue", ["view", "list", "status"]],
     decision="allow",
     justification="Workers may read Issue state.",
@@ -71,15 +76,17 @@ prefix_rule(
     decision="prompt",
     justification="Prefer bounded typed gh commands; gh api can bypass Worker authority boundaries.",
 )
+
+# Destructive push variants override the generic push allow above.
 prefix_rule(
-    pattern=["git", "push", "--force"],
+    pattern=["git", "push", ["--force", "-f", "--force-with-lease", "--mirror", "--delete"]],
     decision="forbidden",
-    justification="Published Candidate history must not be rewritten.",
+    justification="Workers must not rewrite or delete published remote history.",
 )
 prefix_rule(
-    pattern=["git", "push", "-f"],
+    pattern=["git", "push", "origin", ["--force", "-f", "--force-with-lease", "--mirror", "--delete"]],
     decision="forbidden",
-    justification="Published Candidate history must not be rewritten.",
+    justification="Workers must not rewrite or delete published remote history on origin.",
 )
 prefix_rule(
     pattern=["git", "reset", "--hard"],

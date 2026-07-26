@@ -82,7 +82,7 @@ if [[ "$control_branch" != "main" ]]; then
   exit 1
 fi
 
-# Fail before spending a model call when credentials or command policy are invalid.
+# Fail before spending a model call when credentials are missing.
 gh auth status >/dev/null 2>&1 || {
   echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
   exit 1
@@ -92,17 +92,20 @@ codex login status >/dev/null 2>&1 || {
   exit 1
 }
 
+# The controlling checkout is orchestration state only. Generated worktrees are ignored.
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  echo "Controlling checkout has tracked local changes; refusing to update or derive worker state from it." >&2
+  exit 1
+fi
+
+# Always launch from the current canonical main and current project prompts/rules.
+git fetch origin main --quiet
+git merge --ff-only origin/main --quiet
+
 rules_path="$repo_root/.codex/rules/default.rules"
 [[ -f "$rules_path" ]] || { echo "Missing Codex rules: $rules_path" >&2; exit 1; }
 codex execpolicy check --rules "$rules_path" -- git status >/dev/null
 
-# The controlling checkout is orchestration state only. Generated worktrees are ignored.
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo "Controlling checkout has tracked local changes; refusing to derive worker state from it." >&2
-  exit 1
-fi
-
-git fetch origin main --quiet
 mkdir -p "$repo_root/.worktrees"
 
 if [[ "$activity" == "review" ]]; then
