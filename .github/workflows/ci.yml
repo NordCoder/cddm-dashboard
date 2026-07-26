@@ -83,11 +83,13 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
       - name: Verify checkout identity
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-      - name: Validate Codex worker scripts
+      - name: Validate Codex host scripts
         run: |
-          bash -n scripts/cddm-codex-worker.sh
+          bash -n scripts/cddm-codex-change.sh
           bash -n scripts/cddm-publish-branch.sh
       - name: Validate Codex project config
         run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
+      - name: Validate Codex result schema
+        run: python3 -c 'import json, pathlib; json.loads(pathlib.Path(".codex/schemas/change-turn-result.json").read_text())'
       - name: Validate configuration
         run: docker compose config --quiet

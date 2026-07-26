@@ -1,18 +1,18 @@
-# Project-scoped Codex Worker defaults. Loaded only when this repository is trusted.
-# Task-specific model tier and reasoning effort are selected by the Web Lead.
+# Project-scoped defaults for CDDM Codex Minimal 3.0 WebLead Change Workers.
+# The Web Lead chooses the model/effort; the Host passes them explicitly on every start/resume.
 
-# Workers never need interactive elevation: host-side orchestration performs Git/GitHub writes.
 approval_policy = "never"
 sandbox_mode = "workspace-write"
 web_search = "cached"
 model_reasoning_summary = "none"
 model_verbosity = "low"
 
-# Shell/network access is disabled for Workers. The trusted host supplies Issue/PR/CI
-# context and performs dependency-capable Candidate verification outside the model sandbox.
 [sandbox_workspace_write]
 network_access = false
 
-# CDDM parallelism is Change/worktree-level, not an internal swarm inside one Change.
+[features]
+goals = true
+
+# Parallelism is Change/worktree-level. One Change keeps one primary persistent thread.
 [agents]
 enabled = false

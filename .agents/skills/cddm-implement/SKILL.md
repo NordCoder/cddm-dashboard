@@ -1,26 +1,19 @@
 ---
 name: cddm-implement
-description: Execute one implementation-ready CDDM Codex Change in the current repository. Use for feature, bug-fix, refactor, or process implementation after material Design and dependencies are resolved.
+description: Implement or continue one WebLead-approved Change using the existing Change Contract. Use in a persistent Change session for initial implementation and bounded QA/CI corrections.
 ---
 
 # CDDM Implement
 
-1. Read `AGENTS.md`, `.delivery/PRODUCT.md`, `.delivery/PRINCIPLES.md`, the Active Milestone, host-supplied Issue context, and the current Change contract.
-2. Confirm the Change is implementation-ready: dependencies satisfied, material Design resolved, and current worktree is the bounded Change worktree.
-3. Locate only relevant code, callers, tests, schemas, and configuration. Do not inventory the whole repository without evidence that it is necessary.
-4. Implement the smallest maintainable solution inside Scope. Do not implement future Roadmap work.
-5. Run the cheapest relevant local verifier after coherent edits and fix locally reproducible failures locally.
-6. Before returning `DONE`, run practical affected checks available without network access and inspect the full diff.
-7. Do not weaken tests, invariants, or policy to obtain green checks. Do not add secrets or local environment data.
-8. Do not stage, commit, push, or write GitHub state; the host launcher performs authoritative full V2 and creates/publishes the Candidate only after a successful result.
-9. Stop when the implementation is locally coherent. Do not perform unrelated cleanup.
+1. Read `AGENTS.md`, the current Change Contract, host-supplied Issue/Lead instruction, and only relevant code/tests.
+2. Treat the Change Contract as authoritative for WHAT and HARD HOW.
+3. Own only LITE HOW: private implementation structure, local helpers/types, test organization, and bounded refactoring inside the approved architecture.
+4. On the first turn, create a Goal if goal tools are available. The Goal is optional execution assistance and MUST NOT replace the Change Contract.
+5. Maintain a private Task plan. Do not persist or narrate Tasks to GitHub.
+6. Implement the smallest maintainable solution inside Scope and run the cheapest relevant V1 checks while working.
+7. If the approved HARD HOW conflicts with repository facts, stop and return `BLOCKED` with concise evidence rather than silently redesigning the system.
+8. For resumed QA/CI corrections, change only what the Web Lead instruction requires unless evidence proves the contract itself is invalid.
+9. Never stage, commit, push, use `gh`, or write GitHub state. The Host owns V2 and Candidate publication.
+10. Stop at locally candidate-ready state; do not perform unrelated cleanup.
 
-Final response, exactly:
-
-```text
-ACTIVITY: IMPLEMENT
-STATUS: DONE | BLOCKED | NO-OP
-CHANGED: <bounded summary>
-VERIFY: <checks and results>
-BLOCKER: <only if material; otherwise none>
-```
+Return only the JSON object required by the host output schema.

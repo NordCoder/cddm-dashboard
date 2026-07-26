@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "verify", "blocker"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["CANDIDATE_READY", "CONTINUE", "BLOCKED", "NO_OP"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200
+    },
+    "verify": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200
+    },
+    "blocker": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200
+    }
+  }
+}

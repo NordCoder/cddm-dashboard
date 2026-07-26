@@ -16,7 +16,7 @@
 
 Status: **Pending**.
 
-Product-code development for M6 MUST NOT begin until the Owner approves this Milestone Outcome, bounded Change set, dependencies/parallel plan, key risks, and Exit Gate. Technical preparation of the WebLead worker runtime is independent of this approval.
+Product-code development for M6 MUST NOT begin until the Owner approves this Milestone Outcome, bounded Change set, dependencies/parallel plan, key risks, and Exit Gate. Technical preparation of the WebLead 3.0 runtime is independent of this approval.
 
 #### Outcome
 
@@ -44,27 +44,27 @@ A user can take a current policy-approved Prompt Plan, inspect the intended brow
 
 | Change | Depends on | Risk | State before Owner approval |
 | --- | --- | --- | --- |
-| #17 — Delivery command contract | process bootstrap #16 | High | Planned — shaping after approval |
-| #18 — Browser identity and lane binding | process bootstrap #16 | High | Planned — shaping after approval |
+| #17 — Delivery command contract | process bootstrap #16 | High | Planned — Web Lead shaping after approval |
+| #18 — Browser identity and lane binding | process bootstrap #16 | High | Planned — Web Lead shaping after approval |
 | #19 — Chrome extension execution | #17, #18 | High | Blocked |
 | #20 — Confirmed delivery UX | #17; integrates #18 binding | High | Blocked |
 | #21 — End-to-end hardening | #18, #19, #20 | High | Blocked |
 
-After Owner approval, #17 and #18 become Ready for Shaping. Product-code implementation starts only after each canonical Change Contract resolves its material Design decisions and becomes Ready for Implementation.
+After Owner approval, the Web Lead shapes #17 and #18: WHAT and material HARD HOW are fixed in each canonical Change Contract. Only then does each Change start one persistent Codex implementation session.
 
 #### Parallel Plan
 
 ```text
 Owner approval
 ↓
-Shaping Wave 1:         #17 + #18
+Web Lead shaping:       #17 + #18
 Lead reconciliation
-Implementation Wave 1: #17 + #18 after each contract is independently ready
-Downstream Wave 2:     #19 + #20 after dependencies
-Integration Wave 3:    #21
+Implementation Wave 1:  #17 + #18 persistent Codex sessions
+Downstream Wave 2:      #19 + #20 after dependencies
+Integration Wave 3:     #21
 ```
 
-Wave membership is descriptive, not a lifecycle state. A Change starts only when its current activity's material dependencies are satisfied and no shared-contract conflict is unresolved.
+Wave membership is descriptive, not a lifecycle state. Unresolved HARD HOW is never delegated into parallel Worker decisions.
 
 #### Key Risks
 
@@ -85,7 +85,9 @@ M6 is accepted only when:
 - backend/browser restart does not silently replay a completed consequential command;
 - Project/lane isolation is demonstrated;
 - Chrome extension does not read or persist ChatGPT response content;
-- required local verification, exact-Head CI, independent safety review, and Web Lead acceptance are complete;
+- required local verification and exact-Head CI are complete;
+- Web Lead QA accepts each required current Candidate and the integrated Outcome;
+- additional independent review is complete where the Web Lead determines the residual risk warrants it;
 - Owner accepts the integrated Milestone Outcome;
 - manual Copy fallback remains usable unless a later approved Change explicitly removes it.
 

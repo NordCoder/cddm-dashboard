@@ -1,24 +1,21 @@
-# CDDM WebLead Worker command policy.
-# Workers reason/edit/test locally. The trusted host launcher owns Git metadata,
-# networked dependency verification, and all GitHub delivery writes.
+# CDDM WebLead 3.0 Worker command policy.
+# Workers edit/test locally in one persistent Change session.
+# The trusted Host Runtime owns Git state transitions and GitHub transport.
 
-# Routine repository inspection.
 prefix_rule(
     pattern=["git", ["status", "diff", "log", "show", "rev-parse", "ls-files"]],
     decision="allow",
     justification="Workers may inspect local repository state and diffs.",
 )
 
-# Git metadata and remote operations belong to the trusted host launcher.
 prefix_rule(
     pattern=["git", ["add", "commit", "fetch", "pull", "push", "checkout", "switch", "merge", "rebase", "reset", "clean", "remote", "tag", "branch"]],
     decision="forbidden",
-    justification="Workers edit and verify files; host orchestration owns Git state transitions and publication.",
+    justification="Persistent Change Workers edit and verify files; Host Runtime owns Git state transitions and publication.",
 )
 
-# Workers receive Issue/PR/CI context from the host and do not access GitHub directly.
 prefix_rule(
     pattern=["gh"],
     decision="forbidden",
-    justification="GitHub inspection and all GitHub writes are host/Web Lead authority; Worker prompts receive bounded host context.",
+    justification="GitHub state is supplied by the Host/Web Lead; Workers never access GitHub directly.",
 )
