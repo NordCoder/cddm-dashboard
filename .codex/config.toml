@@ -12,19 +12,22 @@ allow_login_shell = false
 description = "Edit only the current project worktree without shell network or host credential access"
 extends = ":workspace"
 
+# Files outside the runtime workspace must be expressed as absolute, ~/..., or
+# symbolic paths. These home-relative entries protect common host credentials.
 [permissions."cddm-worker".filesystem]
 glob_scan_max_depth = 8
-"**/.git-credentials" = "deny"
-"**/.netrc" = "deny"
-"**/.ssh/**" = "deny"
-"**/.gnupg/**" = "deny"
-"**/.config/gh/**" = "deny"
-"**/.aws/**" = "deny"
-"**/.azure/**" = "deny"
-"**/.kube/**" = "deny"
-"**/.docker/config.json" = "deny"
-"**/.codex/auth.json" = "deny"
+"~/.git-credentials" = "deny"
+"~/.netrc" = "deny"
+"~/.ssh/**" = "deny"
+"~/.gnupg/**" = "deny"
+"~/.config/gh/**" = "deny"
+"~/.aws/**" = "deny"
+"~/.azure/**" = "deny"
+"~/.kube/**" = "deny"
+"~/.docker/config.json" = "deny"
+"~/.codex/auth.json" = "deny"
 
+# Globs below are intentionally relative to the active Change worktree.
 [permissions."cddm-worker".filesystem.":workspace_roots"]
 "." = "write"
 ".git" = "read"
