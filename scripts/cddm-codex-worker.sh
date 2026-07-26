@@ -76,7 +76,13 @@ done
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-# Fail early on missing authentication rather than spending a model call.
+control_branch="$(git branch --show-current)"
+if [[ "$control_branch" != "main" ]]; then
+  echo "Run the launcher from the clean controlling 'main' checkout, not '$control_branch'." >&2
+  exit 1
+fi
+
+# Fail before spending a model call when credentials or command policy are invalid.
 gh auth status >/dev/null 2>&1 || {
   echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
   exit 1
@@ -86,7 +92,11 @@ codex login status >/dev/null 2>&1 || {
   exit 1
 }
 
-# The controlling checkout is only an orchestration root. Generated worktrees are ignored.
+rules_path="$repo_root/.codex/rules/default.rules"
+[[ -f "$rules_path" ]] || { echo "Missing Codex rules: $rules_path" >&2; exit 1; }
+codex execpolicy check --rules "$rules_path" git status >/dev/null
+
+# The controlling checkout is orchestration state only. Generated worktrees are ignored.
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   echo "Controlling checkout has tracked local changes; refusing to derive worker state from it." >&2
   exit 1
@@ -106,7 +116,6 @@ if [[ "$activity" == "review" ]]; then
     exit 1
   }
 
-  # Ensure the exact Candidate object exists locally even when the PR branch is not checked out.
   git fetch origin "pull/$pr/head" --quiet
 
   worktree="$repo_root/.worktrees/review-pr-$pr"
