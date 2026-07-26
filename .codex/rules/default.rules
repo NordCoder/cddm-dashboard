@@ -1,0 +1,98 @@
+# CDDM WebLead worker command policy.
+# AGENTS.md remains the authority boundary; these rules add command-level guardrails.
+
+# Routine local/read operations.
+prefix_rule(
+    pattern=["git", ["status", "diff", "log", "show", "rev-parse", "branch"]],
+    decision="allow",
+    justification="Routine repository inspection is normal Worker activity.",
+)
+prefix_rule(
+    pattern=["git", "fetch"],
+    decision="allow",
+    justification="Workers may refresh remote state for the current Change.",
+)
+prefix_rule(
+    pattern=["gh", "issue", ["view", "list", "status"]],
+    decision="allow",
+    justification="Workers may read Issue state.",
+)
+prefix_rule(
+    pattern=["gh", "pr", ["view", "list", "checks", "diff", "status"]],
+    decision="allow",
+    justification="Workers may inspect PR and exact-Candidate evidence.",
+)
+prefix_rule(
+    pattern=["gh", "run", ["view", "list", "watch"]],
+    decision="allow",
+    justification="Workers may inspect CI for the current Candidate.",
+)
+
+# Bounded delivery writes permitted by AGENTS.md.
+prefix_rule(
+    pattern=["gh", "pr", "create"],
+    decision="allow",
+    justification="A Worker may create the current Change PR.",
+)
+prefix_rule(
+    pattern=["gh", "pr", "comment"],
+    decision="allow",
+    justification="A Worker may persist one compact activity result on the current PR.",
+)
+prefix_rule(
+    pattern=["gh", "pr", "ready"],
+    decision="allow",
+    justification="An implementation Worker may mark its Candidate-ready PR ready for review.",
+)
+prefix_rule(
+    pattern=["gh", "issue", "comment"],
+    decision="allow",
+    justification="Material investigation evidence may be persisted to the current Issue.",
+)
+
+# Consequential actions remain outside Worker authority.
+prefix_rule(
+    pattern=["gh", "pr", "merge"],
+    decision="forbidden",
+    justification="Workers prepare merge-ready state; merge authority belongs to the Web Lead/Owner gate.",
+)
+prefix_rule(
+    pattern=["gh", "pr", "close"],
+    decision="forbidden",
+    justification="Workers do not close delivery records.",
+)
+prefix_rule(
+    pattern=["gh", "issue", "close"],
+    decision="forbidden",
+    justification="Workers do not close Issues.",
+)
+prefix_rule(
+    pattern=["gh", "api"],
+    decision="prompt",
+    justification="Prefer bounded typed gh commands; gh api can bypass Worker authority boundaries.",
+)
+prefix_rule(
+    pattern=["git", "push", "--force"],
+    decision="forbidden",
+    justification="Published Candidate history must not be rewritten.",
+)
+prefix_rule(
+    pattern=["git", "push", "-f"],
+    decision="forbidden",
+    justification="Published Candidate history must not be rewritten.",
+)
+prefix_rule(
+    pattern=["git", "reset", "--hard"],
+    decision="forbidden",
+    justification="Destructive repository reset is outside bounded Worker activity.",
+)
+prefix_rule(
+    pattern=["git", "clean", ["-fd", "-fdx"]],
+    decision="forbidden",
+    justification="Destructive workspace cleanup is outside bounded Worker activity.",
+)
+prefix_rule(
+    pattern=["git", "branch", "-D"],
+    decision="forbidden",
+    justification="Destructive branch deletion is outside bounded Worker activity.",
+)
