@@ -11,14 +11,18 @@ description: Diagnose and repair a failed exact-Candidate CI check under CDDM Co
 4. Reproduce the failure locally when practical using the same or closest repository command.
 5. Change code only when evidence supports an implementation defect. Do not create a compensating code change for infrastructure failure.
 6. After correction, run the cheapest relevant V1 checks, then practical V2 Candidate verification.
-7. A correction creates a new Candidate. Old CI and review authority are stale; publish and verify the new exact Head.
+7. A correction creates a new Candidate. Commit and push the new Head on the existing Change branch; old CI/review authority is stale.
+8. Post exactly one final `CDDM Worker Result` comment to the current PR. Do not post progress comments.
 
-Return only:
+Result schema:
 
 ```text
+ACTIVITY: FIX_CI
 STATUS: FIXED | INFRA_FAILURE | BLOCKED | INCONCLUSIVE
+OLD_HEAD: <sha>
+NEW_HEAD: <sha or none>
 CAUSE: <concise classification>
 CHANGED: <bounded summary or none>
 VERIFY: <local checks>
-NEXT: <new Candidate CI / retry / required decision>
+NEXT: <new exact-Head CI / retry / required decision>
 ```
