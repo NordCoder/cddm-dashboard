@@ -375,6 +375,18 @@ func (s *Service) pruneLocked(now time.Time) {
 func (s *Service) markConflictLocked(workerID string) {
 	by := s.sessions[workerID]
 	conflict := len(by) > 1
+	wasConflict := false
+	for _, v := range by {
+		wasConflict = wasConflict || v.conflict
+	}
+	if conflict && !wasConflict {
+		// A conflict invalidates every prior observation for this installation.
+		// If one session later wins by staleness, it must prove freshness with a
+		// token that cannot equal any token usable before the conflict.
+		for _, v := range by {
+			v.token = randomID()
+		}
+	}
 	for _, v := range by {
 		v.conflict = conflict
 	}
