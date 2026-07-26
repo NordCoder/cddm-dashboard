@@ -91,5 +91,15 @@ jobs:
         run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
       - name: Validate Codex result schema
         run: python3 -c 'import json, pathlib; json.loads(pathlib.Path(".codex/schemas/change-turn-result.json").read_text())'
+      - name: Validate persistent-session invariants
+        run: |
+          ! grep -q -- '--ephemeral' scripts/cddm-codex-change.sh
+          grep -q -- '--ignore-user-config' scripts/cddm-codex-change.sh
+          grep -q 'resume "$thread_id"' scripts/cddm-codex-change.sh
+          grep -q 'thread.started' scripts/cddm-codex-change.sh
+          grep -q 'thread_history' scripts/cddm-codex-change.sh
+          test -f .codex/prompts/change-start.md
+          test -f .codex/prompts/change-resume.md
+          test -f .codex/prompts/change-rotate.md
       - name: Validate configuration
         run: docker compose config --quiet
