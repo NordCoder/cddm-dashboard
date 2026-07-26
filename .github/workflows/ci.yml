@@ -86,6 +86,8 @@ jobs:
       - name: Validate Codex host scripts
         run: |
           bash -n scripts/cddm-codex-change.sh
+          bash -n scripts/cddm-codex-change-core.sh
+          bash -n scripts/cddm-codex-worker-shim.sh
           bash -n scripts/cddm-publish-branch.sh
       - name: Validate Codex project config
         run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
@@ -93,14 +95,17 @@ jobs:
         run: python3 -c 'import json, pathlib; json.loads(pathlib.Path(".codex/schemas/change-turn-result.json").read_text())'
       - name: Validate persistent-session invariants
         run: |
-          ! grep -q -- '--ephemeral' scripts/cddm-codex-change.sh
-          grep -q -- '--ignore-user-config' scripts/cddm-codex-change.sh
-          grep -q 'resume "$thread_id"' scripts/cddm-codex-change.sh
-          grep -q 'thread.started' scripts/cddm-codex-change.sh
-          grep -q 'thread_history' scripts/cddm-codex-change.sh
-          grep -q 'START_FAILED_NO_THREAD' scripts/cddm-codex-change.sh
-          grep -q 'PUSHED_PENDING_GITHUB' scripts/cddm-codex-change.sh
-          grep -q 'Pending Candidate reconciliation must succeed before another Codex turn' scripts/cddm-codex-change.sh
+          ! grep -q -- '--ephemeral' scripts/cddm-codex-change-core.sh
+          grep -q -- '--ignore-user-config' scripts/cddm-codex-change-core.sh
+          grep -q 'resume "$thread_id"' scripts/cddm-codex-change-core.sh
+          grep -q 'thread.started' scripts/cddm-codex-change-core.sh
+          grep -q 'thread_history' scripts/cddm-codex-change-core.sh
+          grep -q 'START_FAILED_NO_THREAD' scripts/cddm-codex-change-core.sh
+          grep -q 'PUSHED_PENDING_GITHUB' scripts/cddm-codex-change-core.sh
+          grep -q 'Pending Candidate reconciliation must succeed before another Codex turn' scripts/cddm-codex-change-core.sh
+          grep -q 'repair_prethread_start_failure' scripts/cddm-codex-change.sh
+          grep -q 'align_clean_prethread_orphan' scripts/cddm-codex-change.sh
+          grep -q 'CDDM_REAL_CODEX' scripts/cddm-codex-worker-shim.sh
           for prompt in .codex/prompts/change-start.md .codex/prompts/change-resume.md .codex/prompts/change-rotate.md; do
             grep -q 'Stable Change Goal:' "$prompt"
             grep -q 'Implement approved Change #{{ISSUE}} to locally candidate-ready state' "$prompt"
