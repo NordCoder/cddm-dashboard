@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-real_codex="${CDDM_REAL_CODEX:-}"
-[[ -n "$real_codex" && -x "$real_codex" ]] || { echo "CDDM Codex shim has no real Codex executable." >&2; exit 1; }
-
+# `recover` must be able to enter the legacy core without invoking the real
+# Codex executable. The core still probes `codex login status`; satisfy only
+# that non-execution probe and reject every other Codex path.
 if [[ "${CDDM_BLOCK_CODEX:-0}" == "1" ]]; then
+  if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
+    exit 0
+  fi
   echo "Refusing Codex invocation in recovery-only mode." >&2
   exit 97
 fi
+
+real_codex="${CDDM_REAL_CODEX:-}"
+[[ -n "$real_codex" && -x "$real_codex" ]] || { echo "CDDM Codex shim has no real Codex executable." >&2; exit 1; }
 
 if [[ "${1:-}" != "exec" ]]; then
   exec "$real_codex" "$@"
