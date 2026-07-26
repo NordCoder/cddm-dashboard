@@ -1,0 +1,21 @@
+# CDDM WebLead 3.0 Worker command policy.
+# Workers edit/test locally in one persistent Change session.
+# The trusted Host Runtime owns Git state transitions and GitHub transport.
+
+prefix_rule(
+    pattern=["git", ["status", "diff", "log", "show", "rev-parse", "ls-files"]],
+    decision="allow",
+    justification="Workers may inspect local repository state and diffs.",
+)
+
+prefix_rule(
+    pattern=["git", ["add", "commit", "fetch", "pull", "push", "checkout", "switch", "merge", "rebase", "reset", "clean", "remote", "tag", "branch"]],
+    decision="forbidden",
+    justification="Persistent Change Workers edit and verify files; Host Runtime owns Git state transitions and publication.",
+)
+
+prefix_rule(
+    pattern=["gh"],
+    decision="forbidden",
+    justification="GitHub state is supplied by the Host/Web Lead; Workers never access GitHub directly.",
+)

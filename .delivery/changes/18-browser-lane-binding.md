@@ -3,7 +3,7 @@
 Milestone: M6 — Browser Prompt Delivery
 Risk: High
 Issue: #18
-Execution state: Ready for shaping; not implementation-ready
+Execution state: Planned — Ready for Web Lead shaping after M6 Owner approval
 
 ## Outcome
 
@@ -27,11 +27,11 @@ Provide an explicit backend-owned binding between a deterministic workflow lane 
 - autonomous target discovery;
 - public multi-user identity/authentication.
 
-## Design
+## Architecture
 
-Status: **Pending shaping.** Product-code implementation MUST NOT begin until the canonical contract fixes the material decisions below.
+Status: **Pending Web Lead shaping.** Product-code implementation MUST NOT begin until M6 is Owner-approved and the Web Lead fixes the material HARD HOW below.
 
-Shaping must determine:
+Web Lead shaping must determine:
 
 - browser worker identity and registration model;
 - lane/binding key and target representation;
@@ -40,7 +40,8 @@ Shaping must determine:
 - persistence/restart boundary;
 - minimum credential/secret exposure;
 - API ownership consumed by dashboard and #19;
-- rollback or safe-disable behavior.
+- rollback or safe-disable behavior;
+- explicit Implementation Freedom left to the Codex Change Worker.
 
 The design must preserve Stage 3 lane routing authority rather than creating a second router.
 
@@ -52,10 +53,12 @@ The design must preserve Stage 3 lane routing authority rather than creating a s
 - Project/lane isolation tests;
 - backend regression and race suite;
 - exact-Head CI;
-- fresh independent review plus human review because Risk is High.
+- Web Lead QA against the approved WHAT + HARD HOW;
+- additional independent Codex review only when Web Lead judges the residual High-risk surface warrants it.
 
 ## Dependencies
 
 Product dependencies: none.
-Operational dependency: bootstrap #16 merged.
-Parallel-eligible with #17 for shaping unless investigation discovers a shared mutable surface.
+Operational dependency: WebLead 3.0 runtime #25 merged.
+Approval dependency: M6 Owner approval.
+Parallel-eligible with #17 for Web Lead shaping after approval unless evidence reveals a shared mutable contract.

@@ -1,14 +1,63 @@
-# Project-scoped Codex defaults. Loaded only when this repository is trusted.
-# Task-specific model tier and reasoning effort are selected per CDDM-CODEX-ECO;
-# do not pin one model for all Changes here.
+# Project-scoped defaults for CDDM Codex Minimal 3.0 WebLead Change Workers.
+# The Web Lead chooses model/effort; the Host passes them explicitly on every start/resume/rotate.
 
-approval_policy = "on-request"
-sandbox_mode = "workspace-write"
+approval_policy = "never"
+default_permissions = "cddm-worker"
 web_search = "cached"
 model_reasoning_summary = "none"
 model_verbosity = "low"
+allow_login_shell = false
 
-# CDDM parallelism is Change/worktree-level. Do not spawn an internal agent swarm
-# inside one Change unless a future explicit contract changes this policy.
+[permissions."cddm-worker"]
+description = "Edit only the current project worktree without shell network or host credential access"
+extends = ":workspace"
+
+[permissions."cddm-worker".filesystem]
+glob_scan_max_depth = 8
+"**/.git-credentials" = "deny"
+"**/.netrc" = "deny"
+"**/.ssh/**" = "deny"
+"**/.gnupg/**" = "deny"
+"**/.config/gh/**" = "deny"
+"**/.aws/**" = "deny"
+"**/.azure/**" = "deny"
+"**/.kube/**" = "deny"
+"**/.docker/config.json" = "deny"
+"**/.codex/auth.json" = "deny"
+
+[permissions."cddm-worker".filesystem.":workspace_roots"]
+"." = "write"
+".git" = "read"
+".agents" = "read"
+".codex" = "read"
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+"**/*.env" = "deny"
+
+[permissions."cddm-worker".network]
+enabled = false
+
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+exclude = [
+  "GH_*",
+  "GITHUB_*",
+  "*_TOKEN",
+  "*_SECRET",
+  "*_PASSWORD",
+  "*_KEY",
+  "AWS_*",
+  "AZURE_*",
+  "SSH_AUTH_SOCK",
+  "GIT_ASKPASS",
+  "SSH_ASKPASS",
+  "CODEX_HOME",
+]
+
+[features]
+goals = true
+
+# Parallelism is Change/worktree-level. One Change keeps one primary persistent thread.
 [agents]
 enabled = false
