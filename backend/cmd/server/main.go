@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NordCoder/cddm-dashboard/backend/internal/browserbinding"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/config"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/database"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/githubclient"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/httpapi"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
@@ -68,11 +70,18 @@ func run() error {
 		},
 		FallbackEnabled: cfg.PromptFallbackEnabled,
 	})
+	bindingService := browserbinding.New(db, cfg.BrowserBindingTTL)
+	deliveryService := delivery.New(db, planningService, delivery.NewBrowserBindingResolver(bindingService), delivery.Config{
+		Enabled: cfg.BrowserDeliveryEnabled, PendingTTL: cfg.BrowserDeliveryPendingTTL, ClaimTTL: cfg.BrowserDeliveryClaimTTL,
+	})
+	if err := deliveryService.Reconcile(startupContext); err != nil {
+		return fmt.Errorf("reconcile browser delivery commands: %w", err)
+	}
 
 	server := &http.Server{
 		Addr: cfg.Address,
-		Handler: httpapi.NewWithPlanningAndBindingTTL(
-			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, cfg.BrowserBindingTTL,
+		Handler: httpapi.NewWithPlanningAndBindingServiceAndDelivery(
+			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, bindingService, deliveryService,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -81,6 +90,9 @@ func run() error {
 	}
 
 	applicationContext, cancelApplication := context.WithCancel(context.Background())
+	go deliveryService.ReconcilePeriodically(applicationContext, minDuration(cfg.BrowserDeliveryClaimTTL/2, time.Minute), func(err error) {
+		slog.Error("reconcile browser delivery commands", "error", err)
+	})
 	pollerDone := make(chan struct{})
 	go func() {
 		defer close(pollerDone)
@@ -143,4 +155,11 @@ func maxDuration(left, right time.Duration) time.Duration {
 		return right
 	}
 	return left
+}
+
+func minDuration(left, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
 }

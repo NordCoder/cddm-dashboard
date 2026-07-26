@@ -9,11 +9,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
 )
 
 type fakePlanningAPI struct {
 	mode string
+}
+
+type fakeDeliveryAPI struct{ created delivery.Confirmation }
+
+func (f *fakeDeliveryAPI) Create(_ context.Context, projectID int64, issueNumber int, input delivery.Confirmation) (delivery.Command, error) {
+	f.created = input
+	return delivery.Command{ID: "command", ProjectID: projectID, IssueNumber: issueNumber, Status: delivery.StatusPending}, nil
+}
+func (f *fakeDeliveryAPI) List(context.Context, int64, int) ([]delivery.Command, error) {
+	return []delivery.Command{{ID: "command", Status: delivery.StatusPending}}, nil
+}
+func (f *fakeDeliveryAPI) ClaimNext(context.Context, delivery.ClaimRequest) (*delivery.Execution, error) {
+	return &delivery.Execution{ClaimID: "claim", Prompt: "canonical prompt"}, nil
+}
+func (f *fakeDeliveryAPI) Complete(_ context.Context, input delivery.Completion) (delivery.Command, error) {
+	return delivery.Command{ID: input.CommandID, Status: input.Outcome}, nil
 }
 
 func (f *fakePlanningAPI) Generate(_ context.Context, projectID int64, issueNumber int, mode string) (planning.GenerationResult, error) {
@@ -92,5 +109,25 @@ func TestPlanningAPIMethodAndInputValidation(t *testing.T) {
 		if response.Code != test.status {
 			t.Fatalf("%s %s = %d %s, want %d", test.method, test.path, response.Code, response.Body.String(), test.status)
 		}
+	}
+}
+
+func TestBrowserDeliveryContractEndpoints(t *testing.T) {
+	service := &fakeDeliveryAPI{}
+	handler := &planningHandler{legacy: http.NotFoundHandler(), planning: &fakePlanningAPI{}, delivery: service}
+	create := httptest.NewRecorder()
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/projects/1/work-units/11/deliveries", strings.NewReader(`{"plan_id":9,"idempotency_key":"intent","expected_plan_hash":"plan","expected_context_hash":"context","expected_head":"head","expected_lane_key":"lane","expected_binding_id":"binding","expected_binding_version":1,"expected_presence_token":"presence"}`)))
+	if create.Code != http.StatusCreated || service.created.IdempotencyKey != "intent" {
+		t.Fatalf("create = %d %s; request=%#v", create.Code, create.Body.String(), service.created)
+	}
+	claim := httptest.NewRecorder()
+	handler.ServeHTTP(claim, httptest.NewRequest(http.MethodPost, "/api/browser/deliveries/claim-next", strings.NewReader(`{"worker_id":"worker","worker_session_id":"session","claim_request_id":"request"}`)))
+	if claim.Code != http.StatusOK || !strings.Contains(claim.Body.String(), "canonical prompt") {
+		t.Fatalf("claim = %d %s", claim.Code, claim.Body.String())
+	}
+	complete := httptest.NewRecorder()
+	handler.ServeHTTP(complete, httptest.NewRequest(http.MethodPost, "/api/browser/deliveries/command/complete", strings.NewReader(`{"claim_id":"claim","outcome":"delivered"}`)))
+	if complete.Code != http.StatusOK {
+		t.Fatalf("complete = %d %s", complete.Code, complete.Body.String())
 	}
 }
