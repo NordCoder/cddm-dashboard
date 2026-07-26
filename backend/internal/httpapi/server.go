@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NordCoder/cddm-dashboard/backend/internal/browserbinding"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workflow"
 )
@@ -45,6 +46,10 @@ type errorResponse struct {
 }
 
 func New(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollInterval time.Duration) http.Handler {
+	return NewWithBindingTTL(db, store, syncer, defaultPollInterval, 30*time.Second)
+}
+
+func NewWithBindingTTL(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollInterval, bindingTTL time.Duration) http.Handler {
 	seconds := int64(defaultPollInterval / time.Second)
 	if seconds <= 0 {
 		seconds = 300
@@ -62,7 +67,7 @@ func New(db *sql.DB, store *supervisor.Store, syncer ProjectSyncer, defaultPollI
 	mux.HandleFunc("/api/workspace", server.workspace)
 	mux.HandleFunc("/api/workspace/state", server.workspaceState)
 	mux.HandleFunc("/api/attention", server.attention)
-	return mux
+	return withBrowserBinding(mux, server, browserbinding.New(db, bindingTTL))
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

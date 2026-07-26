@@ -71,8 +71,8 @@ func run() error {
 
 	server := &http.Server{
 		Addr: cfg.Address,
-		Handler: httpapi.NewWithPlanning(
-			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService,
+		Handler: httpapi.NewWithPlanningAndBindingTTL(
+			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, cfg.BrowserBindingTTL,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
