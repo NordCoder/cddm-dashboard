@@ -1,7 +1,7 @@
 Use `$cddm-fix-ci` for Issue #{{ISSUE}}.
 
-Locate the current Change PR, exact Candidate Head, and failing/inconclusive required check with `gh`. Classify the failure before editing and inspect only the relevant logs first.
+Use the current Issue/PR/CI context supplied below plus read-only `gh` inspection as needed. Classify the exact Candidate failure before editing and inspect only relevant logs first.
 
-Reproduce locally when practical. Change code only for an evidenced implementation defect. Run required V1/V2 after correction, commit the new Candidate, publish the Change branch through the trusted repository helper, and preserve exact-Head semantics.
+Reproduce locally when practical. Change code only for an evidenced implementation defect and run required V1/V2 after correction. Do not stage, commit, push, or write GitHub state; host-side orchestration publishes a corrected Candidate only for `STATUS: FIXED`.
 
-Do not merge or broaden Scope. Persist exactly one compact FIX_CI result to the PR.
+Final response MUST be exactly the `$cddm-fix-ci` result schema with no prose or code fence.

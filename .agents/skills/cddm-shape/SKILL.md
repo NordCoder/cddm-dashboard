@@ -9,18 +9,16 @@ description: Shape or refine one Medium/High CDDM Codex Change before implementa
 2. Confirm one observable Outcome, explicit Requirements, Out of Scope, material dependencies, Risk, and Requirement-to-Verification mapping.
 3. For High-risk work, resolve material Design decisions before implementation: ownership, contracts/schema, state transitions, failure semantics, persistence/compatibility, rollback or safe-disable behavior as applicable.
 4. Distinguish engineering choices the Implementor may decide later from product/architecture decisions that belong in the contract.
-5. Do not write product code during shaping. Update only the canonical Change/planning artifacts required to make execution unambiguous.
+5. Do not write product code during shaping. Update only canonical Change/planning files required to make execution unambiguous.
 6. If evidence is insufficient, return the exact Decision/Discovery needed; do not invent semantics.
 7. Mark the canonical Change Contract implementation-ready only when material ambiguity is resolved and dependencies permit execution.
-8. Commit the shaped contract and publish the current Change branch only with `bash scripts/cddm-publish-branch.sh`. Create or reuse one draft PR for the Change.
-9. Post exactly one final `CDDM Worker Result` comment to that PR. Do not post progress comments.
+8. Do not stage, commit, push, or write GitHub state; the host launcher persists successful shaping output.
 
-Result schema:
+Final response, exactly:
 
 ```text
 ACTIVITY: SHAPE
 STATUS: READY | DECISION_REQUIRED | DISCOVERY_REQUIRED
-HEAD: <sha>
 CONTRACT: <canonical path>
 DECISIONS: <material decisions fixed>
 DEPENDENCIES: <satisfied / remaining>

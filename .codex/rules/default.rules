@@ -1,17 +1,14 @@
-# CDDM WebLead worker command policy.
-# AGENTS.md remains the authority boundary; these rules add command-level guardrails.
+# CDDM WebLead Worker command policy.
+# Worker tools are intentionally read/local-edit oriented. Host-side orchestration owns Git/GitHub writes.
 
-# Routine local/read operations.
+# Routine repository inspection.
 prefix_rule(
-    pattern=["git", ["status", "diff", "log", "show", "rev-parse", "branch"]],
+    pattern=["git", ["status", "diff", "log", "show", "rev-parse", "ls-files"]],
     decision="allow",
-    justification="Routine repository inspection is normal Worker activity.",
+    justification="Workers may inspect repository state and diffs.",
 )
-prefix_rule(
-    pattern=["git", "fetch"],
-    decision="allow",
-    justification="Workers may refresh remote state for the current Change.",
-)
+
+# Read-only GitHub inspection.
 prefix_rule(
     pattern=["gh", "issue", ["view", "list", "status"]],
     decision="allow",
@@ -25,81 +22,39 @@ prefix_rule(
 prefix_rule(
     pattern=["gh", "run", ["view", "list", "watch"]],
     decision="allow",
-    justification="Workers may inspect CI for the current Candidate.",
+    justification="Workers may inspect CI evidence.",
 )
 
-# Bounded delivery writes permitted by AGENTS.md.
+# Git metadata and remote writes belong to the trusted host launcher.
 prefix_rule(
-    pattern=["bash", "scripts/cddm-publish-branch.sh"],
-    decision="allow",
-    justification="Trusted helper publishes only the current change/<issue> branch to the expected repository.",
+    pattern=["git", ["add", "commit", "fetch", "push", "checkout", "switch", "merge", "rebase", "reset", "clean", "remote", "tag"]],
+    decision="forbidden",
+    justification="Workers edit and verify files; the host launcher owns Git metadata and remote delivery writes.",
 )
 prefix_rule(
-    pattern=["gh", "pr", "create"],
-    decision="allow",
-    justification="A Worker may create the current Change PR.",
-)
-prefix_rule(
-    pattern=["gh", "pr", "comment"],
-    decision="allow",
-    justification="A Worker may persist one compact activity result on the current PR.",
-)
-prefix_rule(
-    pattern=["gh", "pr", "ready"],
-    decision="allow",
-    justification="An implementation Worker may mark its Candidate-ready PR ready for review.",
-)
-prefix_rule(
-    pattern=["gh", "issue", "comment"],
-    decision="allow",
-    justification="Material investigation evidence may be persisted to the current Issue.",
+    pattern=["git", "branch"],
+    decision="forbidden",
+    justification="Branch lifecycle is host-owned; use git rev-parse for read-only branch identity.",
 )
 
-# Direct remote Git mutation is outside Worker authority; use the trusted helper above.
+# All GitHub writes and credential access are host/Lead authority.
 prefix_rule(
-    pattern=["git", "push"],
+    pattern=["gh", "pr", ["create", "comment", "ready", "merge", "close", "edit", "reopen"]],
     decision="forbidden",
-    justification="Workers publish through scripts/cddm-publish-branch.sh so destination/refspec cannot be changed by model-authored arguments.",
+    justification="PR writes are persisted by the trusted host launcher or Web Lead.",
 )
 prefix_rule(
-    pattern=["git", "remote", ["set-url", "add", "remove", "rename"]],
+    pattern=["gh", "issue", ["comment", "close", "edit", "reopen", "create"]],
     decision="forbidden",
-    justification="Workers must not mutate repository remotes.",
-)
-
-# Consequential GitHub actions remain outside Worker authority.
-prefix_rule(
-    pattern=["gh", "pr", "merge"],
-    decision="forbidden",
-    justification="Workers prepare merge-ready state; merge authority belongs to the Web Lead/Owner gate.",
-)
-prefix_rule(
-    pattern=["gh", "pr", "close"],
-    decision="forbidden",
-    justification="Workers do not close delivery records.",
-)
-prefix_rule(
-    pattern=["gh", "issue", "close"],
-    decision="forbidden",
-    justification="Workers do not close Issues.",
+    justification="Issue writes are persisted by the trusted host launcher or Web Lead.",
 )
 prefix_rule(
     pattern=["gh", "api"],
-    decision="prompt",
-    justification="Prefer bounded typed gh commands; gh api can bypass Worker authority boundaries.",
+    decision="forbidden",
+    justification="Workers must not bypass typed GitHub authority boundaries.",
 )
 prefix_rule(
-    pattern=["git", "reset", "--hard"],
+    pattern=["gh", "auth"],
     decision="forbidden",
-    justification="Destructive repository reset is outside bounded Worker activity.",
-)
-prefix_rule(
-    pattern=["git", "clean", ["-fd", "-fdx"]],
-    decision="forbidden",
-    justification="Destructive workspace cleanup is outside bounded Worker activity.",
-)
-prefix_rule(
-    pattern=["git", "branch", "-D"],
-    decision="forbidden",
-    justification="Destructive branch deletion is outside bounded Worker activity.",
+    justification="Workers do not retrieve or modify GitHub credentials.",
 )

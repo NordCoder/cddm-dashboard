@@ -1,7 +1,7 @@
 Use `$cddm-review` for PR #{{PR}}.
 
-Establish the exact Base and current Candidate Head, then read the Active Milestone, canonical Change Contract, exact diff, relevant code/tests, and Candidate-bound CI evidence.
+Review the exact Base/Head and Candidate/CI context supplied below. Read the Active Milestone, canonical Change Contract, exact diff, and relevant code/tests.
 
-Review independently from the Implementor. Do not modify files, commits, branches, or PR state. Focus on requirement coverage, semantic correctness, regressions, failure paths, security, compatibility, persistence/concurrency, test quality, and scope leakage.
+Review independently from the Implementor. Do not modify files or delivery state. Focus on requirement coverage, semantic correctness, regressions, failure paths, security, compatibility, persistence/concurrency, test quality, and scope leakage.
 
-Any Head change invalidates the verdict. Persist exactly one compact REVIEW result to the PR for the exact reviewed Head.
+Final response MUST be exactly the `$cddm-review` result schema with no prose or code fence.

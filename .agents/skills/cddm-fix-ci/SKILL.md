@@ -11,16 +11,13 @@ description: Diagnose and repair a failed exact-Candidate CI check under CDDM Co
 4. Reproduce the failure locally when practical using the same or closest repository command.
 5. Change code only when evidence supports an implementation defect. Do not create a compensating code change for infrastructure failure.
 6. After correction, run the cheapest relevant V1 checks, then practical V2 Candidate verification.
-7. A correction creates a new Candidate. Commit the corrected Head and publish the current Change branch only with `bash scripts/cddm-publish-branch.sh`; old CI/review authority is stale.
-8. Post exactly one final `CDDM Worker Result` comment to the current PR. Do not post progress comments.
+7. Do not stage, commit, push, or write GitHub state; the host launcher publishes a new Candidate only when `STATUS: FIXED`.
 
-Result schema:
+Final response, exactly:
 
 ```text
 ACTIVITY: FIX_CI
 STATUS: FIXED | INFRA_FAILURE | BLOCKED | INCONCLUSIVE
-OLD_HEAD: <sha>
-NEW_HEAD: <sha or none>
 CAUSE: <concise classification>
 CHANGED: <bounded summary or none>
 VERIFY: <local checks>

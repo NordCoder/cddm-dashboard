@@ -1,7 +1,7 @@
 Use `$cddm-shape` for Issue #{{ISSUE}}.
 
-Work only in the current Change worktree/branch. Read `AGENTS.md`, the Active Milestone, the current Issue, the canonical Change Contract, and only the repository evidence needed to resolve material Design.
+Work only in the current Change worktree. Read `AGENTS.md`, the Active Milestone, the current Issue context supplied below, the canonical Change Contract, and only repository evidence needed to resolve material Design.
 
-Make the Change implementation-ready. Do not write product implementation code, expand Scope, or implement downstream Changes.
+Make the Change implementation-ready. Do not write product implementation code or expand Scope. Do not stage, commit, push, or write GitHub state; host-side orchestration handles delivery after your final result.
 
-Use `git`/`gh` only within `AGENTS.md` authority. Commit the shaped contract, publish the Change branch through the trusted repository helper, create or reuse the current draft PR, and persist exactly one compact SHAPE result to that PR.
+Final response MUST be exactly the `$cddm-shape` result schema with no prose or code fence.

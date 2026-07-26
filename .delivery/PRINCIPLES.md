@@ -15,9 +15,10 @@
 
 - The Owner governs product intent, Milestone approval, material product/risk decisions, and product acceptance; the Owner does not operate the routine delivery pipeline.
 - ChatGPT Web is the logical Lead and owns planning, dependency/parallelism decisions, shaping orchestration, worker/model routing, Candidate/CI/review reconciliation, corrections, and merge preparation.
-- Codex Workers execute bounded Change activities and may use local `git`/`gh` within the authority defined by `AGENTS.md`.
+- Codex Workers own bounded reasoning, file edits, and local verification; they do not own Git metadata or GitHub delivery writes.
+- A deterministic host launcher owns worktree setup plus staging, commit, bounded branch publication, PR/result persistence, and exact-Head review handoff after Worker completion.
 - GitHub is the canonical delivery record; chat memory and narrative handoffs are not authoritative.
-- One Change has one observable Outcome, one primary Implementor, one branch/worktree, one primary PR, and one current Candidate.
+- One Change has one observable Outcome, one primary Implementor, one isolated worktree/branch, one primary PR, and one current Candidate.
 - Future Roadmap work is planning context, not current Scope.
 - High-risk work with unresolved material Design is shaped before product-code implementation.
 - Risk determines verification and review depth; Diff size alone does not.
@@ -27,6 +28,6 @@
 - Shared contracts are fixed before dependent parallel implementations rely on them.
 - WIP is bounded by integration and review capacity; agent count is not a delivery objective.
 - High Risk requires stronger machine review and Lead acceptance, not automatic Owner code review.
-- GitHub writes are limited to persistent delivery facts; progress narration and duplicate handoffs are not required.
+- GitHub writes are limited to persistent delivery facts and are performed by the trusted host/Lead path, not by Worker narration.
 - Milestone completion requires integrated Outcome evidence, not merely merged Issues.
 - A new process artifact, role, or gate is introduced only when it prevents a concrete failure class or shortens the critical path more than its coordination cost.

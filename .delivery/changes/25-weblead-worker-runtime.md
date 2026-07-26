@@ -6,18 +6,18 @@ Issue: #25
 
 ## Outcome
 
-The repository supports WebLead-orchestrated Codex CLI workers that execute bounded Change activities in isolated worktrees with local `git`/`gh`, persist compact results to GitHub, and do not require the Owner to operate the delivery pipeline.
+The repository supports WebLead-orchestrated Codex CLI workers that perform bounded reasoning/file edits/local verification in isolated worktrees while a deterministic host launcher owns Git metadata and GitHub delivery writes, eliminating Owner transport from the normal pipeline.
 
 ## Requirements
 
-- `AGENTS.md` defines Owner, Web Lead, Worker, GitHub, and exact-Candidate authority boundaries.
-- Trusted workspace-write Workers have outbound network for bounded `git`/`gh` use.
-- Project Codex rules permit routine inspection/current-Change delivery operations and forbid merge, direct `git push`, remote mutation, and destructive repository actions.
-- Branch publication is performed only through a trusted repository helper that accepts no caller-controlled refspec and publishes only the current `change/<issue>` branch to the expected `NordCoder/cddm-dashboard` origin.
-- Reusable worker prompts exist for shape, implement, investigate, fix-ci, and review activities without duplicating canonical context.
-- Repository skills persist one compact final activity result for Web Lead state reconstruction.
-- A launcher verifies authentication, requires a clean controlling `main`, refreshes remote state, proves local `main == origin/main`, creates/reuses isolated Change worktrees, and starts `codex exec` with the matching activity/model/effort.
-- Every review uses a fresh temporary detached worktree at the exact current PR Head and removes it after completion.
+- `AGENTS.md` defines Owner, Web Lead, Worker, host launcher, GitHub, and exact-Candidate authority boundaries.
+- Codex Workers run with `workspace-write`, `approval_policy = never`, and no responsibility for Git metadata or GitHub writes.
+- Workers retain bounded read-only repository/GitHub inspection plus file-edit/test capability required for implementation.
+- Project rules forbid Worker Git metadata/remote operations, GitHub writes/API calls, and credential access.
+- Reusable prompts exist for shape, implement, investigate, fix-ci, and review without duplicating canonical context.
+- `codex exec --output-last-message` returns one compact activity result to a host-owned path outside the Worker worktree.
+- The trusted launcher verifies auth/canonical main, creates/reuses Change worktrees, invokes the correct model/activity, validates Worker result shape, performs host-side staging/commit, publishes only `change/<issue>` through the validated canonical repository URL, creates/updates PR state, and persists one result to GitHub.
+- Review uses a fresh temporary detached worktree; fetched PR Head must equal the pre-resolved exact Head, the worktree must remain clean, and Head is rechecked before verdict persistence.
 - M6 product implementation remains gated by explicit Owner Milestone approval.
 - Existing product/runtime behavior and exact-Head CI semantics remain unchanged.
 
@@ -25,7 +25,7 @@ The repository supports WebLead-orchestrated Codex CLI workers that execute boun
 
 - M6 product implementation;
 - automatic merge;
-- force-push/rewrite workflows;
+- Worker-controlled remote Git/GitHub writes;
 - unattended product-scope changes;
 - committed credentials;
 - redesign of the product Supervisor protocol.
@@ -33,9 +33,9 @@ The repository supports WebLead-orchestrated Codex CLI workers that execute boun
 ## Verification
 
 - inspect changed surface for process/configuration only;
-- validate `.codex/config.toml` and project rule syntax with current Codex tooling where available;
-- shell-parse both worker runtime scripts;
-- verify prompts and skills agree on activity result/publish contracts;
-- verify branch publication cannot target `main`, arbitrary refs, or arbitrary remotes through caller arguments;
+- validate project TOML and shell syntax;
+- verify Worker prompts/skills require no staging/commit/push/GitHub persistence;
+- verify host launcher refuses noncanonical main and stale PR review setup;
+- verify host publication accepts no Worker-controlled remote/refspec;
 - exact-Head CI remains green;
-- fresh independent review confirms no authority leak, stale review worktree, noncanonical-main source, or Owner-transport requirement.
+- fresh independent review confirms no Worker authority leak, stale review identity, or Owner-transport requirement.

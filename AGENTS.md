@@ -7,6 +7,7 @@ Repository development follows CDDM Codex Minimal 2.0 — WebLead.
 - **Owner** approves Milestone scope and resolves only material product/risk decisions.
 - **ChatGPT Web Lead** owns planning, Change decomposition, shaping orchestration, worker/model routing, Candidate/CI/review reconciliation, corrections, and merge preparation.
 - **Codex Worker** executes one bounded activity for one Change in one isolated worktree.
+- **Host launcher** owns Git metadata writes and GitHub delivery writes after the Worker returns.
 - **GitHub** is the canonical delivery record.
 
 Workers MUST NOT ask the Owner to operate the pipeline or make ordinary engineering decisions. Material decisions are returned to the Web Lead as bounded blockers.
@@ -23,35 +24,29 @@ Read only the context needed for the current activity, in this order:
 
 Chat history is not authoritative. `docs/cddm-minimal.md` describes Supervisor behavior implemented by the product; it is not the repository-development methodology.
 
-## Git and GitHub authority
-
-`git` and `gh` are normal Worker tools for the current Change, subject to project rules.
+## Worker authority
 
 Workers MAY:
 
-- inspect repository/history and fetch remote state;
-- read the current Issue/PR/checks/runs;
-- edit files inside the current worktree;
-- commit coherent in-scope work;
-- publish the current `change/<issue>` branch only through `bash scripts/cddm-publish-branch.sh`;
-- create or update the current Change draft PR;
-- mark the PR ready only after Candidate-ready verification;
-- post one compact final activity result to the current Issue/PR.
+- inspect repository files/history and local diffs;
+- use read-only `gh` commands for the current Issue/PR/checks/runs;
+- edit in-scope files inside the current worktree;
+- run formatters, compilers, tests, builds, and other non-destructive local verification;
+- return one compact activity result to the host launcher.
 
 Workers MUST NOT:
 
-- push or commit directly to `main`;
-- invoke `git push` directly; branch publication uses the trusted helper only;
-- force-push, delete remote refs, or rewrite published history;
+- stage or commit Git changes;
+- create/switch/merge/rebase/reset branches;
+- fetch, push, delete, or rewrite remote refs;
 - modify Git remotes;
-- merge or close PRs;
-- close, relabel, reassign, or change milestones on Issues;
-- modify another Change branch/worktree;
+- create/edit/comment/ready/merge/close PRs or Issues;
+- use `gh api` or retrieve GitHub credentials/tokens;
+- modify another Change worktree;
 - change repository settings, secrets, branch protection, or Actions permissions;
-- use `gh api` for side effects that bypass these boundaries;
-- publish progress/heartbeat comments.
+- publish progress/heartbeat state.
 
-External writes are limited to the current Change and only when the activity authorizes them.
+The trusted host launcher performs staging, commits, bounded branch publication, PR state changes, and result persistence after the Worker exits successfully. This separation is mandatory; a Worker must not attempt to bypass it.
 
 ## Activity rules
 
@@ -60,39 +55,41 @@ External writes are limited to the current Change and only when the activity aut
 - Resolve material Design needed for implementation readiness.
 - Do not write product implementation code.
 - Update only the canonical Change Contract and directly necessary planning metadata.
-- Commit the shaped contract, publish with `bash scripts/cddm-publish-branch.sh`, and create/reuse one draft PR for the Change.
+- Return the SHAPE result; the host launcher persists the contract and draft PR.
 
 ### Implement
 
 - Start only when the Change Contract is implementation-ready and dependencies are satisfied.
 - Implement the smallest maintainable solution inside Scope.
-- Continue the same Change branch/PR created during shaping when one exists.
-- Publish the Candidate with `bash scripts/cddm-publish-branch.sh`.
+- Continue the same Change worktree created during shaping when one exists.
 - Do not implement future Roadmap work.
+- Return the IMPLEMENT result; the host launcher creates the Candidate and publishes it.
 
 ### Investigate
 
-- Establish facts/root cause before proposing writes.
-- Do not modify product code unless a later implementation/fix activity explicitly authorizes it.
+- Establish facts/root cause before proposing changes.
+- Do not modify product code.
+- Return the INVESTIGATE result; the host launcher persists material evidence.
 
 ### Fix CI
 
-- Work only on the exact failing Candidate branch.
+- Work only on the exact failing Candidate worktree.
 - Classify the failure before editing.
 - Do not change product code for infrastructure-only failures.
-- Publish a corrected Candidate with `bash scripts/cddm-publish-branch.sh`.
+- Return the FIX_CI result; the host launcher publishes a corrected Candidate only for `FIXED`.
 
 ### Review
 
 - Review one exact Candidate independently.
-- Do not modify files, commits, branches, or PR state.
+- Do not modify files or delivery state.
 - Any Head change invalidates the verdict.
+- Return the REVIEW result; the host launcher rechecks exact Head before persistence.
 
 ## Parallel work
 
 - Parallelize independent Changes, never multiple primary Implementors inside one Change.
 - Shared mutable contracts must be fixed before dependent implementations run in parallel.
-- Relevant upstream semantic/contract drift requires integration with current target and revalidation.
+- Relevant upstream semantic/contract drift requires Lead reconciliation and revalidation.
 
 ## Verification
 
@@ -104,7 +101,7 @@ Run focused formatting, tests, type checks, builds, or integration checks for th
 
 ### V2 — local Candidate verification
 
-Before Candidate publication, run every practical affected check. Full baseline:
+Before returning `STATUS: DONE`, run every practical affected check. Full baseline:
 
 ```bash
 cd backend
@@ -125,7 +122,7 @@ If a check is irrelevant or unavailable, report it explicitly. Inspect the final
 
 ### V3 — exact-Head CI
 
-GitHub CI confirms the published Candidate. Candidate evidence is valid only for the exact current PR Head. Any new commit creates a new Candidate and invalidates prior final CI/review evidence.
+GitHub CI confirms the Candidate created by the host launcher. Candidate evidence is valid only for the exact current PR Head. Any new commit creates a new Candidate and invalidates prior final CI/review evidence.
 
 ## Review depth
 
@@ -135,15 +132,11 @@ GitHub CI confirms the published Candidate. Candidate evidence is valid only for
 
 High Risk does not automatically require Owner code review. Owner involvement is reserved for Owner-authority decisions and Milestone acceptance.
 
-## Result persistence
+## Result contract
 
-At activity completion, persist exactly one compact result so the Web Lead can resume from GitHub without chat transport.
+The final response MUST be only the activity result schema defined by the selected repository skill: no prose before/after it, no code fence, no internal reasoning, and no GitHub write.
 
-- `shape`, `implement`, `fix-ci`: one PR comment on the current Change PR.
-- `review`: one PR comment containing the exact-Head verdict.
-- material `investigate`: one Issue comment only when the conclusion must persist for later work.
-
-Use the corresponding repository skill result schema. Do not post internal reasoning, full logs, or repeated canonical context.
+The host launcher captures this final response outside the Worker worktree, adds authoritative Git/PR metadata, and persists it to GitHub.
 
 ## Reusable workflows
 

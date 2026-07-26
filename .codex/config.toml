@@ -1,19 +1,17 @@
-# Project-scoped Codex defaults. Loaded only when this repository is trusted.
-# Task-specific model tier and reasoning effort are selected by the Web Lead;
-# do not pin one model for all Changes here.
+# Project-scoped Codex Worker defaults. Loaded only when this repository is trusted.
+# Task-specific model tier and reasoning effort are selected by the Web Lead.
 
-approval_policy = "on-request"
+# Workers never need interactive elevation: host-side orchestration performs Git/GitHub writes.
+approval_policy = "never"
 sandbox_mode = "workspace-write"
 web_search = "cached"
 model_reasoning_summary = "none"
 model_verbosity = "low"
 
-# Trusted local workers need outbound access for git fetch/push and gh.
-# Filesystem writes remain bounded by workspace-write.
+# Network is available for bounded read-only GitHub access and task research.
 [sandbox_workspace_write]
 network_access = true
 
-# CDDM parallelism is Change/worktree-level. Do not spawn an internal agent swarm
-# inside one Change unless a future explicit contract changes this policy.
+# CDDM parallelism is Change/worktree-level, not an internal swarm inside one Change.
 [agents]
 enabled = false

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_slug="NordCoder/cddm-dashboard"
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -16,188 +18,254 @@ Defaults:
   investigate  gpt-5.6-terra medium
   fix-ci       gpt-5.6-terra medium
   review       gpt-5.6-terra medium
-
-The Web Lead may override model/reasoning per task risk and leverage.
 EOF
 }
 
 [[ $# -ge 2 ]] || { usage >&2; exit 2; }
-
 activity="$1"
 target="$2"
 model="${3:-}"
 reasoning="${4:-}"
 
 case "$activity" in
-  shape)
-    model="${model:-gpt-5.6-sol}"
-    reasoning="${reasoning:-medium}"
-    template="shape.md"
-    ;;
-  implement)
-    model="${model:-gpt-5.6-terra}"
-    reasoning="${reasoning:-medium}"
-    template="implement.md"
-    ;;
-  investigate)
-    model="${model:-gpt-5.6-terra}"
-    reasoning="${reasoning:-medium}"
-    template="investigate.md"
-    ;;
-  fix-ci)
-    model="${model:-gpt-5.6-terra}"
-    reasoning="${reasoning:-medium}"
-    template="fix-ci.md"
-    ;;
-  review)
-    model="${model:-gpt-5.6-terra}"
-    reasoning="${reasoning:-medium}"
-    template="review.md"
-    ;;
-  *)
-    echo "Unsupported activity: $activity" >&2
-    usage >&2
-    exit 2
-    ;;
+  shape) model="${model:-gpt-5.6-sol}"; reasoning="${reasoning:-medium}"; template="shape.md" ;;
+  implement) model="${model:-gpt-5.6-terra}"; reasoning="${reasoning:-medium}"; template="implement.md" ;;
+  investigate) model="${model:-gpt-5.6-terra}"; reasoning="${reasoning:-medium}"; template="investigate.md" ;;
+  fix-ci) model="${model:-gpt-5.6-terra}"; reasoning="${reasoning:-medium}"; template="fix-ci.md" ;;
+  review) model="${model:-gpt-5.6-terra}"; reasoning="${reasoning:-medium}"; template="review.md" ;;
+  *) echo "Unsupported activity: $activity" >&2; usage >&2; exit 2 ;;
 esac
 
-[[ "$target" =~ ^[0-9]+$ ]] || {
-  echo "Issue/PR target must be a positive integer: $target" >&2
-  exit 2
-}
+[[ "$target" =~ ^[0-9]+$ ]] || { echo "Issue/PR target must be numeric." >&2; exit 2; }
 
 for command in git gh codex; do
-  command -v "$command" >/dev/null 2>&1 || {
-    echo "Required command is not installed or not on PATH: $command" >&2
-    exit 1
-  }
+  command -v "$command" >/dev/null 2>&1 || { echo "Missing required command: $command" >&2; exit 1; }
 done
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
+[[ "$(git branch --show-current)" == "main" ]] || { echo "Run from the controlling main checkout." >&2; exit 1; }
+[[ -z "$(git status --porcelain)" ]] || { echo "Controlling main must be clean." >&2; exit 1; }
 
-control_branch="$(git branch --show-current)"
-if [[ "$control_branch" != "main" ]]; then
-  echo "Run the launcher from the clean controlling 'main' checkout, not '$control_branch'." >&2
-  exit 1
-fi
+gh auth status >/dev/null 2>&1 || { echo "GitHub CLI is not authenticated. Run: gh auth login" >&2; exit 1; }
+codex login status >/dev/null 2>&1 || { echo "Codex CLI is not authenticated. Run: codex login" >&2; exit 1; }
+git config user.name >/dev/null || { echo "Git user.name is not configured." >&2; exit 1; }
+git config user.email >/dev/null || { echo "Git user.email is not configured." >&2; exit 1; }
 
-# Fail before spending a model call when credentials are missing.
-gh auth status >/dev/null 2>&1 || {
-  echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
-  exit 1
-}
-codex login status >/dev/null 2>&1 || {
-  echo "Codex CLI is not authenticated. Run: codex login" >&2
-  exit 1
-}
-
-# The controlling checkout is orchestration state only. Generated worktrees are ignored.
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo "Controlling checkout has tracked local changes; refusing to update or derive worker state from it." >&2
-  exit 1
-fi
-
-# Refresh all remote refs, fast-forward local main, then prove it is exactly canonical.
 git fetch --prune origin --quiet
 git merge --ff-only origin/main --quiet
 local_main="$(git rev-parse HEAD)"
 remote_main="$(git rev-parse origin/main)"
-if [[ "$local_main" != "$remote_main" ]]; then
-  echo "Local main is not identical to origin/main; refusing to launch Workers." >&2
-  echo "local:  $local_main" >&2
-  echo "origin: $remote_main" >&2
-  exit 1
-fi
+[[ "$local_main" == "$remote_main" ]] || { echo "Local main differs from origin/main; refusing to launch." >&2; exit 1; }
+
+origin_url="$(git remote get-url origin)"
+case "$origin_url" in
+  "https://github.com/NordCoder/cddm-dashboard"|"https://github.com/NordCoder/cddm-dashboard.git"|"git@github.com:NordCoder/cddm-dashboard.git"|"ssh://git@github.com/NordCoder/cddm-dashboard.git") ;;
+  *) echo "Unexpected canonical origin: $origin_url" >&2; exit 1 ;;
+esac
 
 rules_path="$repo_root/.codex/rules/default.rules"
 [[ -f "$rules_path" ]] || { echo "Missing Codex rules: $rules_path" >&2; exit 1; }
 codex execpolicy check --rules "$rules_path" -- git status >/dev/null
 
-mkdir -p "$repo_root/.worktrees"
+mkdir -p "$repo_root/.worktrees/results"
+result_file="$repo_root/.worktrees/results/${activity}-${target}-$(date +%s)-$$.txt"
+evidence_file="$result_file.evidence.md"
+worktree=""
+review_head=""
+review_base=""
+cleanup_review=false
 
-review_worktree=""
-cleanup_review_worktree() {
-  if [[ -n "$review_worktree" && -d "$review_worktree" ]]; then
-    git worktree remove --force "$review_worktree" >/dev/null 2>&1 || true
+cleanup() {
+  if [[ "$cleanup_review" == true && -n "$worktree" && -d "$worktree" ]]; then
+    git worktree remove --force "$worktree" >/dev/null 2>&1 || true
   fi
+}
+trap cleanup EXIT
+
+issue_context() {
+  gh issue view "$1" --repo "$repo_slug" --json title,body --jq '"ISSUE TITLE: " + .title + "\n\nISSUE BODY:\n" + (.body // "")'
+}
+
+find_pr_for_branch() {
+  gh pr list --repo "$repo_slug" --head "$1" --state open --json number --jq '.[0].number // empty'
+}
+
+ensure_pr() {
+  local issue="$1" branch="$2" pr title
+  pr="$(find_pr_for_branch "$branch")"
+  if [[ -z "$pr" ]]; then
+    title="$(gh issue view "$issue" --repo "$repo_slug" --json title --jq '.title')"
+    gh pr create --repo "$repo_slug" --draft --base main --head "$branch" --title "$title" --body "Closes #$issue" >/dev/null
+    pr="$(find_pr_for_branch "$branch")"
+  fi
+  [[ -n "$pr" ]] || { echo "Unable to resolve/create PR for $branch" >&2; return 1; }
+  printf '%s' "$pr"
+}
+
+append_host_metadata() {
+  local destination="$1" head="${2:-}" pr="${3:-}" reviewed="${4:-}"
+  {
+    echo "## CDDM Worker Result"
+    echo
+    cat "$result_file"
+    [[ -n "$head" ]] && { echo; echo "CANDIDATE: $head"; }
+    [[ -n "$reviewed" ]] && { echo; echo "REVIEWED_HEAD: $reviewed"; }
+    [[ -n "$pr" ]] && echo "PR: #$pr"
+  } > "$destination"
+}
+
+commit_changes() {
+  local message="$1"
+  [[ -n "$(git -C "$worktree" status --porcelain)" ]] || return 0
+  git -C "$worktree" diff --check
+  git -C "$worktree" add -A
+  git -C "$worktree" diff --cached --check
+  if ! git -C "$worktree" diff --cached --quiet; then
+    git -C "$worktree" commit -m "$message" >/dev/null
+  fi
+}
+
+publish_branch() {
+  "$repo_root/scripts/cddm-publish-branch.sh" "$worktree"
+}
+
+field() {
+  local name="$1"
+  sed -n "s/^${name}:[[:space:]]*//p" "$result_file" | head -n 1
 }
 
 if [[ "$activity" == "review" ]]; then
   pr="$target"
-  prompt_path="$repo_root/.codex/prompts/$template"
-  [[ -f "$prompt_path" ]] || { echo "Missing prompt template: $prompt_path" >&2; exit 1; }
+  review_base="$(gh pr view "$pr" --repo "$repo_slug" --json baseRefOid --jq '.baseRefOid')"
+  review_head="$(gh pr view "$pr" --repo "$repo_slug" --json headRefOid --jq '.headRefOid')"
+  [[ -n "$review_base" && -n "$review_head" ]] || { echo "Unable to resolve PR Base/Head." >&2; exit 1; }
 
-  head_sha="$(gh pr view "$pr" --json headRefOid --jq '.headRefOid')"
-  [[ -n "$head_sha" && "$head_sha" != "null" ]] || {
-    echo "Unable to resolve PR #$pr Head." >&2
-    exit 1
-  }
-
-  # Fetch the exact current PR Head, then create a fresh detached review worktree.
   git fetch origin "pull/$pr/head" --quiet
-  review_worktree="$repo_root/.worktrees/review-pr-$pr-${head_sha:0:12}-$$"
-  [[ ! -e "$review_worktree" ]] || {
-    echo "Unexpected existing review worktree path: $review_worktree" >&2
-    exit 1
-  }
-  git worktree add --detach "$review_worktree" "$head_sha" >/dev/null
-  worktree="$review_worktree"
-  trap cleanup_review_worktree EXIT
+  fetched_head="$(git rev-parse FETCH_HEAD)"
+  [[ "$fetched_head" == "$review_head" ]] || { echo "PR Head changed during review setup; rerun review." >&2; exit 3; }
 
-  actual_head="$(git -C "$worktree" rev-parse HEAD)"
-  [[ "$actual_head" == "$head_sha" ]] || {
-    echo "Review worktree Head mismatch: expected $head_sha, got $actual_head" >&2
-    exit 1
-  }
-  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || {
-    echo "Fresh review worktree is unexpectedly dirty." >&2
-    exit 1
-  }
+  worktree="$repo_root/.worktrees/review-pr-$pr-${review_head:0:12}-$$"
+  git worktree add --detach "$worktree" "$review_head" >/dev/null
+  cleanup_review=true
+  [[ "$(git -C "$worktree" rev-parse HEAD)" == "$review_head" ]] || { echo "Review Head mismatch." >&2; exit 1; }
+  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { echo "Fresh review worktree is dirty." >&2; exit 1; }
 
-  prompt="$(sed "s/{{PR}}/$pr/g" "$prompt_path")"
+  prompt="$(sed "s/{{PR}}/$pr/g" "$repo_root/.codex/prompts/$template")"
+  prompt+=$'\n\nHOST CANDIDATE CONTEXT:\nBASE SHA: '"$review_base"$'\nHEAD SHA: '"$review_head"
 else
   issue="$target"
-  prompt_path="$repo_root/.codex/prompts/$template"
-  [[ -f "$prompt_path" ]] || { echo "Missing prompt template: $prompt_path" >&2; exit 1; }
-
   branch="change/$issue"
   worktree="$repo_root/.worktrees/issue-$issue"
 
   if [[ -d "$worktree" ]]; then
-    current_branch="$(git -C "$worktree" branch --show-current)"
-    [[ "$current_branch" == "$branch" ]] || {
-      echo "Existing worktree $worktree is on '$current_branch', expected '$branch'." >&2
-      exit 1
-    }
+    [[ "$(git -C "$worktree" rev-parse --abbrev-ref HEAD)" == "$branch" ]] || { echo "Unexpected branch in $worktree" >&2; exit 1; }
   else
     if git show-ref --verify --quiet "refs/heads/$branch"; then
+      if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+        if git merge-base --is-ancestor "$branch" "origin/$branch"; then
+          git branch -f "$branch" "origin/$branch" >/dev/null
+        elif ! git merge-base --is-ancestor "origin/$branch" "$branch"; then
+          echo "Local and remote $branch diverged; Lead reconciliation required." >&2
+          exit 1
+        fi
+      fi
       git worktree add "$worktree" "$branch" >/dev/null
     elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
       git branch --track "$branch" "origin/$branch" >/dev/null
       git worktree add "$worktree" "$branch" >/dev/null
     else
-      if [[ "$activity" == "fix-ci" ]]; then
-        echo "No existing branch '$branch' for CI repair." >&2
-        exit 1
-      fi
+      [[ "$activity" != "fix-ci" ]] || { echo "No existing branch $branch for CI repair." >&2; exit 1; }
       git worktree add -b "$branch" "$worktree" origin/main >/dev/null
     fi
   fi
 
-  prompt="$(sed "s/{{ISSUE}}/$issue/g" "$prompt_path")"
+  prompt="$(sed "s/{{ISSUE}}/$issue/g" "$repo_root/.codex/prompts/$template")"
+  prompt+=$'\n\nHOST ISSUE CONTEXT:\n'"$(issue_context "$issue")"
 fi
 
-echo "CDDM Codex worker"
-echo "  activity:  $activity"
-echo "  target:    $target"
-echo "  model:     $model"
-echo "  reasoning: $reasoning"
-echo "  worktree:  $worktree"
-
-printf '%s\n' "$prompt" | codex exec \
+set +e
+printf '%s\n' "$prompt" | codex exec --ephemeral \
   -C "$worktree" \
   --sandbox workspace-write \
   -m "$model" \
   -c "model_reasoning_effort=\"$reasoning\"" \
+  --output-last-message "$result_file" \
   -
+worker_rc=$?
+set -e
+
+[[ $worker_rc -eq 0 ]] || { echo "Codex Worker failed with exit code $worker_rc" >&2; [[ -s "$result_file" ]] && cat "$result_file"; exit "$worker_rc"; }
+[[ -s "$result_file" ]] || { echo "Worker produced no final result." >&2; exit 1; }
+expected_activity="$(printf '%s' "$activity" | tr '[:lower:]-' '[:upper:]_')"
+[[ "$(field ACTIVITY)" == "$expected_activity" ]] || { echo "Invalid Worker result activity." >&2; cat "$result_file" >&2; exit 1; }
+
+if [[ "$activity" == "review" ]]; then
+  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || { echo "Reviewer modified the exact Candidate; verdict discarded." >&2; exit 1; }
+  current_base="$(gh pr view "$pr" --repo "$repo_slug" --json baseRefOid --jq '.baseRefOid')"
+  current_head="$(gh pr view "$pr" --repo "$repo_slug" --json headRefOid --jq '.headRefOid')"
+  [[ "$current_base" == "$review_base" && "$current_head" == "$review_head" ]] || { echo "PR Base/Head changed during review; verdict discarded." >&2; exit 3; }
+  append_host_metadata "$evidence_file" "" "$pr" "$review_head"
+  gh pr comment "$pr" --repo "$repo_slug" --body-file "$evidence_file" >/dev/null
+  cat "$result_file"
+  exit 0
+fi
+
+status="$(field STATUS)"
+pr="$(find_pr_for_branch "$branch")"
+dirty=false
+[[ -n "$(git -C "$worktree" status --porcelain)" ]] && dirty=true
+
+case "$activity:$status" in
+  shape:READY|shape:DECISION_REQUIRED|shape:DISCOVERY_REQUIRED)
+    if [[ "$dirty" == true ]]; then
+      commit_changes "Shape Issue #$issue"
+    fi
+    ahead_count="$(git -C "$worktree" rev-list --count "origin/main..HEAD")"
+    if [[ "$ahead_count" -gt 0 ]]; then
+      publish_branch
+      pr="$(ensure_pr "$issue" "$branch")"
+    fi
+    ;;
+  implement:DONE)
+    [[ "$dirty" == true ]] || { echo "IMPLEMENT:DONE produced no file changes; return NO-OP when no implementation change is required." >&2; exit 1; }
+    commit_changes "Implement Issue #$issue"
+    publish_branch
+    pr="$(ensure_pr "$issue" "$branch")"
+    gh pr ready "$pr" --repo "$repo_slug" >/dev/null
+    ;;
+  implement:BLOCKED)
+    ;;
+  implement:NO-OP)
+    [[ "$dirty" == false ]] || { echo "NO-OP result left file changes; refusing persistence." >&2; exit 1; }
+    ;;
+  investigate:RESOLVED|investigate:BLOCKED|investigate:NO_DEFECT)
+    [[ "$dirty" == false ]] || { echo "Investigation modified files; refusing persistence." >&2; exit 1; }
+    ;;
+  fix-ci:FIXED)
+    [[ "$dirty" == true ]] || { echo "FIX_CI:FIXED produced no file changes; use INFRA_FAILURE/INCONCLUSIVE when no correction is required." >&2; exit 1; }
+    commit_changes "Fix CI for Issue #$issue"
+    publish_branch
+    pr="$(ensure_pr "$issue" "$branch")"
+    ;;
+  fix-ci:INFRA_FAILURE|fix-ci:BLOCKED|fix-ci:INCONCLUSIVE)
+    [[ "$dirty" == false ]] || { echo "Non-fix CI result left file changes; refusing persistence." >&2; exit 1; }
+    ;;
+  *)
+    echo "Unexpected result status '$status' for activity '$activity'." >&2
+    cat "$result_file" >&2
+    exit 1
+    ;;
+esac
+
+candidate=""
+if [[ -n "$pr" ]]; then
+  candidate="$(git -C "$worktree" rev-parse HEAD)"
+  append_host_metadata "$evidence_file" "$candidate" "$pr" ""
+  gh pr comment "$pr" --repo "$repo_slug" --body-file "$evidence_file" >/dev/null
+else
+  append_host_metadata "$evidence_file" "" "" ""
+  gh issue comment "$issue" --repo "$repo_slug" --body-file "$evidence_file" >/dev/null
+fi
+
+cat "$result_file"
