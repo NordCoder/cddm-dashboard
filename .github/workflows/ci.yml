@@ -91,7 +91,7 @@ jobs:
           bash -n scripts/cddm-host-tool-shim.sh
           bash -n scripts/cddm-publish-branch.sh
           bash -n scripts/test-cddm-runtime-r1.sh
-          python3 -m py_compile scripts/cddm-codex-observe.py
+          python3 -m py_compile scripts/cddm-codex-observe.py scripts/cddm-codex-proxy.py
       - name: Validate Codex project config
         run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
       - name: Validate Codex result schema
@@ -112,7 +112,8 @@ jobs:
           grep -q 'stop_change' scripts/cddm-codex-change.sh
           grep -q 'status|watch|logs|turns' scripts/cddm-codex-change.sh
           grep -q 'CDDM_BLOCK_CODEX' scripts/cddm-codex-worker-shim.sh
-          grep -q 'cddm-codex-observe.py' scripts/cddm-codex-worker-shim.sh
+          grep -q 'cddm-codex-proxy.py' scripts/cddm-codex-worker-shim.sh
+          grep -q 'raw Codex stream remains active' scripts/cddm-codex-proxy.py
           grep -q 'CDDM_HOST_V2_UI' scripts/cddm-host-tool-shim.sh
           for prompt in .codex/prompts/change-start.md .codex/prompts/change-resume.md .codex/prompts/change-rotate.md; do
             grep -q 'Stable Change Goal:' "$prompt"
