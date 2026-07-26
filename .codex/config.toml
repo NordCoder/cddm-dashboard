@@ -1,5 +1,5 @@
 # Project-scoped Codex defaults. Loaded only when this repository is trusted.
-# Task-specific model tier and reasoning effort are selected per CDDM-CODEX-ECO;
+# Task-specific model tier and reasoning effort are selected by the Web Lead;
 # do not pin one model for all Changes here.
 
 approval_policy = "on-request"
@@ -7,6 +7,11 @@ sandbox_mode = "workspace-write"
 web_search = "cached"
 model_reasoning_summary = "none"
 model_verbosity = "low"
+
+# Trusted local workers need outbound access for git fetch/push and gh.
+# Filesystem writes remain bounded by workspace-write.
+[sandbox_workspace_write]
+network_access = true
 
 # CDDM parallelism is Change/worktree-level. Do not spawn an internal agent swarm
 # inside one Change unless a future explicit contract changes this policy.
