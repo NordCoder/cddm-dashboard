@@ -5,6 +5,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 observer="$repo_root/scripts/cddm-codex-observe.py"
 proxy="$repo_root/scripts/cddm-codex-proxy.py"
 change="$repo_root/scripts/cddm-codex-change.sh"
+core="$repo_root/scripts/cddm-codex-change-core.sh"
 worker_shim="$repo_root/scripts/cddm-codex-worker-shim.sh"
 host_tool_shim="$repo_root/scripts/cddm-host-tool-shim.sh"
 issue=990032
@@ -63,14 +64,18 @@ flock "$lock" -c 'sleep 2' &
 locker=$!
 sleep 0.1
 timeout 1 "$change" status "$issue" >"$tmp/status.out"
+timeout 1 "$change" status "$issue" --json >"$tmp/status.json"
 timeout 1 "$change" logs "$issue" --raw >"$tmp/raw.out"
 timeout 1 "$change" turns "$issue" >"$tmp/turns.out"
 wait "$locker"
 grep -q "Issue #$issue · RUNNING" "$tmp/status.out"
+jq -e --argjson issue "$issue" '.issue == $issue' "$tmp/status.json" >/dev/null
 grep -q '10/4/2' "$tmp/turns.out"
 grep -q 'thread.started' "$tmp/raw.out"
 
-echo "[R1] watch exits independently when active state ends"
+echo "[R1] watch bypasses lock and exits independently"
+flock "$lock" -c 'sleep 2' &
+locker=$!
 (
   sleep 0.5
   printf '%s\n' '{"type":"turn.completed"}' >>"$events"
@@ -85,6 +90,7 @@ p.write_text(json.dumps(s))
 PY
 ) &
 timeout 3 "$change" watch "$issue" --stall-seconds 1 >"$tmp/watch.out"
+wait "$locker"
 grep -q 'TURN    COMPLETED' "$tmp/watch.out"
 grep -q 'active turn ended' "$tmp/watch.out"
 
@@ -102,12 +108,14 @@ EOF
 
 echo "[R1] live proxy preserves raw JSONL and derives pretty activity"
 python3 "$proxy" --repo "$repo_root" --issue "$issue" --mode resume --stall-seconds 5 -- \
-  python3 -c 'print("{\"type\":\"thread.started\",\"thread_id\":\"proxy-thread\"}", flush=True); print("{\"type\":\"item.started\",\"item\":{\"type\":\"file_change\",\"path\":\"x.go\"}}", flush=True)' \
+  python3 -c 'print("{\"type\":\"thread.started\",\"thread_id\":\"proxy-thread\"}", flush=True); print("{\"type\":\"item.started\",\"item\":{\"type\":\"file_change\",\"path\":\"x.go\"}}", flush=True); print("{\"type\":\"usage\",\"usage\":{\"input_tokens\":12,\"cached_input_tokens\":5,\"output_tokens\":3}}", flush=True)' \
   >"$tmp/proxy.raw" 2>"$tmp/proxy.pretty"
 grep -q 'proxy-thread' "$tmp/proxy.raw"
 grep -q 'THREAD  proxy-thread' "$tmp/proxy.pretty"
 grep -q 'EDIT    x.go' "$tmp/proxy.pretty"
 grep -q 'CODEX   exit=0 · CONTINUE' "$tmp/proxy.pretty"
+"$change" turns "$issue" >"$tmp/turns-after-proxy.out"
+grep -q '12/5/3' "$tmp/turns-after-proxy.out"
 
 echo "[R1] observer absence degrades to raw pass-through"
 mkdir -p "$tmp/no-observer"
@@ -164,6 +172,53 @@ kill "$unrelated"
 wait "$unrelated" 2>/dev/null || true
 grep -q 'Refusing stop' "$tmp/stop.err"
 
+echo "[R1] stop terminates a proven owned session"
+python3 - "$state" "$core" "$issue" <<'PY' &
+import json, os, pathlib, signal, sys, time
+state_path = pathlib.Path(sys.argv[1])
+# Remaining argv deliberately place the canonical core path + mode + issue in
+# /proc/<pid>/cmdline so the production ownership predicate is exercised.
+def finish(_signum, _frame):
+    state = json.loads(state_path.read_text())
+    state["active_pid"] = None
+    state["active_mode"] = None
+    state["status"] = "TURN_FAILED"
+    state_path.write_text(json.dumps(state))
+    raise SystemExit(143)
+signal.signal(signal.SIGTERM, finish)
+while True:
+    time.sleep(0.2)
+PY
+owned=$!
+# Relaunch through setsid with the identity arguments present in cmdline.
+kill "$owned" 2>/dev/null || true
+wait "$owned" 2>/dev/null || true
+setsid python3 -c '
+import json, pathlib, signal, sys, time
+state_path = pathlib.Path(sys.argv[1])
+def finish(_signum, _frame):
+    state = json.loads(state_path.read_text())
+    state["active_pid"] = None
+    state["active_mode"] = None
+    state["status"] = "TURN_FAILED"
+    state_path.write_text(json.dumps(state))
+    raise SystemExit(143)
+signal.signal(signal.SIGTERM, finish)
+while True: time.sleep(0.2)
+' "$state" "$core" resume "$issue" &
+owned=$!
+python3 - "$state" "$owned" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = json.loads(p.read_text())
+s["active_mode"] = "resume"
+s["active_pid"] = int(sys.argv[2])
+p.write_text(json.dumps(s))
+PY
+"$change" stop "$issue" >"$tmp/owned-stop.out" 2>"$tmp/owned-stop.err"
+! kill -0 "$owned" 2>/dev/null
+jq -e '.active_pid == null and .active_mode == null' "$state" >/dev/null
+
 echo "[R1] V2 presentation keeps full raw log and bounded terminal output"
 fake="$tmp/fake-go"
 cat >"$fake" <<'EOF'
@@ -182,6 +237,8 @@ set -e
 grep -q 'Go tests.*PASS' "$tmp/v2-pass.out"
 grep -q 'raw-v2-output' "$v2"
 ! grep -q 'raw-v2-output' "$tmp/v2-pass.out"
+"$change" logs "$issue" --v2 >"$tmp/v2-read.out"
+grep -q 'raw-v2-output' "$tmp/v2-read.out"
 
 set +e
 FAKE_RC=7 CDDM_HOST_V2_UI=1 CDDM_V2_TOOL_DEPTH=0 CDDM_REPO_ROOT="$repo_root" CDDM_REAL_GO="$fake" "$tmp/go" test ./... 2>&1 \
