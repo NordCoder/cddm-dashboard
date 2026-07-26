@@ -119,7 +119,7 @@ state_init() {
   jq -n --argjson version 3 --arg issue "$issue" --arg branch "$branch" --arg worktree "$worktree" \
     --arg model "$model" --arg reasoning "$reasoning" --arg contract "$contract" --arg status "$status" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,candidate_result:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,updated_at:$updated_at}' >"$tmp"
+    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,candidate_result:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_result:null,active_v2_log:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,last_result:null,last_result_rc:null,last_counted_result:null,updated_at:$updated_at}' >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -183,17 +183,22 @@ state_clear_active() {
   mv "$tmp" "$state_file"
 }
 
-state_set_last_result() {
-  local result="$1" tmp="$state_file.tmp"
-  jq --arg result "$result" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.last_result=$result | .updated_at=$updated_at' "$state_file" >"$tmp"
+state_set_result_disposition() {
+  local result="$1" rc="$2" tmp="$state_file.tmp"
+  jq --arg result "$result" --argjson rc "$rc" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.last_result=$result | .last_result_rc=$rc | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
-state_record_turn() {
-  local tmp="$state_file.tmp"
-  jq --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.thread_turn_count=((.thread_turn_count // 0)+1) | .total_turn_count=((.total_turn_count // 0)+1) | .updated_at=$updated_at' "$state_file" >"$tmp"
+state_record_turn_for_result() {
+  local result="$1" tmp="$state_file.tmp"
+  jq --arg result "$result" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    'if (.last_counted_result // "") == $result then .
+     else .thread_turn_count=((.thread_turn_count // 0)+1)
+       | .total_turn_count=((.total_turn_count // 0)+1)
+       | .last_counted_result=$result
+       | .updated_at=$updated_at
+     end' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -372,16 +377,21 @@ recover_active_turn_state() {
   # A completed Codex turn is accepted only with the exact result path and the
   # thread.started identity that belongs to this recorded turn.
   if [[ -n "$result" && -s "$result" ]]; then
-    if ! validate_result "$result"; then
-      state_patch_status INVALID_RESULT
-      echo "Recovered completed turn has an invalid structured result: $result" >&2
-      return 4
-    fi
     set +e
     run_strict reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason"
     thread_rc=$?
     set -e
     [[ $thread_rc -eq 0 ]] || return 4
+
+    state_record_turn_for_result "$result"
+    if ! validate_result "$result"; then
+      state_patch_status INVALID_RESULT
+      state_set_result_disposition "$result" 13
+      [[ -z "$pid_file" ]] || rm -f "$pid_file"
+      state_clear_active
+      echo "Recovered completed turn has an invalid structured result: $result" >&2
+      return 13
+    fi
 
     set +e
     run_strict dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
@@ -538,16 +548,20 @@ reconcile_pending_candidate() {
 }
 
 commit_and_publish_candidate() {
-  local result_file="$1" v2_log="$2" head parent tree remote_before
+  local result_file="$1" v2_log="$2" head parent tree remote_before v2_rc
   if [[ -z "$(git -C "$worktree" status --porcelain)" ]]; then
     state_patch_status INVALID_CANDIDATE_READY
-    state_set_last_result "$result_file"
+    state_set_result_disposition "$result_file" 1
     echo "CANDIDATE_READY produced no file changes; use NO_OP." >&2
     return 1
   fi
-  if ! run_candidate_v2 "$v2_log"; then
+  set +e
+  run_strict run_candidate_v2 "$v2_log"
+  v2_rc=$?
+  set -e
+  if [[ $v2_rc -ne 0 ]]; then
     state_patch_status V2_FAILED
-    state_set_last_result "$result_file"
+    state_set_result_disposition "$result_file" 4
     echo "Host V2 failed; no Candidate published." >&2
     return 4
   fi
@@ -560,7 +574,7 @@ commit_and_publish_candidate() {
   remote_before=""
   if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then remote_before="$(git rev-parse "origin/$branch")"; fi
   state_set_prepared_candidate "$result_file" "$head" "$parent" "$remote_before"
-  state_set_last_result "$result_file"
+  state_set_result_disposition "$result_file" 0
   git -C "$worktree" reset --hard "$head" >/dev/null
   state_patch_status COMMITTED_PENDING_PUSH "$head"
   publish_committed_candidate
@@ -608,20 +622,21 @@ $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
 }
 
 dispatch_result_file() {
-  local result_file="$1" v2_log="$2" result_status last_result candidate_result
+  local result_file="$1" v2_log="$2" result_status last_result last_result_rc candidate_result
   validate_result "$result_file" || return 13
   result_status="$(jq -r '.status' "$result_file")"
   last_result="$(jq -r '.last_result // ""' "$state_file")"
+  last_result_rc="$(jq -r '.last_result_rc // 0' "$state_file")"
 
   # A result path is the durable identity of one Worker turn. Repeated statuses
   # are never evidence that a different result has already been consumed.
-  [[ "$last_result" != "$result_file" ]] || return 0
+  [[ "$last_result" != "$result_file" ]] || return "$last_result_rc"
 
   case "$result_status" in
     CANDIDATE_READY)
       candidate_result="$(jq -r '.candidate_result // ""' "$state_file")"
       if [[ "$candidate_result" == "$result_file" ]]; then
-        state_set_last_result "$result_file"
+        state_set_result_disposition "$result_file" 0
         reconcile_pending_candidate
         return
       fi
@@ -629,25 +644,25 @@ dispatch_result_file() {
       ;;
     CONTINUE)
       state_patch_status CONTINUE
-      state_set_last_result "$result_file"
+      state_set_result_disposition "$result_file" 0
       cat "$result_file"
       ;;
     BLOCKED)
       state_patch_status BLOCKER_PENDING_GITHUB
       persist_blocker "$result_file"
       state_patch_status BLOCKED
-      state_set_last_result "$result_file"
+      state_set_result_disposition "$result_file" 0
       cat "$result_file"
       ;;
     NO_OP)
       if [[ -n "$(git -C "$worktree" status --porcelain)" ]]; then
         state_patch_status INVALID_NO_OP
-        state_set_last_result "$result_file"
+        state_set_result_disposition "$result_file" 14
         echo "NO_OP returned with file changes." >&2
         return 14
       fi
       state_patch_status NO_OP
-      state_set_last_result "$result_file"
+      state_set_result_disposition "$result_file" 0
       cat "$result_file"
       ;;
   esac
@@ -733,10 +748,28 @@ run_codex_turn() {
     return 10
   fi
 
-  state_record_turn
-  if [[ $rc -ne 0 ]]; then state_patch_status TURN_FAILED; state_clear_active; echo "Codex turn failed; worktree/session preserved." >&2; return "$rc"; fi
-  [[ -s "$result" ]] || { state_patch_status EMPTY_RESULT; state_clear_active; echo "Codex produced no final result." >&2; return 12; }
-  validate_result "$result" || { state_patch_status INVALID_RESULT; cat "$result" >&2; state_clear_active; return 13; }
+  state_record_turn_for_result "$result"
+  if [[ $rc -ne 0 ]]; then
+    state_patch_status TURN_FAILED
+    state_set_result_disposition "$result" "$rc"
+    state_clear_active
+    echo "Codex turn failed; worktree/session preserved." >&2
+    return "$rc"
+  fi
+  if [[ ! -s "$result" ]]; then
+    state_patch_status EMPTY_RESULT
+    state_set_result_disposition "$result" 12
+    state_clear_active
+    echo "Codex produced no final result." >&2
+    return 12
+  fi
+  if ! validate_result "$result"; then
+    state_patch_status INVALID_RESULT
+    state_set_result_disposition "$result" 13
+    cat "$result" >&2
+    state_clear_active
+    return 13
+  fi
 
   set +e
   run_strict reconcile_completed_turn_thread "$mode" "$events" "$thread_id" "$model" "$reasoning" "$rotation_reason"
