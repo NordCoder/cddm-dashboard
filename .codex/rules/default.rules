@@ -1,60 +1,24 @@
 # CDDM WebLead Worker command policy.
-# Worker tools are intentionally read/local-edit oriented. Host-side orchestration owns Git/GitHub writes.
+# Workers reason/edit/test locally. The trusted host launcher owns Git metadata,
+# networked dependency verification, and all GitHub delivery writes.
 
 # Routine repository inspection.
 prefix_rule(
     pattern=["git", ["status", "diff", "log", "show", "rev-parse", "ls-files"]],
     decision="allow",
-    justification="Workers may inspect repository state and diffs.",
+    justification="Workers may inspect local repository state and diffs.",
 )
 
-# Read-only GitHub inspection.
+# Git metadata and remote operations belong to the trusted host launcher.
 prefix_rule(
-    pattern=["gh", "issue", ["view", "list", "status"]],
-    decision="allow",
-    justification="Workers may read Issue state.",
-)
-prefix_rule(
-    pattern=["gh", "pr", ["view", "list", "checks", "diff", "status"]],
-    decision="allow",
-    justification="Workers may inspect PR and exact-Candidate evidence.",
-)
-prefix_rule(
-    pattern=["gh", "run", ["view", "list", "watch"]],
-    decision="allow",
-    justification="Workers may inspect CI evidence.",
+    pattern=["git", ["add", "commit", "fetch", "pull", "push", "checkout", "switch", "merge", "rebase", "reset", "clean", "remote", "tag", "branch"]],
+    decision="forbidden",
+    justification="Workers edit and verify files; host orchestration owns Git state transitions and publication.",
 )
 
-# Git metadata and remote writes belong to the trusted host launcher.
+# Workers receive Issue/PR/CI context from the host and do not access GitHub directly.
 prefix_rule(
-    pattern=["git", ["add", "commit", "fetch", "push", "checkout", "switch", "merge", "rebase", "reset", "clean", "remote", "tag"]],
+    pattern=["gh"],
     decision="forbidden",
-    justification="Workers edit and verify files; the host launcher owns Git metadata and remote delivery writes.",
-)
-prefix_rule(
-    pattern=["git", "branch"],
-    decision="forbidden",
-    justification="Branch lifecycle is host-owned; use git rev-parse for read-only branch identity.",
-)
-
-# All GitHub writes and credential access are host/Lead authority.
-prefix_rule(
-    pattern=["gh", "pr", ["create", "comment", "ready", "merge", "close", "edit", "reopen"]],
-    decision="forbidden",
-    justification="PR writes are persisted by the trusted host launcher or Web Lead.",
-)
-prefix_rule(
-    pattern=["gh", "issue", ["comment", "close", "edit", "reopen", "create"]],
-    decision="forbidden",
-    justification="Issue writes are persisted by the trusted host launcher or Web Lead.",
-)
-prefix_rule(
-    pattern=["gh", "api"],
-    decision="forbidden",
-    justification="Workers must not bypass typed GitHub authority boundaries.",
-)
-prefix_rule(
-    pattern=["gh", "auth"],
-    decision="forbidden",
-    justification="Workers do not retrieve or modify GitHub credentials.",
+    justification="GitHub inspection and all GitHub writes are host/Web Lead authority; Worker prompts receive bounded host context.",
 )

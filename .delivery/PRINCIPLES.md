@@ -15,14 +15,14 @@
 
 - The Owner governs product intent, Milestone approval, material product/risk decisions, and product acceptance; the Owner does not operate the routine delivery pipeline.
 - ChatGPT Web is the logical Lead and owns planning, dependency/parallelism decisions, shaping orchestration, worker/model routing, Candidate/CI/review reconciliation, corrections, and merge preparation.
-- Codex Workers own bounded reasoning, file edits, and local verification; they do not own Git metadata or GitHub delivery writes.
-- A deterministic host launcher owns worktree setup plus staging, commit, bounded branch publication, PR/result persistence, and exact-Head review handoff after Worker completion.
+- Codex Workers own bounded reasoning, file edits, and network-free local verification; they do not receive GitHub delivery authority or shell-network access.
+- A deterministic trusted host launcher owns Git metadata, GitHub context, network-capable Candidate verification, bounded branch publication, PR/result persistence, and exact-Head review handoff after Worker completion.
 - GitHub is the canonical delivery record; chat memory and narrative handoffs are not authoritative.
 - One Change has one observable Outcome, one primary Implementor, one isolated worktree/branch, one primary PR, and one current Candidate.
 - Future Roadmap work is planning context, not current Scope.
 - High-risk work with unresolved material Design is shaped before product-code implementation.
 - Risk determines verification and review depth; Diff size alone does not.
-- Local verification is the primary development feedback loop. CI independently confirms a published exact Candidate.
+- Local verification is the primary development feedback loop. The Worker runs focused checks; the trusted host runs the authoritative Candidate V2 before publication; CI independently confirms the published exact Candidate.
 - Candidate evidence is exact-Head bound. A new Head invalidates prior final CI and review authority.
 - Independent Ready Changes may execute in parallel only when dependencies and shared mutable contracts permit it.
 - Shared contracts are fixed before dependent parallel implementations rely on them.

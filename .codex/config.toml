@@ -8,9 +8,10 @@ web_search = "cached"
 model_reasoning_summary = "none"
 model_verbosity = "low"
 
-# Network is available for bounded read-only GitHub access and task research.
+# Shell/network access is disabled for Workers. The trusted host supplies Issue/PR/CI
+# context and performs dependency-capable Candidate verification outside the model sandbox.
 [sandbox_workspace_write]
-network_access = true
+network_access = false
 
 # CDDM parallelism is Change/worktree-level, not an internal swarm inside one Change.
 [agents]
