@@ -25,7 +25,7 @@ Chat history is not authoritative. `docs/cddm-minimal.md` describes Supervisor b
 
 ## Git and GitHub authority
 
-`git` and `gh` are normal Worker tools for the current Change.
+`git` and `gh` are normal Worker tools for the current Change, subject to project rules.
 
 Workers MAY:
 
@@ -33,7 +33,7 @@ Workers MAY:
 - read the current Issue/PR/checks/runs;
 - edit files inside the current worktree;
 - commit coherent in-scope work;
-- push the current Change branch;
+- publish the current `change/<issue>` branch only through `bash scripts/cddm-publish-branch.sh`;
 - create or update the current Change draft PR;
 - mark the PR ready only after Candidate-ready verification;
 - post one compact final activity result to the current Issue/PR.
@@ -41,7 +41,9 @@ Workers MAY:
 Workers MUST NOT:
 
 - push or commit directly to `main`;
-- force-push or rewrite published history;
+- invoke `git push` directly; branch publication uses the trusted helper only;
+- force-push, delete remote refs, or rewrite published history;
+- modify Git remotes;
 - merge or close PRs;
 - close, relabel, reassign, or change milestones on Issues;
 - modify another Change branch/worktree;
@@ -58,13 +60,14 @@ External writes are limited to the current Change and only when the activity aut
 - Resolve material Design needed for implementation readiness.
 - Do not write product implementation code.
 - Update only the canonical Change Contract and directly necessary planning metadata.
-- Commit/push the shaped contract and create/reuse one draft PR for the Change.
+- Commit the shaped contract, publish with `bash scripts/cddm-publish-branch.sh`, and create/reuse one draft PR for the Change.
 
 ### Implement
 
 - Start only when the Change Contract is implementation-ready and dependencies are satisfied.
 - Implement the smallest maintainable solution inside Scope.
 - Continue the same Change branch/PR created during shaping when one exists.
+- Publish the Candidate with `bash scripts/cddm-publish-branch.sh`.
 - Do not implement future Roadmap work.
 
 ### Investigate
@@ -77,11 +80,12 @@ External writes are limited to the current Change and only when the activity aut
 - Work only on the exact failing Candidate branch.
 - Classify the failure before editing.
 - Do not change product code for infrastructure-only failures.
+- Publish a corrected Candidate with `bash scripts/cddm-publish-branch.sh`.
 
 ### Review
 
 - Review one exact Candidate independently.
-- Do not modify files, commits, or the Candidate branch.
+- Do not modify files, commits, branches, or PR state.
 - Any Head change invalidates the verdict.
 
 ## Parallel work

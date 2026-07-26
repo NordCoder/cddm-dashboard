@@ -12,7 +12,7 @@ description: Shape or refine one Medium/High CDDM Codex Change before implementa
 5. Do not write product code during shaping. Update only the canonical Change/planning artifacts required to make execution unambiguous.
 6. If evidence is insufficient, return the exact Decision/Discovery needed; do not invent semantics.
 7. Mark the canonical Change Contract implementation-ready only when material ambiguity is resolved and dependencies permit execution.
-8. Commit and push the shaped contract on the current Change branch. Create or reuse one draft PR for the Change.
+8. Commit the shaped contract and publish the current Change branch only with `bash scripts/cddm-publish-branch.sh`. Create or reuse one draft PR for the Change.
 9. Post exactly one final `CDDM Worker Result` comment to that PR. Do not post progress comments.
 
 Result schema:

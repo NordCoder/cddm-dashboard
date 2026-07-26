@@ -98,15 +98,30 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   exit 1
 fi
 
-# Always launch from the current canonical main and current project prompts/rules.
-git fetch origin main --quiet
+# Refresh all remote refs, fast-forward local main, then prove it is exactly canonical.
+git fetch --prune origin --quiet
 git merge --ff-only origin/main --quiet
+local_main="$(git rev-parse HEAD)"
+remote_main="$(git rev-parse origin/main)"
+if [[ "$local_main" != "$remote_main" ]]; then
+  echo "Local main is not identical to origin/main; refusing to launch Workers." >&2
+  echo "local:  $local_main" >&2
+  echo "origin: $remote_main" >&2
+  exit 1
+fi
 
 rules_path="$repo_root/.codex/rules/default.rules"
 [[ -f "$rules_path" ]] || { echo "Missing Codex rules: $rules_path" >&2; exit 1; }
 codex execpolicy check --rules "$rules_path" -- git status >/dev/null
 
 mkdir -p "$repo_root/.worktrees"
+
+review_worktree=""
+cleanup_review_worktree() {
+  if [[ -n "$review_worktree" && -d "$review_worktree" ]]; then
+    git worktree remove --force "$review_worktree" >/dev/null 2>&1 || true
+  fi
+}
 
 if [[ "$activity" == "review" ]]; then
   pr="$target"
@@ -119,18 +134,26 @@ if [[ "$activity" == "review" ]]; then
     exit 1
   }
 
+  # Fetch the exact current PR Head, then create a fresh detached review worktree.
   git fetch origin "pull/$pr/head" --quiet
+  review_worktree="$repo_root/.worktrees/review-pr-$pr-${head_sha:0:12}-$$"
+  [[ ! -e "$review_worktree" ]] || {
+    echo "Unexpected existing review worktree path: $review_worktree" >&2
+    exit 1
+  }
+  git worktree add --detach "$review_worktree" "$head_sha" >/dev/null
+  worktree="$review_worktree"
+  trap cleanup_review_worktree EXIT
 
-  worktree="$repo_root/.worktrees/review-pr-$pr"
-  if [[ -d "$worktree" ]]; then
-    existing_head="$(git -C "$worktree" rev-parse HEAD)"
-    if [[ "$existing_head" != "$head_sha" ]]; then
-      git worktree remove --force "$worktree"
-    fi
-  fi
-  if [[ ! -d "$worktree" ]]; then
-    git worktree add --detach "$worktree" "$head_sha" >/dev/null
-  fi
+  actual_head="$(git -C "$worktree" rev-parse HEAD)"
+  [[ "$actual_head" == "$head_sha" ]] || {
+    echo "Review worktree Head mismatch: expected $head_sha, got $actual_head" >&2
+    exit 1
+  }
+  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || {
+    echo "Fresh review worktree is unexpectedly dirty." >&2
+    exit 1
+  }
 
   prompt="$(sed "s/{{PR}}/$pr/g" "$prompt_path")"
 else

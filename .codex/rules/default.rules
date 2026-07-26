@@ -13,11 +13,6 @@ prefix_rule(
     justification="Workers may refresh remote state for the current Change.",
 )
 prefix_rule(
-    pattern=["git", "push"],
-    decision="allow",
-    justification="Workers may publish the current Change branch/Candidate; stricter destructive push rules below override this allow.",
-)
-prefix_rule(
     pattern=["gh", "issue", ["view", "list", "status"]],
     decision="allow",
     justification="Workers may read Issue state.",
@@ -34,6 +29,11 @@ prefix_rule(
 )
 
 # Bounded delivery writes permitted by AGENTS.md.
+prefix_rule(
+    pattern=["bash", "scripts/cddm-publish-branch.sh"],
+    decision="allow",
+    justification="Trusted helper publishes only the current change/<issue> branch to the expected repository.",
+)
 prefix_rule(
     pattern=["gh", "pr", "create"],
     decision="allow",
@@ -55,7 +55,19 @@ prefix_rule(
     justification="Material investigation evidence may be persisted to the current Issue.",
 )
 
-# Consequential actions remain outside Worker authority.
+# Direct remote Git mutation is outside Worker authority; use the trusted helper above.
+prefix_rule(
+    pattern=["git", "push"],
+    decision="forbidden",
+    justification="Workers publish through scripts/cddm-publish-branch.sh so destination/refspec cannot be changed by model-authored arguments.",
+)
+prefix_rule(
+    pattern=["git", "remote", ["set-url", "add", "remove", "rename"]],
+    decision="forbidden",
+    justification="Workers must not mutate repository remotes.",
+)
+
+# Consequential GitHub actions remain outside Worker authority.
 prefix_rule(
     pattern=["gh", "pr", "merge"],
     decision="forbidden",
@@ -75,18 +87,6 @@ prefix_rule(
     pattern=["gh", "api"],
     decision="prompt",
     justification="Prefer bounded typed gh commands; gh api can bypass Worker authority boundaries.",
-)
-
-# Destructive push variants override the generic push allow above.
-prefix_rule(
-    pattern=["git", "push", ["--force", "-f", "--force-with-lease", "--mirror", "--delete"]],
-    decision="forbidden",
-    justification="Workers must not rewrite or delete published remote history.",
-)
-prefix_rule(
-    pattern=["git", "push", "origin", ["--force", "-f", "--force-with-lease", "--mirror", "--delete"]],
-    decision="forbidden",
-    justification="Workers must not rewrite or delete published remote history on origin.",
 )
 prefix_rule(
     pattern=["git", "reset", "--hard"],

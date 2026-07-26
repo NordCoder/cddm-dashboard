@@ -12,7 +12,7 @@ description: Execute one implementation-ready CDDM Codex Change in the current r
 5. Run the cheapest relevant V1 verifier after coherent edits and fix locally reproducible failures locally.
 6. Before Candidate publication, run practical V2 checks from `AGENTS.md` for every affected surface and inspect the full diff.
 7. Do not weaken tests, invariants, or policy to obtain green checks. Do not commit secrets or local environment data.
-8. Commit and push the coherent Candidate on the current Change branch. Create or reuse the current draft PR and mark it ready only after Candidate-ready verification.
+8. Commit the coherent Candidate and publish the current Change branch only with `bash scripts/cddm-publish-branch.sh`. Create or reuse the current draft PR and mark it ready only after Candidate-ready verification.
 9. Post exactly one final `CDDM Worker Result` comment to the PR. Do not post progress comments.
 10. Stop when Candidate Ready is satisfied. Do not perform unrelated cleanup.
 

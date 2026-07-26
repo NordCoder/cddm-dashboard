@@ -4,4 +4,4 @@ Work only in the current Change worktree/branch. Read `AGENTS.md`, the Active Mi
 
 Make the Change implementation-ready. Do not write product implementation code, expand Scope, or implement downstream Changes.
 
-Use `git`/`gh` only within `AGENTS.md` authority. Commit and push the shaped contract, create or reuse the current draft PR, and persist exactly one compact SHAPE result to that PR.
+Use `git`/`gh` only within `AGENTS.md` authority. Commit the shaped contract, publish the Change branch through the trusted repository helper, create or reuse the current draft PR, and persist exactly one compact SHAPE result to that PR.
