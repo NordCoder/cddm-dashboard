@@ -263,6 +263,11 @@ thread_from_events() {
   jq -r 'select(.type=="thread.started") | .thread_id // .thread.id // empty' "$events" 2>/dev/null | head -n1
 }
 
+run_strict() (
+  set -e
+  "$@"
+)
+
 reconcile_completed_turn_thread() {
   local mode="$1" events="$2" previous="$3" model="$4" reasoning="$5" rotation_reason="$6"
   local found stored
@@ -375,7 +380,7 @@ recover_active_turn_state() {
     reconcile_completed_turn_thread "$mode" "$events" "$previous" "$active_model" "$active_reasoning" "$rotation_reason" || return 4
 
     set +e
-    dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
+    run_strict dispatch_result_file "$result" "${v2_log:-$results_dir/issue-$issue-recovered-v2.log}"
     dispatch_rc=$?
     set -e
     consumed="$(jq -r '.last_result // ""' "$state_file")"
@@ -598,7 +603,7 @@ $(jq -r '"SUMMARY: " + .summary + "\nBLOCKER: " + .blocker' "$result_file")"
 }
 
 dispatch_result_file() {
-  local result_file="$1" v2_log="$2" result_status last_result candidate_result rc=0
+  local result_file="$1" v2_log="$2" result_status last_result candidate_result
   validate_result "$result_file" || return 13
   result_status="$(jq -r '.status' "$result_file")"
   last_result="$(jq -r '.last_result // ""' "$state_file")"
@@ -611,18 +616,11 @@ dispatch_result_file() {
     CANDIDATE_READY)
       candidate_result="$(jq -r '.candidate_result // ""' "$state_file")"
       if [[ "$candidate_result" == "$result_file" ]]; then
-        set +e
-        reconcile_pending_candidate
-        rc=$?
-        set -e
         state_set_last_result "$result_file"
-        return "$rc"
+        reconcile_pending_candidate
+        return
       fi
-      set +e
       commit_and_publish_candidate "$result_file" "$v2_log"
-      rc=$?
-      set -e
-      return "$rc"
       ;;
     CONTINUE)
       state_patch_status CONTINUE
@@ -631,14 +629,7 @@ dispatch_result_file() {
       ;;
     BLOCKED)
       state_patch_status BLOCKER_PENDING_GITHUB
-      set +e
       persist_blocker "$result_file"
-      rc=$?
-      set -e
-      if [[ $rc -ne 0 ]]; then
-        echo "Blocker publication pending; exact Worker result retained for recovery." >&2
-        return "$rc"
-      fi
       state_patch_status BLOCKED
       state_set_last_result "$result_file"
       cat "$result_file"
@@ -745,7 +736,7 @@ run_codex_turn() {
   reconcile_completed_turn_thread "$mode" "$events" "$thread_id" "$model" "$reasoning" "$rotation_reason" || { state_clear_active; return 11; }
 
   set +e
-  dispatch_result_file "$result" "$v2_log"
+  run_strict dispatch_result_file "$result" "$v2_log"
   dispatch_rc=$?
   set -e
   consumed="$(jq -r '.last_result // ""' "$state_file")"
