@@ -10,13 +10,15 @@ description: Investigate a defect, ambiguity, or unexpected repository/CI behavi
 3. Gather facts in the cheapest order: current code/state → targeted search → relevant tests/logs → history/external sources only when needed.
 4. Reproduce the problem locally when practical before proposing a correction.
 5. Separate implementation defect, contract gap, stale documentation, infrastructure failure, and expected behavior.
-6. Do not make speculative writes while the correct behavior is unresolved.
-7. If a material product/architecture decision remains, stop with the smallest decision request that can unblock work.
+6. Do not make speculative product-code writes while the correct behavior is unresolved.
+7. If a material product/architecture decision remains, stop with the smallest decision request that can unblock the Web Lead.
+8. Persist exactly one final Issue comment only when the conclusion materially affects later work. Otherwise return the result without a GitHub write.
 
-Return only:
+Result schema:
 
 ```text
-STATUS: RESOLVED | BLOCKED | NO-DEFECT
+ACTIVITY: INVESTIGATE
+STATUS: RESOLVED | BLOCKED | NO_DEFECT
 FACTS: <concise evidence>
 CONCLUSION: <root cause / contract interpretation>
 NEXT: <bounded action or required decision>
