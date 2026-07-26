@@ -118,7 +118,7 @@ state_init() {
   jq -n --argjson version 3 --arg issue "$issue" --arg branch "$branch" --arg worktree "$worktree" \
     --arg model "$model" --arg reasoning "$reasoning" --arg contract "$contract" --arg status "$status" \
     --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_remote_before:null,pr:null,active_pid:null,active_mode:null,active_events:null,updated_at:$updated_at}' >"$tmp"
+    '{version:$version,issue:($issue|tonumber),branch:$branch,worktree:$worktree,thread_id:"",model:$model,reasoning:$reasoning,contract:$contract,status:$status,thread_turn_count:0,total_turn_count:0,thread_generation:1,thread_history:[],candidate_head:null,candidate_parent:null,candidate_remote_before:null,pr:null,active_pid:null,active_pid_file:null,active_mode:null,active_events:null,active_previous_thread:null,active_rotation_reason:null,active_model:null,active_reasoning:null,updated_at:$updated_at}' >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -132,10 +132,10 @@ state_patch_status() {
   mv "$tmp" "$state_file"
 }
 
-state_set_committed_candidate() {
-  local head="$1" remote_before="$2" tmp="$state_file.tmp"
-  jq --arg head "$head" --arg remote_before "$remote_before" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.status="COMMITTED_PENDING_PUSH" | .candidate_head=$head | .candidate_remote_before=$remote_before | .updated_at=$updated_at' "$state_file" >"$tmp"
+state_set_prepared_candidate() {
+  local head="$1" parent="$2" remote_before="$3" tmp="$state_file.tmp"
+  jq --arg head "$head" --arg parent "$parent" --arg remote_before "$remote_before" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.status="COMMIT_PREPARED" | .candidate_head=$head | .candidate_parent=$parent | .candidate_remote_before=$remote_before | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -153,17 +153,30 @@ state_set_execution() {
   mv "$tmp" "$state_file"
 }
 
-state_set_active() {
-  local pid="$1" mode="$2" events="$3" tmp="$state_file.tmp"
-  jq --argjson pid "$pid" --arg mode "$mode" --arg events "$events" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.active_pid=$pid | .active_mode=$mode | .active_events=$events | .updated_at=$updated_at' "$state_file" >"$tmp"
+state_set_active_intent() {
+  local mode="$1" events="$2" pid_file="$3" previous_thread="$4" rotation_reason="$5" model="$6" reasoning="$7" tmp="$state_file.tmp"
+  jq --arg mode "$mode" --arg events "$events" --arg pid_file "$pid_file" --arg previous_thread "$previous_thread" \
+    --arg rotation_reason "$rotation_reason" --arg model "$model" --arg reasoning "$reasoning" \
+    --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.active_pid=null | .active_pid_file=$pid_file | .active_mode=$mode | .active_events=$events
+     | .active_previous_thread=$previous_thread | .active_rotation_reason=$rotation_reason
+     | .active_model=$model | .active_reasoning=$reasoning | .updated_at=$updated_at' "$state_file" >"$tmp"
+  mv "$tmp" "$state_file"
+}
+
+state_attach_active_pid() {
+  local pid="$1" tmp="$state_file.tmp"
+  jq --argjson pid "$pid" --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.active_pid=$pid | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
 state_clear_active() {
   local tmp="$state_file.tmp"
   jq --arg updated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.active_pid=null | .active_mode=null | .active_events=null | .updated_at=$updated_at' "$state_file" >"$tmp"
+    '.active_pid=null | .active_pid_file=null | .active_mode=null | .active_events=null
+     | .active_previous_thread=null | .active_rotation_reason=null | .active_model=null | .active_reasoning=null
+     | .updated_at=$updated_at' "$state_file" >"$tmp"
   mv "$tmp" "$state_file"
 }
 
@@ -240,23 +253,54 @@ thread_from_events() {
   jq -r 'select(.type=="thread.started") | .thread_id // .thread.id // empty' "$events" 2>/dev/null | head -n1
 }
 
-recover_start_thread_from_state() {
+recover_active_turn_state() {
   [[ -f "$state_file" ]] || return 0
-  local stored events found pid
-  stored="$(jq -r '.thread_id // ""' "$state_file")"
-  [[ -z "$stored" ]] || return 0
+  local mode events previous rotation_reason active_model active_reasoning found stored pid pid_file
+  mode="$(jq -r '.active_mode // ""' "$state_file")"
   events="$(jq -r '.active_events // ""' "$state_file")"
+  [[ -n "$mode" || -n "$events" ]] || return 0
+  previous="$(jq -r '.active_previous_thread // ""' "$state_file")"
+  rotation_reason="$(jq -r '.active_rotation_reason // ""' "$state_file")"
+  active_model="$(jq -r '.active_model // .model // "gpt-5.6-terra"' "$state_file")"
+  active_reasoning="$(jq -r '.active_reasoning // .reasoning // "medium"' "$state_file")"
   found="$(thread_from_events "$events")"
+  stored="$(jq -r '.thread_id // ""' "$state_file")"
+
   if [[ -n "$found" ]]; then
-    state_set_thread "$found" "RUNNING"
-    return 0
+    case "$mode" in
+      start)
+        if [[ -z "$stored" ]]; then state_set_thread "$found" RUNNING; elif [[ "$stored" != "$found" ]]; then state_patch_status THREAD_MISMATCH; return 2; fi
+        ;;
+      resume)
+        [[ -z "$previous" || "$found" == "$previous" ]] || { state_patch_status THREAD_MISMATCH; return 2; }
+        ;;
+      rotate)
+        if [[ "$stored" == "$previous" ]]; then
+          [[ "$found" != "$previous" ]] || { state_patch_status ROTATE_FAILED_NO_THREAD; return 2; }
+          state_rotate_thread "$found" "$active_model" "$active_reasoning" "$rotation_reason"
+        elif [[ "$stored" != "$found" ]]; then
+          state_patch_status THREAD_MISMATCH
+          return 2
+        fi
+        ;;
+    esac
   fi
+
   pid="$(jq -r '.active_pid // ""' "$state_file")"
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-    echo "Previous initial Codex turn is still active (pid=$pid)." >&2
-    return 2
+  pid_file="$(jq -r '.active_pid_file // ""' "$state_file")"
+  if [[ ! "$pid" =~ ^[0-9]+$ && -n "$pid_file" ]]; then
+    for _ in {1..20}; do
+      if [[ -s "$pid_file" ]]; then pid="$(cat "$pid_file")"; break; fi
+      sleep 0.05
+    done
   fi
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "A prior Codex turn is still active for Issue #$issue (pid=$pid)." >&2
+    return 3
+  fi
+  [[ -z "$pid_file" ]] || rm -f "$pid_file"
   state_clear_active
+  return 0
 }
 
 ensure_start_runtime() {
@@ -271,7 +315,7 @@ ensure_start_runtime() {
       state_patch_status "INITIALIZING"
     fi
   else
-    recover_start_thread_from_state || return $?
+    recover_active_turn_state || return $?
     local thread
     thread="$(jq -r '.thread_id // ""' "$state_file")"
     [[ -z "$thread" ]] || { echo "Persistent thread already exists for Issue #$issue; use resume/status." >&2; return 1; }
@@ -282,17 +326,6 @@ ensure_start_runtime() {
   ensure_worker_home
 }
 
-ensure_no_live_active_turn() {
-  [[ -f "$state_file" ]] || return 0
-  local pid
-  pid="$(jq -r '.active_pid // ""' "$state_file")"
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-    echo "A prior Codex turn is still active for Issue #$issue (pid=$pid)." >&2
-    return 1
-  fi
-  state_clear_active
-}
-
 ensure_owned_worktree() {
   [[ -f "$state_file" ]] || { echo "No persistent session state for Issue #$issue. Use start." >&2; return 1; }
   [[ -d "$worktree" ]] || { echo "Persistent worktree is missing: $worktree" >&2; return 1; }
@@ -301,7 +334,7 @@ ensure_owned_worktree() {
     [[ "$(git -C "$worktree" rev-parse HEAD)" == "$(git rev-parse "origin/$branch")" ]] || { echo "Remote Change branch moved outside this session." >&2; return 1; }
   fi
   ensure_worker_home
-  ensure_no_live_active_turn
+  recover_active_turn_state
 }
 
 render_template() {
@@ -373,10 +406,29 @@ publish_committed_candidate() {
   return 1
 }
 
+reconcile_prepared_candidate() {
+  local head parent local_head
+  head="$(jq -r '.candidate_head // ""' "$state_file")"
+  parent="$(jq -r '.candidate_parent // ""' "$state_file")"
+  [[ -n "$head" && -n "$parent" ]] || { state_patch_status PUBLISH_INCONCLUSIVE; echo "Prepared Candidate state is incomplete." >&2; return 1; }
+  git -C "$worktree" cat-file -e "$head^{commit}" 2>/dev/null || { state_patch_status PUBLISH_INCONCLUSIVE "$head"; echo "Prepared Candidate commit object is missing." >&2; return 1; }
+  local_head="$(git -C "$worktree" rev-parse HEAD)"
+  if [[ "$local_head" == "$parent" ]]; then
+    git -C "$worktree" reset --hard "$head" >/dev/null
+  elif [[ "$local_head" != "$head" ]]; then
+    state_patch_status PUBLISH_INCONCLUSIVE "$head"
+    echo "Local branch moved outside prepared Candidate: parent=$parent candidate=$head actual=$local_head" >&2
+    return 1
+  fi
+  state_patch_status COMMITTED_PENDING_PUSH "$head"
+  publish_committed_candidate
+}
+
 reconcile_pending_candidate() {
   local status
   status="$(jq -r '.status // ""' "$state_file")"
   case "$status" in
+    COMMIT_PREPARED) reconcile_prepared_candidate ;;
     COMMITTED_PENDING_PUSH|PUBLISH_CONFIRMATION_PENDING) publish_committed_candidate ;;
     PUSHED_PENDING_GITHUB) finalize_pushed_candidate ;;
     PUBLISH_INCONCLUSIVE) echo "Candidate publication is inconclusive; Web Lead reconciliation required." >&2; return 1 ;;
@@ -384,17 +436,20 @@ reconcile_pending_candidate() {
 }
 
 commit_and_publish_candidate() {
-  local result_file="$1" v2_log="$2" head remote_before
+  local result_file="$1" v2_log="$2" head parent tree remote_before
   [[ -n "$(git -C "$worktree" status --porcelain)" ]] || { echo "CANDIDATE_READY produced no file changes; use NO_OP." >&2; return 1; }
   run_candidate_v2 "$v2_log" || { state_patch_status V2_FAILED; echo "Host V2 failed; no Candidate published." >&2; return 4; }
   git -C "$worktree" diff --check
   git -C "$worktree" add -A
   git -C "$worktree" diff --cached --check
-  git -C "$worktree" commit -m "Implement Issue #$issue" >/dev/null
-  head="$(git -C "$worktree" rev-parse HEAD)"
+  parent="$(git -C "$worktree" rev-parse HEAD)"
+  tree="$(git -C "$worktree" write-tree)"
+  head="$(printf 'Implement Issue #%s\n' "$issue" | git -C "$worktree" commit-tree "$tree" -p "$parent")"
   remote_before=""
   if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then remote_before="$(git rev-parse "origin/$branch")"; fi
-  state_set_committed_candidate "$head" "$remote_before"
+  state_set_prepared_candidate "$head" "$parent" "$remote_before"
+  git -C "$worktree" reset --hard "$head" >/dev/null
+  state_patch_status COMMITTED_PENDING_PUSH "$head"
   publish_committed_candidate
 }
 
@@ -447,17 +502,23 @@ persist_live_thread_event() {
 
 run_codex_turn() {
   local mode="$1" thread_id="$2" model="$3" reasoning="$4" prompt="$5" rotation_reason="${6:-}"
-  local stamp events result prompt_file pid rc=0 status event_rc
+  local stamp events result prompt_file pid_file pid rc=0 status event_rc
   stamp="$(date +%s)-$$"
   events="$results_dir/issue-$issue-$mode-$stamp.jsonl"
   result="$results_dir/issue-$issue-$mode-$stamp.result.json"
   prompt_file="$results_dir/issue-$issue-$mode-$stamp.prompt.txt"
+  pid_file="$results_dir/issue-$issue-$mode-$stamp.pid"
   printf '%s\n' "$prompt" >"$prompt_file"
   : >"$events"
+  rm -f "$pid_file"
+  state_set_active_intent "$mode" "$events" "$pid_file" "$thread_id" "$rotation_reason" "$model" "$reasoning"
 
-  codex_command "$mode" "$thread_id" "$model" "$reasoning" "$result" <"$prompt_file" >"$events" &
+  (
+    printf '%s\n' "$BASHPID" >"$pid_file"
+    codex_command "$mode" "$thread_id" "$model" "$reasoning" "$result" <"$prompt_file" >"$events"
+  ) &
   pid=$!
-  state_set_active "$pid" "$mode" "$events"
+  state_attach_active_pid "$pid"
 
   while kill -0 "$pid" 2>/dev/null; do
     set +e; persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
@@ -467,7 +528,7 @@ run_codex_turn() {
   done
   set +e; wait "$pid"; rc=$?; set -e
   set +e; persist_live_thread_event "$mode" "$thread_id" "$model" "$reasoning" "$rotation_reason" "$events"; event_rc=$?; set -e
-  rm -f "$prompt_file"
+  rm -f "$prompt_file" "$pid_file"
   state_clear_active
   [[ $event_rc -ne 2 ]] || { state_patch_status THREAD_MISMATCH; return 11; }
 
@@ -496,7 +557,7 @@ if [[ -f "$state_file" ]]; then
   [[ -z "$stored_contract" ]] || contract="$stored_contract"
   pending_status="$(jq -r '.status // ""' "$state_file")"
   case "$pending_status" in
-    COMMITTED_PENDING_PUSH|PUBLISH_CONFIRMATION_PENDING|PUSHED_PENDING_GITHUB|PUBLISH_INCONCLUSIVE)
+    COMMIT_PREPARED|COMMITTED_PENDING_PUSH|PUBLISH_CONFIRMATION_PENDING|PUSHED_PENDING_GITHUB|PUBLISH_INCONCLUSIVE)
       if ! reconcile_pending_candidate; then [[ "$command_name" == status ]] || { echo "Pending Candidate reconciliation must succeed before another Codex turn." >&2; exit 1; }; fi
       ;;
   esac
