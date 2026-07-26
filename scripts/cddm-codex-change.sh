@@ -14,6 +14,16 @@ command -v pkill >/dev/null 2>&1 || { echo "Missing required command: pkill" >&2
 export CDDM_REAL_CODEX="$real_codex"
 ln -sfn "$repo_root/scripts/cddm-codex-worker-shim.sh" "$shim_dir/codex"
 
+pid_is_active_core_turn() {
+  local pid="$1" mode="$2" issue="$3" cmdline
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)" || return 1
+  [[ "$cmdline" == *"$core"* ]] || return 1
+  [[ "$cmdline" == *" $mode $issue "* || "$cmdline" == *" $mode $issue" ]] || return 1
+}
+
 repair_prethread_start_failure() {
   [[ "${1:-}" == "start" && "${2:-}" =~ ^[0-9]+$ ]] || return 0
   local issue="$2" runtime_dir="$repo_root/.worktrees/runtime" state worktree pid events archive_dir
@@ -22,8 +32,8 @@ repair_prethread_start_failure() {
   jq -e '.thread_id == "" and .status == "START_FAILED_NO_THREAD" and .active_mode == "start"' "$state" >/dev/null 2>&1 || return 0
 
   pid="$(jq -r '.active_pid // ""' "$state")"
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-    echo "Refusing to repair Issue #$issue: prior Codex process is still alive (pid=$pid)." >&2
+  if pid_is_active_core_turn "$pid" start "$issue"; then
+    echo "Refusing to repair Issue #$issue: prior Codex host turn is still alive (pid=$pid)." >&2
     return 1
   fi
   events="$(jq -r '.active_events // ""' "$state")"
@@ -82,14 +92,18 @@ align_clean_prethread_orphan() {
 
 recover_dead_interrupted_turn() {
   [[ "${1:-}" =~ ^(start|resume|rotate|status)$ && "${2:-}" =~ ^[0-9]+$ ]] || return 0
-  local issue="$2" runtime_dir="$repo_root/.worktrees/runtime" state pid result exit_status events stored_thread found_thread pid_file archive_dir tmp
+  local issue="$2" runtime_dir="$repo_root/.worktrees/runtime" state pid active_mode result exit_status events stored_thread found_thread pid_file archive_dir tmp
   state="$runtime_dir/issue-$issue.json"
   [[ -f "$state" ]] || return 0
   jq -e '(.active_mode // "") != "" or (.active_pid // null) != null' "$state" >/dev/null 2>&1 || return 0
 
   pid="$(jq -r '.active_pid // ""' "$state")"
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+  active_mode="$(jq -r '.active_mode // ""' "$state")"
+  if pid_is_active_core_turn "$pid" "$active_mode" "$issue"; then
     return 0
+  fi
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "Ignoring reused/stale active PID for Issue #$issue: pid=$pid is not the recorded $active_mode host turn." >&2
   fi
 
   result="$(jq -r '.active_result // ""' "$state")"
