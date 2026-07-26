@@ -600,7 +600,17 @@ resolve_runtime_contract() {
 resolve_runtime_contract
 
 if [[ -f "$state_file" ]]; then
-  reconcile_pending_candidate || true
+  pending_status="$(jq -r '.status // ""' "$state_file")"
+  case "$pending_status" in
+    PUSHED_PENDING_GITHUB|PUBLISH_CONFIRMATION_PENDING|PUBLISH_INCONCLUSIVE)
+      if ! reconcile_pending_candidate; then
+        if [[ "$command_name" != "status" ]]; then
+          echo "Pending Candidate reconciliation must succeed before another Codex turn." >&2
+          exit 1
+        fi
+      fi
+      ;;
+  esac
 fi
 
 case "$command_name" in
