@@ -278,8 +278,6 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 			}
 		}
 	}()
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -289,12 +287,11 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 	lastWarn := time.Time{}
 	started := time.Now()
 	var usage Usage
-	var childErr error
-	childDone, linesDone := false, false
 	threadSeen := ""
 	threadInvalid := false
 
-	for !(childDone && linesDone) {
+	linesDone := false
+	for !linesDone {
 		select {
 		case lr, ok := <-lines:
 			if !ok {
@@ -323,9 +320,6 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 			e.ui.printEvent(os.Stderr, time.Since(started), parseRenderedEvent(trimmed))
 			lastEvent = time.Now()
 			lastWarn = time.Time{}
-		case err := <-waitCh:
-			childErr = err
-			childDone = true
 		case sig := <-sigCh:
 			if unixSig, ok := sig.(syscall.Signal); ok {
 				_ = syscall.Kill(-identity.PGID, unixSig)
@@ -338,6 +332,28 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 			}
 		}
 	}
+
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	var childErr error
+waitLoop:
+	for {
+		select {
+		case childErr = <-waitCh:
+			break waitLoop
+		case sig := <-sigCh:
+			if unixSig, ok := sig.(syscall.Signal); ok {
+				_ = syscall.Kill(-identity.PGID, unixSig)
+			}
+		case <-ticker.C:
+			stall := envStallSeconds()
+			if stall > 0 && time.Since(lastEvent) >= time.Duration(stall)*time.Second && (lastWarn.IsZero() || time.Since(lastWarn) >= time.Duration(stall)*time.Second) {
+				e.ui.warnf(os.Stderr, "no Codex events for %s · process still alive · observation only", humanDuration(time.Since(lastEvent)))
+				lastWarn = time.Now()
+			}
+		}
+	}
+
 	_ = eventFile.Sync()
 	rc := exitCode(childErr)
 	if err := writeIntAtomic(exitStatus, rc); err != nil {
