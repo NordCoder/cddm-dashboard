@@ -10,7 +10,12 @@ import (
 
 var buildRevision = "dev"
 
-func main() { os.Exit(run(os.Args[1:])) }
+func main() {
+	if isCodexProfileShim() {
+		os.Exit(runCodexProfileShim(os.Args[1:]))
+	}
+	os.Exit(run(os.Args[1:]))
+}
 
 func run(args []string) int {
 	if len(args) == 1 && args[0] == "__build-revision" { fmt.Println(buildRevision); return 0 }
@@ -38,6 +43,13 @@ func run(args []string) int {
 	repo, workspace, err := resolveInvocation(opts)
 	if err != nil { ui.errorf("%v", err); return 1 }
 	execOpts := resolveExecutionOptions(opts, workspace)
+	if command == "start" && execOpts.CodexProfile != "" {
+		if len(commandArgs) == 0 { ui.errorf("start requires an Issue number"); return 2 }
+		issue, err := parseIssue(commandArgs[0]); if err != nil { ui.errorf("%v", err); return 2 }
+		e := &engine{repo: repo, issue: issue}
+		if err := e.activateCodexProfile(execOpts.CodexProfile); err != nil { ui.errorf("Codex profile: %v", err); return 1 }
+		if err := e.persistCodexProfile(execOpts.CodexProfile); err != nil { ui.errorf("persist Codex profile: %v", err); return 1 }
+	}
 
 	switch command {
 	case "status": return commandStatus(ui, repo, commandArgs)
