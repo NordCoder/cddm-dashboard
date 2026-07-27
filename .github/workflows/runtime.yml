@@ -32,12 +32,23 @@ jobs:
             cat /tmp/cddm-gofmt.list
             exit 1
           fi
+      - name: Prepare Go formatting diagnostics
+        if: failure()
+        run: |
+          mkdir -p /tmp/cddm-gofmt-formatted
+          while IFS= read -r file; do
+            [[ -n "$file" ]] || continue
+            cp "$file" "/tmp/cddm-gofmt-formatted/$(basename "$file")"
+          done < /tmp/cddm-gofmt.list
+          find /tmp/cddm-gofmt-formatted -type f -name '*.go' -print0 | xargs -0 -r gofmt -w
       - name: Upload Go formatting diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cddm-gofmt-list
-          path: /tmp/cddm-gofmt.list
+          name: cddm-gofmt-diagnostics
+          path: |
+            /tmp/cddm-gofmt.list
+            /tmp/cddm-gofmt-formatted
           if-no-files-found: ignore
       - name: Test Go runtime
         working-directory: backend
