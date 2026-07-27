@@ -13,6 +13,8 @@ import (
 const (
 	codexProfileEnv       = "CDDM_CODEX_PROFILE"
 	codexProfileSourceEnv = "CDDM_CODEX_PROFILE_SOURCE"
+	codexBaseSourceEnv    = "CDDM_CODEX_BASE_SOURCE"
+	codexWorktreeEnv      = "CDDM_CODEX_WORKTREE"
 	codexRealEnv          = "CDDM_CODEX_REAL"
 )
 
@@ -40,7 +42,7 @@ func runCodexProfileShim(args []string) int {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = withoutEnv(os.Environ(), codexProfileEnv, codexProfileSourceEnv, codexRealEnv)
+	cmd.Env = withoutEnv(os.Environ(), codexProfileEnv, codexProfileSourceEnv, codexBaseSourceEnv, codexWorktreeEnv, codexRealEnv)
 	if err := cmd.Run(); err != nil {
 		return exitCode(err)
 	}
@@ -56,6 +58,10 @@ func (e *engine) activateCodexProfile(profile string) error {
 		return err
 	}
 	source, err := hostCodexProfilePath(profile)
+	if err != nil {
+		return err
+	}
+	baseSource, err := hostCodexBaseConfigPath()
 	if err != nil {
 		return err
 	}
@@ -80,26 +86,24 @@ func (e *engine) activateCodexProfile(profile string) error {
 	if err := os.Symlink(self, shim); err != nil {
 		return fmt.Errorf("create Codex profile shim: %w", err)
 	}
-	if err := os.Setenv(codexRealEnv, absReal); err != nil {
-		return err
-	}
-	if err := os.Setenv(codexProfileEnv, profile); err != nil {
-		return err
-	}
-	if err := os.Setenv(codexProfileSourceEnv, source); err != nil {
-		return err
+	for key, value := range map[string]string{
+		codexRealEnv:          absReal,
+		codexProfileEnv:       profile,
+		codexProfileSourceEnv: source,
+		codexBaseSourceEnv:    baseSource,
+		codexWorktreeEnv:      e.worktree,
+	} {
+		if err := os.Setenv(key, value); err != nil {
+			return err
+		}
 	}
 	return os.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func hostCodexProfilePath(profile string) (string, error) {
-	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		home = filepath.Join(userHome, ".codex")
+	home, err := hostCodexHome()
+	if err != nil {
+		return "", err
 	}
 	path := filepath.Join(home, profile+".config.toml")
 	info, err := os.Stat(path)
@@ -117,11 +121,13 @@ func hostCodexProfilePath(profile string) (string, error) {
 
 func installProfileIntoWorker(profile string) error {
 	source := strings.TrimSpace(os.Getenv(codexProfileSourceEnv))
+	baseSource := strings.TrimSpace(os.Getenv(codexBaseSourceEnv))
+	worktree := strings.TrimSpace(os.Getenv(codexWorktreeEnv))
 	workerHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if source == "" || workerHome == "" {
-		return errors.New("profile source or worker CODEX_HOME missing")
+	if source == "" || workerHome == "" || worktree == "" {
+		return errors.New("profile source, worker CODEX_HOME or worktree missing")
 	}
-	if err := os.MkdirAll(workerHome, 0o700); err != nil {
+	if err := installWorkerBaseConfig(baseSource, workerHome, worktree); err != nil {
 		return err
 	}
 	destination := filepath.Join(workerHome, profile+".config.toml")
