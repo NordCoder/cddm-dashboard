@@ -184,6 +184,16 @@ func (e *engine) loadCodexProfile() string {
 	return strings.TrimSpace(string(data))
 }
 
+func (e *engine) selectCodexProfile(profile string) error {
+	profile = strings.TrimSpace(profile)
+	if profile != "" {
+		if err := e.activateCodexProfile(profile); err != nil {
+			return err
+		}
+	}
+	return e.persistCodexProfile(profile)
+}
+
 func withoutEnv(env []string, keys ...string) []string {
 	blocked := map[string]bool{}
 	for _, key := range keys {
