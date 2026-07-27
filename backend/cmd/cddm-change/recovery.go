@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"syscall"
@@ -38,8 +37,6 @@ func (e *engine) recoverCommand() int {
 		}
 		fmt.Println(".")
 		printStatusDashboard(e.ui, os.Stdout, e.issue, state, e.historyPath)
-		// Explicit recovery reports successful reconciliation even when the recovered
-		// Codex turn itself ended non-zero (for example durable rc=143).
 		return 0
 	}
 	if rc == 0 {
@@ -67,8 +64,10 @@ func (e *engine) recoverActive(state *RuntimeState) (bool, int) {
 			e.ui.errorf("a prior Codex turn is still active for Issue #%d (pid=%d)", e.issue, pid)
 			return false, 3
 		}
-		e.ui.errorf("persisted pid=%d is alive but does not match the recorded Host-owned turn", pid)
-		return false, 3
+		// PID reuse must never prevent no-Codex recovery. A live but unowned PID is
+		// not signal authority; only the durable turn evidence below may decide the
+		// old turn's disposition.
+		e.ui.warnf(os.Stderr, "persisted pid=%d is live but no longer matches the recorded Codex turn; continuing durable recovery without signalling it", pid)
 	}
 
 	if err := e.reconcileRecoveredThread(state); err != nil {
@@ -89,7 +88,7 @@ func (e *engine) recoverActive(state *RuntimeState) (bool, int) {
 		e.ui.errorf("dead active turn has no durable completion status identity")
 		return false, 15
 	}
-	codexRC, err := readIntFile(state.ActiveExitStatus)
+	codexRC, err := readExitStatus(state.ActiveExitStatus)
 	if err != nil {
 		state.Status = "TURN_COMPLETION_UNKNOWN"
 		_ = saveStateAtomic(e.statePath, *state)
@@ -198,9 +197,6 @@ func (e *engine) reconcileRecoveredThread(state *RuntimeState) error {
 }
 
 func (e *engine) stopCommand() int {
-	// stop is intentionally lock-free during signal delivery. The active Host
-	// operation owns the Issue lock and must be allowed to finish its durable rc
-	// write. commandMutating dispatches stop before acquiring the Issue lock.
 	state, err := loadState(e.statePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -279,5 +275,3 @@ func removeIfPresent(path string) {
 		_ = os.Remove(path)
 	}
 }
-
-var _ io.Reader
