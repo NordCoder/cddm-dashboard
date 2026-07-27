@@ -47,7 +47,7 @@ func (h *browserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *browserHandler) workers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		workers, err := h.bindings.ListWorkers(r.Context())
+		workers, err := h.bindings.ListWorkerProjections(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
