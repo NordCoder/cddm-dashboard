@@ -46,11 +46,28 @@ start_epoch="$(date +%s)"
 printf '@@CDDM_V2@@|START|%s|%s\n' "$phase" "$start_epoch" >&2
 
 if [[ "$tool" == "gofmt" ]]; then
+  gofmt_args=("$@")
+  # The legacy core invokes `gofmt -l .`. Real gofmt expects files, not a
+  # directory. Expand that exact Host-V2 form recursively so formatting and
+  # syntax errors cannot be silently accepted by the surrounding `test -z`.
+  if [[ $# -eq 2 && "$1" == "-l" && -d "$2" ]]; then
+    mapfile -d '' go_files < <(find "$2" -type f -name '*.go' -print0)
+    gofmt_args=(-l "${go_files[@]}")
+  fi
+
   set +e
-  output="$(CDDM_V2_TOOL_DEPTH=1 "$real" "$@")"
+  output="$(CDDM_V2_TOOL_DEPTH=1 "$real" "${gofmt_args[@]}")"
   rc=$?
   set -e
+
+  # Command substitution inside the legacy `test -z` would otherwise discard
+  # the non-zero exit status. A non-empty sentinel makes syntax/read failures
+  # fail closed while the real diagnostic remains on stderr.
+  if [[ $rc -ne 0 && -z "$output" ]]; then
+    output="gofmt failed (rc=$rc)"
+  fi
   [[ -z "$output" ]] || printf '%s\n' "$output"
+
   semantic_rc="$rc"
   if [[ $semantic_rc -eq 0 && -n "$output" && " $* " == *" -l "* ]]; then
     semantic_rc=1
