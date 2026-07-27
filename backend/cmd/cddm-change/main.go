@@ -124,7 +124,7 @@ func delegateCompat(ui *UI, repo string, args []string) int {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "CDDM_CHANGE_BIN="+exe, "CDDM_REPO_ROOT="+repo)
+	cmd.Env = append(os.Environ(), "CDDM_CHANGE_BIN="+exe, "CDDM_REPO_ROOT="+repo, "CDDM_COLOR="+string(ui.mode))
 	if err := cmd.Run(); err != nil {
 		return exitCode(err)
 	}
