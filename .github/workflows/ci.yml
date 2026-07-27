@@ -93,17 +93,10 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Validate Codex host scripts
+      - name: Validate Host runtime launchers
         run: |
           bash -n scripts/cddm-codex-change.sh
-          bash -n scripts/cddm-codex-change-compat.sh
-          bash -n scripts/cddm-codex-change-core.sh
-          bash -n scripts/cddm-codex-worker-shim.sh
-          bash -n scripts/cddm-host-tool-shim.sh
           bash -n scripts/build-cddm-change.sh
-          bash -n scripts/cddm-publish-branch.sh
-          bash -n scripts/test-cddm-runtime-r1.sh
-          python3 -m py_compile scripts/cddm-codex-observe.py scripts/cddm-codex-proxy.py
       - name: Build Go Host runtime
         run: |
           bash scripts/build-cddm-change.sh
@@ -113,32 +106,29 @@ jobs:
         run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
       - name: Validate Codex result schema
         run: python3 -c 'import json, pathlib; json.loads(pathlib.Path(".codex/schemas/change-turn-result.json").read_text())'
-      - name: Validate persistent-session invariants
+      - name: Validate Go-only Host runtime cutover
         run: |
-          ! grep -q -- '--ephemeral' scripts/cddm-codex-change-core.sh
-          grep -q -- '--ignore-user-config' scripts/cddm-codex-change-core.sh
-          grep -q 'resume "$thread_id"' scripts/cddm-codex-change-core.sh
-          grep -q 'thread.started' scripts/cddm-codex-change-core.sh
-          grep -q 'thread_history' scripts/cddm-codex-change-core.sh
-          grep -q 'START_FAILED_NO_THREAD' scripts/cddm-codex-change-core.sh
-          grep -q 'PUSHED_PENDING_GITHUB' scripts/cddm-codex-change-core.sh
-          grep -q 'Pending Candidate reconciliation must succeed before another Codex turn' scripts/cddm-codex-change-core.sh
-          grep -q 'cddm-codex-change-compat.sh' backend/cmd/cddm-change/main.go
-          grep -q 'CDDM Go runtime is stale' scripts/cddm-codex-change.sh
-          grep -q 'CDDM_CHANGE_BIN' scripts/cddm-codex-worker-shim.sh
-          grep -q '__proxy' scripts/cddm-codex-worker-shim.sh
-          grep -q '__v2tee' scripts/cddm-host-tool-shim.sh
-          grep -q 'recover_change' scripts/cddm-codex-change-compat.sh
-          grep -q 'stop_change' scripts/cddm-codex-change-compat.sh
+          for legacy in \
+            scripts/cddm-codex-change-compat.sh \
+            scripts/cddm-codex-change-core.sh \
+            scripts/cddm-codex-worker-shim.sh \
+            scripts/cddm-host-tool-shim.sh \
+            scripts/cddm-codex-observe.py \
+            scripts/cddm-codex-proxy.py \
+            scripts/cddm-publish-branch.sh \
+            scripts/test-cddm-runtime-r1.sh; do
+            test ! -e "$legacy"
+          done
+          grep -q 'return commandMutating' backend/cmd/cddm-change/main.go
+          grep -q 'Setpgid: true' backend/cmd/cddm-change/codex_engine.go
+          grep -q 'GIT_CONFIG_GLOBAL=/dev/null' backend/cmd/cddm-change/codex_engine.go
+          grep -q 'thread.started' backend/cmd/cddm-change/codex_engine.go
+          grep -q 'recoverActive' backend/cmd/cddm-change/recovery.go
+          grep -q 'PUBLISH_INCONCLUSIVE' backend/cmd/cddm-change/dispatch.go
+          ! grep -R -n -E 'cddm-codex-change-(compat|core)|cddm-codex-worker-shim|cddm-host-tool-shim|cddm-codex-(observe|proxy)\.py|test-cddm-runtime-r1' backend/cmd/cddm-change scripts/cddm-codex-change.sh scripts/build-cddm-change.sh
           for prompt in .codex/prompts/change-start.md .codex/prompts/change-resume.md .codex/prompts/change-rotate.md; do
             grep -q 'Stable Change Goal:' "$prompt"
             grep -q 'Implement approved Change #{{ISSUE}} to locally candidate-ready state' "$prompt"
           done
-      - name: Legacy R1 compatibility harness
-        run: |
-          cp scripts/cddm-codex-change.sh /tmp/cddm-go-launcher.sh
-          cp scripts/cddm-codex-change-compat.sh scripts/cddm-codex-change.sh
-          bash scripts/test-cddm-runtime-r1.sh
-          cp /tmp/cddm-go-launcher.sh scripts/cddm-codex-change.sh
       - name: Validate configuration
         run: docker compose config --quiet
