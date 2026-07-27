@@ -11,12 +11,12 @@ import (
 )
 
 var safeCodexBaseKeys = map[string]bool{
-	"model_provider":                  true,
-	"model_providers":                 true,
-	"model_catalog_json":              true,
-	"openai_base_url":                 true,
-	"chatgpt_base_url":                true,
-	"oss_provider":                    true,
+	"model_provider":                    true,
+	"model_providers":                   true,
+	"model_catalog_json":                true,
+	"openai_base_url":                   true,
+	"chatgpt_base_url":                  true,
+	"oss_provider":                      true,
 	"experimental_realtime_ws_base_url": true,
 }
 
