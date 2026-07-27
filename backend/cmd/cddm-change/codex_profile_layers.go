@@ -77,11 +77,13 @@ func sanitizeCodexBaseConfig(source []byte, worktree string) ([]byte, error) {
 
 	scanner := bufio.NewScanner(bytes.NewReader(source))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	inAnySection := false
 	inAllowedSection := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 		if isTOMLSectionHeader(trimmed) {
+			inAnySection = true
 			inAllowedSection = isModelProviderSection(trimmed)
 			if inAllowedSection {
 				out.WriteString("\n")
@@ -95,9 +97,11 @@ func sanitizeCodexBaseConfig(source []byte, worktree string) ([]byte, error) {
 			out.WriteString("\n")
 			continue
 		}
-		if key, ok := topLevelTOMLKey(trimmed); ok && safeCodexBaseKeys[key] {
-			out.WriteString(line)
-			out.WriteString("\n")
+		if !inAnySection {
+			if key, ok := topLevelTOMLKey(trimmed); ok && safeCodexBaseKeys[key] {
+				out.WriteString(line)
+				out.WriteString("\n")
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
