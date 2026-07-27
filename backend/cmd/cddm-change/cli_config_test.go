@@ -125,10 +125,10 @@ func TestUnknownProfileFailsClosed(t *testing.T) {
 
 func TestGitHubRepoSlugSupportsCommonOrigins(t *testing.T) {
 	cases := map[string]string{
-		"git@github.com:NordCoder/cddm-dashboard.git":          "NordCoder/cddm-dashboard",
-		"https://github.com/NordCoder/misak-website.git":       "NordCoder/misak-website",
-		"ssh://git@github.com/NordCoder/unmatched-web.git":      "NordCoder/unmatched-web",
-		"https://github.com/NordCoder/haze-sync":                "NordCoder/haze-sync",
+		"git@github.com:NordCoder/cddm-dashboard.git":      "NordCoder/cddm-dashboard",
+		"https://github.com/NordCoder/misak-website.git":   "NordCoder/misak-website",
+		"ssh://git@github.com/NordCoder/unmatched-web.git": "NordCoder/unmatched-web",
+		"https://github.com/NordCoder/haze-sync":           "NordCoder/haze-sync",
 	}
 	for origin, want := range cases {
 		got, err := githubRepoSlug(origin)
