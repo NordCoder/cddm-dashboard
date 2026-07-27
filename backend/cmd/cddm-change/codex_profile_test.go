@@ -27,15 +27,30 @@ func TestHostCodexProfilePathRequiresNamedProfileFile(t *testing.T) {
 	}
 }
 
-func TestCodexProfileShimInjectsProfileAndCopiesWorkerFile(t *testing.T) {
+func TestCodexProfileShimInjectsProfileAndCopiesWorkerLayers(t *testing.T) {
 	root := t.TempDir()
 	host := filepath.Join(root, "host")
 	worker := filepath.Join(root, "worker")
+	worktree := filepath.Join(root, "repo", ".worktrees", "issue-19")
 	if err := os.MkdirAll(host, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	profileSource := filepath.Join(host, "deep-review.config.toml")
-	profileBody := "model = \"gpt-profile\"\nmodel_reasoning_effort = \"high\"\n"
+	baseSource := filepath.Join(host, "config.toml")
+	baseBody := `[model_providers.codexsale]
+name = "Codex Sale"
+base_url = "https://codex.sale/v1"
+env_key = "CODEXSALE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+[mcp_servers.playwright]
+command = "npx"
+`
+	if err := os.WriteFile(baseSource, []byte(baseBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profileSource := filepath.Join(host, "codexsale.config.toml")
+	profileBody := "model = \"gpt-profile\"\nmodel_provider = \"codexsale\"\nmodel_reasoning_effort = \"high\"\n"
 	if err := os.WriteFile(profileSource, []byte(profileBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,8 +64,10 @@ func TestCodexProfileShimInjectsProfileAndCopiesWorkerFile(t *testing.T) {
 	}
 
 	t.Setenv(codexRealEnv, realCodex)
-	t.Setenv(codexProfileEnv, "deep-review")
+	t.Setenv(codexProfileEnv, "codexsale")
 	t.Setenv(codexProfileSourceEnv, profileSource)
+	t.Setenv(codexBaseSourceEnv, baseSource)
+	t.Setenv(codexWorktreeEnv, worktree)
 	t.Setenv("CODEX_HOME", worker)
 	t.Setenv("CDDM_TEST_ARGS", argsPath)
 	t.Setenv("CDDM_TEST_ENV", envPath)
@@ -64,12 +81,12 @@ func TestCodexProfileShimInjectsProfileAndCopiesWorkerFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotArgs := strings.Fields(string(argsData))
-	wantArgs := []string{"exec", "--profile", "deep-review", "--json", "-m", "gpt-explicit"}
+	wantArgs := []string{"exec", "--profile", "codexsale", "--json", "-m", "gpt-explicit"}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("argv=%q want=%q", gotArgs, wantArgs)
 	}
 
-	copied := filepath.Join(worker, "deep-review.config.toml")
+	copied := filepath.Join(worker, "codexsale.config.toml")
 	copiedData, err := os.ReadFile(copied)
 	if err != nil {
 		t.Fatal(err)
@@ -85,12 +102,29 @@ func TestCodexProfileShimInjectsProfileAndCopiesWorkerFile(t *testing.T) {
 		t.Fatalf("profile mode=%o want=600", info.Mode().Perm())
 	}
 
+	baseData, err := os.ReadFile(filepath.Join(worker, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseText := string(baseData)
+	if !strings.Contains(baseText, "[model_providers.codexsale]") || !strings.Contains(baseText, `env_key = "CODEXSALE_API_KEY"`) {
+		t.Fatalf("inherited provider missing:\n%s", baseText)
+	}
+	if strings.Contains(baseText, "mcp_servers") {
+		t.Fatalf("host MCP leaked into worker base:\n%s", baseText)
+	}
+	if !strings.Contains(baseText, worktree) {
+		t.Fatalf("exact worktree trust missing:\n%s", baseText)
+	}
+
 	envData, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	envText := string(envData)
-	for _, secret := range []string{codexRealEnv + "=", codexProfileEnv + "=", codexProfileSourceEnv + "="} {
+	for _, secret := range []string{
+		codexRealEnv + "=", codexProfileEnv + "=", codexProfileSourceEnv + "=", codexBaseSourceEnv + "=", codexWorktreeEnv + "=",
+	} {
 		if strings.Contains(envText, secret) {
 			t.Fatalf("shim control env leaked to real Codex: %s", secret)
 		}
@@ -111,6 +145,8 @@ func TestCodexProfileShimLeavesNonExecCommandsUnchanged(t *testing.T) {
 	t.Setenv(codexRealEnv, realCodex)
 	t.Setenv(codexProfileEnv, "deep-review")
 	t.Setenv(codexProfileSourceEnv, filepath.Join(root, "does-not-exist"))
+	t.Setenv(codexBaseSourceEnv, filepath.Join(root, "config.toml"))
+	t.Setenv(codexWorktreeEnv, filepath.Join(root, "worktree"))
 	t.Setenv("CDDM_TEST_ARGS", argsPath)
 
 	if rc := runCodexProfileShim([]string{"login", "status"}); rc != 0 {
