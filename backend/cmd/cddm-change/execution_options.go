@@ -39,14 +39,8 @@ func (e *engine) resumeOrRotateWithOptions(mode, instruction string, legacy []st
 	if opts.CodexProfile != "" {
 		profile = opts.CodexProfile
 	}
-	if profile != "" {
-		if err := e.activateCodexProfile(profile); err != nil {
-			e.ui.errorf("Codex profile: %v", err)
-			return 1
-		}
-	}
-	if err := e.persistCodexProfile(profile); err != nil {
-		e.ui.errorf("persist Codex profile: %v", err)
+	if err := e.selectCodexProfile(profile); err != nil {
+		e.ui.errorf("Codex profile: %v", err)
 		return 1
 	}
 
