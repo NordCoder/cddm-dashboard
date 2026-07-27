@@ -198,6 +198,11 @@ export class ExtensionRuntime {
   }
 
   async handleAlarm(name) { await this.scheduler.alarm(name); }
+
+  async handleTabActivated(tabId) {
+    try { await this.adapter.observeActivatedTab?.(tabId); } catch { /* the periodic target validation remains authoritative */ }
+    if (this.workerId) await this.heartbeatCycle();
+  }
 }
 
 if (globalThis.chrome?.storage?.local) {
@@ -205,5 +210,8 @@ if (globalThis.chrome?.storage?.local) {
   runtime.start().catch(() => runtime.status("startup_failed"));
   globalThis.chrome.alarms?.onAlarm.addListener((alarm) => {
     if (alarm.name === HEARTBEAT_ALARM || alarm.name === POLL_ALARM) runtime.handleAlarm(alarm.name).catch(() => runtime.status("tick_failed"));
+  });
+  globalThis.chrome.tabs?.onActivated?.addListener(({ tabId }) => {
+    runtime.handleTabActivated(tabId).catch(() => runtime.status("target_activation_failed"));
   });
 }

@@ -32,6 +32,16 @@ export class ChromeTargetAdapter {
     try { await this.sessionStorage.remove(TRACKED_TAB_KEY); } catch { /* stale ID is always revalidated before use */ }
   }
 
+  async observeActivatedTab(tabId) {
+    if (!Number.isInteger(tabId) || tabId <= 0) return null;
+    let tab;
+    try { tab = await this.chrome.tabs.get(tabId); } catch { return null; }
+    const target = tab?.url ? normalizeTargetUrl(tab.url) : null;
+    if (!tab?.id || !target) return null;
+    await this.rememberTab(tab.id);
+    return target;
+  }
+
   async activeSupportedTab() {
     const tabs = await this.chrome.tabs.query({ active: true, lastFocusedWindow: true });
     const tab = tabs[0];

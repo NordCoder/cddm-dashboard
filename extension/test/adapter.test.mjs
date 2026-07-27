@@ -38,6 +38,15 @@ test("tracked ChatGPT target remains current while the dashboard tab is active",
   assert.deepEqual(await f.adapter.currentTarget(), targetOne);
 });
 
+test("activation event captures the exact ChatGPT tab even after focus already returned to dashboard", async () => {
+  const f = fixture();
+  f.activate(dashboard.id);
+  assert.deepEqual(await f.adapter.observeActivatedTab(chatOne.id), targetOne);
+  assert.deepEqual(await f.adapter.currentTarget(), targetOne);
+  assert.equal(await f.adapter.observeActivatedTab(dashboard.id), null);
+  assert.deepEqual(await f.adapter.currentTarget(), targetOne);
+});
+
 test("tracked target fails closed when its exact tab closes or navigates away", async () => {
   const closed = fixture();
   await closed.adapter.currentTarget();
