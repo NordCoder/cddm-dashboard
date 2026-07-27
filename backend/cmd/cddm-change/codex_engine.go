@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,8 +43,8 @@ func (e *engine) start(model, reasoning string) int {
 	}
 	if os.IsNotExist(err) {
 		state = e.initialState(model, reasoning, "WORKTREE_INITIALIZING")
-		if saveErr := saveStateAtomic(e.statePath, state); saveErr != nil {
-			e.ui.errorf("initialize state: %v", saveErr)
+		if err := saveStateAtomic(e.statePath, state); err != nil {
+			e.ui.errorf("initialize state: %v", err)
 			return 1
 		}
 		if err := e.createOrAttachWorktree(); err != nil {
@@ -128,21 +127,18 @@ func (e *engine) resumeOrRotate(mode, instruction string, overrides []string) in
 		e.ui.errorf("persistent thread_id missing")
 		return 1
 	}
-	model := state.Model
-	reasoning := state.Reasoning
+	model, reasoning := state.Model, state.Reasoning
 	if len(overrides) >= 1 {
 		model = overrides[0]
 	}
 	if len(overrides) >= 2 {
 		reasoning = overrides[1]
 	}
-	state.Model = model
-	state.Reasoning = reasoning
+	state.Model, state.Reasoning = model, reasoning
 	if err := saveStateAtomic(e.statePath, state); err != nil {
 		e.ui.errorf("persist execution settings: %v", err)
 		return 1
 	}
-
 	template := "change-resume.md"
 	if mode == "rotate" {
 		template = "change-rotate.md"
@@ -190,14 +186,12 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 	v2Log := filepath.Join(e.resultsDir, fmt.Sprintf("issue-%d-v2-%s.log", e.issue, stamp))
 	pidFile := filepath.Join(e.resultsDir, fmt.Sprintf("issue-%d-%s-%s.pid", e.issue, mode, stamp))
 	exitStatus := filepath.Join(e.resultsDir, fmt.Sprintf("issue-%d-%s-%s.exit-status", e.issue, mode, stamp))
-	f, err := os.OpenFile(events, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	eventFile, err := os.OpenFile(events, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		e.ui.errorf("create event log: %v", err)
 		return 1
 	}
-	defer f.Close()
-	_ = os.Remove(pidFile)
-	_ = os.Remove(exitStatus)
+	defer eventFile.Close()
 
 	state.ActivePID = nil
 	state.ActivePIDFile = pidFile
@@ -235,11 +229,11 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 		e.ui.errorf("start Codex: %v", err)
 		return 1
 	}
-	identity, identityErr := readProcessIdentity(cmd.Process.Pid)
-	if identityErr != nil {
+	identity, err := readProcessIdentity(cmd.Process.Pid)
+	if err != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		_, _ = cmd.Process.Wait()
-		e.ui.errorf("capture Codex process identity: %v", identityErr)
+		e.ui.errorf("capture Codex process identity: %v", err)
 		return 1
 	}
 	state.ActivePID = ptr(identity.PID)
@@ -293,11 +287,10 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 	defer ticker.Stop()
 	lastEvent := time.Now()
 	lastWarn := time.Time{}
-	startTime := time.Now()
+	started := time.Now()
 	var usage Usage
 	var childErr error
-	childDone := false
-	linesDone := false
+	childDone, linesDone := false, false
 	threadSeen := ""
 	threadInvalid := false
 
@@ -312,8 +305,8 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 				e.ui.warnf(os.Stderr, "event stream read failed: %v", lr.err)
 				continue
 			}
-			_, _ = io.WriteString(f, lr.line)
-			_ = f.Sync()
+			_, _ = io.WriteString(eventFile, lr.line)
+			_ = eventFile.Sync()
 			trimmed := strings.TrimSuffix(lr.line, "\n")
 			var event map[string]any
 			if json.Unmarshal([]byte(trimmed), &event) == nil {
@@ -327,14 +320,16 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 					}
 				}
 			}
-			e.ui.printEvent(os.Stderr, time.Since(startTime), parseRenderedEvent(trimmed))
+			e.ui.printEvent(os.Stderr, time.Since(started), parseRenderedEvent(trimmed))
 			lastEvent = time.Now()
 			lastWarn = time.Time{}
 		case err := <-waitCh:
 			childErr = err
 			childDone = true
 		case sig := <-sigCh:
-			_ = syscall.Kill(-identity.PGID, sig.(syscall.Signal))
+			if unixSig, ok := sig.(syscall.Signal); ok {
+				_ = syscall.Kill(-identity.PGID, unixSig)
+			}
 		case <-ticker.C:
 			stall := envStallSeconds()
 			if stall > 0 && time.Since(lastEvent) >= time.Duration(stall)*time.Second && (lastWarn.IsZero() || time.Since(lastWarn) >= time.Duration(stall)*time.Second) {
@@ -343,7 +338,7 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 			}
 		}
 	}
-	_ = f.Sync()
+	_ = eventFile.Sync()
 	rc := exitCode(childErr)
 	if err := writeIntAtomic(exitStatus, rc); err != nil {
 		state.Status = "TURN_COMPLETION_UNKNOWN"
@@ -370,12 +365,12 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 		e.ui.errorf("completed %s turn has no valid thread.started identity", mode)
 		return 10
 	}
+
 	e.countTurn(&state, result)
 	_ = appendHistory(e.historyPath, map[string]any{
 		"turn_key": result, "phase": "finish", "ended_at": utcNow(), "rc": rc,
 		"result_status": resultStatus(result), "usage": usage,
 	})
-
 	if rc != 0 {
 		state.Status = "TURN_FAILED"
 		state.LastResult = result
@@ -403,7 +398,6 @@ func (e *engine) runTurn(mode, previousThread, model, reasoning, prompt, rotatio
 		e.ui.errorf("invalid structured result: %v", err)
 		return 13
 	}
-
 	dispatchRC := e.dispatchResult(&state, result, v2Log)
 	if state.LastResult == result {
 		e.clearActive(&state)
@@ -420,12 +414,11 @@ func (e *engine) prepareWorkerRuntime() error {
 	if err := os.MkdirAll(filepath.Join(workerCodexHome, "sqlite"), 0o700); err != nil {
 		return err
 	}
-	configSrc := filepath.Join(e.worktree, ".codex", "config.toml")
-	configDst := filepath.Join(workerCodexHome, "config.toml")
-	if err := copyFile(configSrc, configDst, 0o600); err != nil {
+	if err := copyFile(filepath.Join(e.worktree, ".codex", "config.toml"), filepath.Join(workerCodexHome, "config.toml"), 0o600); err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(workerCodexHome, "auth.json")); os.IsNotExist(err) {
+	workerAuth := filepath.Join(workerCodexHome, "auth.json")
+	if _, err := os.Stat(workerAuth); os.IsNotExist(err) {
 		hostHome := os.Getenv("CODEX_HOME")
 		if hostHome == "" {
 			home, homeErr := os.UserHomeDir()
@@ -434,7 +427,7 @@ func (e *engine) prepareWorkerRuntime() error {
 			}
 			hostHome = filepath.Join(home, ".codex")
 		}
-		if err := copyFile(filepath.Join(hostHome, "auth.json"), filepath.Join(workerCodexHome, "auth.json"), 0o600); err != nil {
+		if err := copyFile(filepath.Join(hostHome, "auth.json"), workerAuth, 0o600); err != nil {
 			return fmt.Errorf("host Codex auth.json unavailable: %w", err)
 		}
 	}
@@ -495,7 +488,7 @@ func (e *engine) workerEnv() []string {
 		}
 		env = append(env, item)
 	}
-	env = append(env,
+	return append(env,
 		"HOME="+e.workerHome,
 		"XDG_CONFIG_HOME="+filepath.Join(e.workerHome, ".config"),
 		"XDG_CACHE_HOME="+filepath.Join(e.workerHome, ".cache"),
@@ -505,7 +498,6 @@ func (e *engine) workerEnv() []string {
 		"CODEX_HOME="+workerCodexHome,
 		"CODEX_SQLITE_HOME="+filepath.Join(workerCodexHome, "sqlite"),
 	)
-	return env
 }
 
 func (e *engine) bindLiveThread(state *RuntimeState, mode, previous, found, model, reasoning, rotationReason string) error {
