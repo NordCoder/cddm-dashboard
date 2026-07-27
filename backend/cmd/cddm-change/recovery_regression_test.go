@@ -75,7 +75,9 @@ func TestRecoverReusedPIDUsesDurableEvidenceWithoutSignal(t *testing.T) {
 
 func TestRepairPrethreadFailureIgnoresReusedPID(t *testing.T) {
 	repo := initGitRepo(t)
-	statePath, _, resultsDir := statePaths(repo, 124)
+	runtimeRoot := t.TempDir()
+	statePath := filepath.Join(runtimeRoot, "issue-124.json")
+	resultsDir := filepath.Join(runtimeRoot, "results")
 	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
