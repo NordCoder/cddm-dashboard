@@ -16,31 +16,31 @@ import (
 )
 
 type RuntimeState struct {
-	Version             int    `json:"version"`
-	Issue               int    `json:"issue"`
-	Branch              string `json:"branch"`
-	Worktree            string `json:"worktree"`
-	ThreadID            string `json:"thread_id"`
-	Model               string `json:"model"`
-	Reasoning           string `json:"reasoning"`
-	Contract            string `json:"contract"`
-	Status              string `json:"status"`
-	ThreadTurnCount     int    `json:"thread_turn_count"`
-	TotalTurnCount      int    `json:"total_turn_count"`
-	ThreadGeneration    int    `json:"thread_generation"`
-	CandidateHead       string `json:"candidate_head"`
-	PR                  *int   `json:"pr"`
-	ActivePID           *int   `json:"active_pid"`
-	ActiveMode          string `json:"active_mode"`
-	ActiveEvents        string `json:"active_events"`
-	ActiveResult        string `json:"active_result"`
-	ActiveV2Log         string `json:"active_v2_log"`
-	ActiveExitStatus    string `json:"active_exit_status"`
-	ActiveModel         string `json:"active_model"`
-	ActiveReasoning     string `json:"active_reasoning"`
-	LastResult          string `json:"last_result"`
-	LastResultRC        *int   `json:"last_result_rc"`
-	UpdatedAt           string `json:"updated_at"`
+	Version          int    `json:"version"`
+	Issue            int    `json:"issue"`
+	Branch           string `json:"branch"`
+	Worktree         string `json:"worktree"`
+	ThreadID         string `json:"thread_id"`
+	Model            string `json:"model"`
+	Reasoning        string `json:"reasoning"`
+	Contract         string `json:"contract"`
+	Status           string `json:"status"`
+	ThreadTurnCount  int    `json:"thread_turn_count"`
+	TotalTurnCount   int    `json:"total_turn_count"`
+	ThreadGeneration int    `json:"thread_generation"`
+	CandidateHead    string `json:"candidate_head"`
+	PR               *int   `json:"pr"`
+	ActivePID        *int   `json:"active_pid"`
+	ActiveMode       string `json:"active_mode"`
+	ActiveEvents     string `json:"active_events"`
+	ActiveResult     string `json:"active_result"`
+	ActiveV2Log      string `json:"active_v2_log"`
+	ActiveExitStatus string `json:"active_exit_status"`
+	ActiveModel      string `json:"active_model"`
+	ActiveReasoning  string `json:"active_reasoning"`
+	LastResult       string `json:"last_result"`
+	LastResultRC     *int   `json:"last_result_rc"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type Usage struct {
