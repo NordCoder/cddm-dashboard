@@ -34,7 +34,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${BIND_HOST:-127.0.0.1}:${API_PORT:-8080}:8080"
     volumes:
       - cddm_data:/data
     healthcheck:
@@ -51,7 +51,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${WEB_PORT:-3000}:80"
+      - "${BIND_HOST:-127.0.0.1}:${WEB_PORT:-3000}:80"
 
 volumes:
   cddm_data:

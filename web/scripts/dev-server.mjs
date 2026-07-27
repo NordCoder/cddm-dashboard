@@ -18,11 +18,17 @@ const contentTypes = new Map([
 function proxyApi(request, response) {
   const target = new URL(request.url ?? '/', apiTarget)
   const transport = target.protocol === 'https:' ? httpsRequest : httpRequest
+  const forwardedHost = request.headers.host ?? `localhost:${port}`
   const proxy = transport(
     target,
     {
       method: request.method,
-      headers: { ...request.headers, host: target.host },
+      headers: {
+        ...request.headers,
+        host: target.host,
+        'x-forwarded-host': forwardedHost,
+        'x-forwarded-proto': 'http',
+      },
     },
     (upstream) => {
       response.writeHead(upstream.statusCode ?? 502, upstream.headers)
@@ -76,7 +82,7 @@ const server = createServer((request, response) => {
   })
 })
 
-server.listen(port, '0.0.0.0', () => {
+server.listen(port, '127.0.0.1', () => {
   console.log(`Web development server listening on http://localhost:${port}`)
   console.log(`Proxying /api to ${apiTarget.origin}`)
 })

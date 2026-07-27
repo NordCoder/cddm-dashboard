@@ -161,4 +161,7 @@ jobs:
             grep -q 'Implement approved Change #{{ISSUE}} to locally candidate-ready state' "$prompt"
           done
       - name: Validate configuration
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          rendered="$(docker compose config)"
+          test "$(grep -c 'host_ip: 127.0.0.1' <<<"$rendered")" -eq 2

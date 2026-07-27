@@ -56,13 +56,13 @@ Set at least `GITHUB_TOKEN` when supervising private repositories, then run:
 docker compose up --build
 ```
 
-Open `http://localhost:3000`. The web container proxies `/api` to the backend; the backend is also exposed at `http://localhost:8080` by default. SQLite data is persisted in the `cddm_data` volume.
+Open `http://localhost:3000`. The web container proxies `/api` to the backend; the backend is also exposed at `http://localhost:8080`. Both host ports bind to `127.0.0.1` by default because the application has no public authentication layer. SQLite data is persisted in the `cddm_data` volume.
 
 For non-Docker development:
 
 ```bash
 cd backend
-APP_DATABASE_PATH=./data/cddm.db GITHUB_TOKEN=... go run ./cmd/server
+APP_ADDR=127.0.0.1:8080 APP_DATABASE_PATH=./data/cddm.db GITHUB_TOKEN=... go run ./cmd/server
 ```
 
 In another terminal:
@@ -119,13 +119,17 @@ The delivery safety model includes:
 
 - backend-owned plan/head/lane/binding/presence validation;
 - lane/version CAS for bind/rebind/disable;
-- one stable idempotency key per frozen confirmation intent;
-- durable claim reservation before DOM insertion/send;
-- exact target check before insertion and again before send;
+- one stable idempotency key per frozen confirmation intent, retained after transport-ambiguous `5xx` or malformed success responses;
+- strict command/claim/session identity validation and SHA-256 verification of the claimed immutable prompt;
+- serialized durable claim reservation before DOM insertion/send;
+- claim authority bound to the exact configured backend origin;
+- exact target and backend-configuration checks before insertion and again before send;
+- identified ChatGPT composer/send selectors without broad generic contenteditable/submit fallbacks;
+- `delivered` only after bounded composer-clear submit acknowledgement; otherwise `uncertain`;
 - at-most-once DOM send for a claim;
 - restart recovery to `uncertain` rather than replay;
-- completion transport retry without DOM resend;
-- terminal local diagnostic on conflicting completion acknowledgement;
+- time-bounded backend requests and completion transport retry without DOM resend;
+- terminal local diagnostic on conflicting or definitive rejected completion acknowledgement;
 - no ChatGPT response scraping, classification or persistence.
 
 See [Confirmed browser delivery](docs/browser-delivery.md) for installation and operating steps.
@@ -224,6 +228,8 @@ Real provider credentials and external model network access are not required by 
 
 SQLite persists Project snapshots, workflow/planning audit state, browser lane bindings and delivery commands. Credentials and authorization headers are not persisted in frontend state or planning audit records.
 
+The API/dashboard are local/private services without a public authentication layer. Direct server launches, the development server and Docker Compose bind to loopback by default. Override `APP_ADDR` or `BIND_HOST` only behind a trusted private-network or authenticated reverse-proxy boundary. State-changing browser requests must come from the same forwarded dashboard origin; bundled extension origins are accepted only for `/api/browser/` execution endpoints, and JSON bodies require `application/json`.
+
 The application does not:
 
 - write to supervised GitHub repositories as part of synchronization;
@@ -236,7 +242,7 @@ The application does not:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `APP_ADDR` | `:8080` | Backend listen address |
+| `APP_ADDR` | `127.0.0.1:8080` | Backend listen address for direct launches |
 | `APP_DATABASE_PATH` | `data/cddm.db` | SQLite database path |
 | `APP_SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown deadline |
 | `GITHUB_TOKEN` | empty | Read-only GitHub credential |
@@ -264,6 +270,7 @@ The application does not:
 | `BROWSER_DELIVERY_ENABLED` | `false` | Enable confirmed browser delivery |
 | `BROWSER_DELIVERY_PENDING_TTL` | `5m` | Pending delivery command lifetime |
 | `BROWSER_DELIVERY_CLAIM_TTL` | `1m` | Claimed-command acknowledgement deadline |
+| `BIND_HOST` | `127.0.0.1` | Host interface for Docker Compose published ports |
 | `API_PORT` | `8080` | Host API port in Docker Compose |
 | `WEB_PORT` | `3000` | Host web port in Docker Compose |
 

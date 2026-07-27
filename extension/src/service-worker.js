@@ -1,9 +1,9 @@
 import { BackendClient, BackendHTTPError } from "./api.js";
 import { ChromeTargetAdapter } from "./adapter.js";
-import { ExecutionCoordinator } from "./executor.js";
+import { ExecutionCoordinator, PreSendError } from "./executor.js";
 import { ClaimLedger } from "./ledger.js";
 import {
-  BACKEND_ORIGIN_KEY, WORKER_ID_KEY, backendPermissionOrigin, normalizeBackendOrigin,
+  BACKEND_ORIGIN_KEY, WORKER_ID_KEY, backendPermissionOrigin, isOpaqueIdentifier, normalizeBackendOrigin,
   randomId, safeDiagnostic, sameTarget
 } from "./protocol.js";
 
@@ -47,7 +47,7 @@ export class RuntimeScheduler {
     const handler = this.handlers[kind];
     this.timers.set(kind, this.setTimeout(async () => {
       this.scheduleTimer(kind, delay);
-      await handler?.();
+      try { await handler?.(); } catch { /* the next bounded tick retries */ }
     }, delay));
   }
 
@@ -76,6 +76,7 @@ export class ExtensionRuntime {
     this.sessionId = dependencies.sessionId || SESSION_ID;
     this.workerId = null;
     this.backend = null;
+    this.backendOrigin = null;
     this.coordinator = null;
     this.currentTarget = null;
     this.presenceTarget = null;
@@ -99,7 +100,7 @@ export class ExtensionRuntime {
 
   async loadWorkerId() {
     const found = (await this.storage.get(WORKER_ID_KEY))[WORKER_ID_KEY];
-    if (found) return found;
+    if (isOpaqueIdentifier(found)) return found;
     const generated = randomId();
     await this.storage.set({ [WORKER_ID_KEY]: generated });
     return generated;
@@ -118,6 +119,17 @@ export class ExtensionRuntime {
     return granted ? origin : null;
   }
 
+  disableRuntimeBackend() {
+    this.backend = null;
+    this.backendOrigin = null;
+    this.coordinator = null;
+    this.registered = false;
+    this.conflict = false;
+    this.currentTarget = null;
+    this.presenceTarget = null;
+    this.presenceCurrent = false;
+  }
+
   async heartbeatCycle() {
     if (this.heartbeatInFlight) {
       this.heartbeatPending = true;
@@ -127,14 +139,17 @@ export class ExtensionRuntime {
     try {
       const origin = await this.enabledOrigin();
       if (!origin) {
-        this.currentTarget = null;
-        this.presenceTarget = null;
-        this.presenceCurrent = false;
+        this.disableRuntimeBackend();
         await this.status("disabled_backend");
         return;
       }
-      this.backend = this.clientFactory(origin);
-      this.coordinator = new ExecutionCoordinator({ ledger: this.ledger, backend: this.backend, adapter: this.adapter });
+      if (origin !== this.backendOrigin) {
+        this.backend = this.clientFactory(origin);
+        this.backendOrigin = origin;
+        this.coordinator = new ExecutionCoordinator({ ledger: this.ledger, backend: this.backend, adapter: this.adapter, backendOrigin: origin });
+        this.registered = false;
+        this.presenceCurrent = false;
+      }
       const target = await this.adapter.currentTarget();
       this.currentTarget = target;
       const payload = { worker_id: this.workerId, worker_session_id: this.sessionId, protocol_version: "m6-c3", capabilities: ["chatgpt_conversation", "exact_prompt_send"], observation: { target } };
@@ -160,29 +175,58 @@ export class ExtensionRuntime {
 
   async reconcileLedger() {
     if (!this.coordinator) return;
+    const coordinator = this.coordinator;
+    const origin = this.backendOrigin;
     const entries = await this.ledger.all();
     for (const entry of Object.values(entries)) {
-      if (!entry.acknowledged && entry.state !== "reserved") await this.coordinator.acknowledge(entry);
+      if (entry.acknowledged || entry.state === "reserved" || entry.backend_origin !== origin) continue;
+      try { await coordinator.acknowledge(entry); } catch { /* a later heartbeat retries remaining durable acknowledgements */ }
     }
   }
 
   async pollCycle() {
-    const target = await this.adapter.currentTarget();
-    this.currentTarget = target;
-    if (!sameTarget(target, this.presenceTarget)) this.presenceCurrent = false;
-    await this.poll();
+    try {
+      const origin = await this.enabledOrigin();
+      if (!origin || origin !== this.backendOrigin || !this.backend || !this.coordinator) {
+        this.presenceCurrent = false;
+        return;
+      }
+      const target = await this.adapter.currentTarget();
+      this.currentTarget = target;
+      if (!sameTarget(target, this.presenceTarget)) this.presenceCurrent = false;
+      await this.poll();
+    } catch {
+      this.presenceCurrent = false;
+      await this.status("backend_unavailable");
+    }
   }
 
   async poll() {
-    if (this.pollInFlight || this.conflict || !this.backend || !this.currentTarget || !this.presenceCurrent) return;
+    if (this.pollInFlight || this.conflict || !this.backend || !this.coordinator || !this.backendOrigin || !this.currentTarget || !this.presenceCurrent) return;
     this.pollInFlight = true;
     const requestId = randomId();
+    const backend = this.backend;
+    const coordinator = this.coordinator;
+    const claimedOrigin = this.backendOrigin;
+    const claimedTarget = this.currentTarget;
     try {
-      const execution = await this.backend.claimNext({ worker_id: this.workerId, worker_session_id: this.sessionId, claim_request_id: requestId });
+      const execution = await backend.claimNext({ worker_id: this.workerId, worker_session_id: this.sessionId, claim_request_id: requestId });
       if (execution) {
-        const result = await this.coordinator.execute(execution, { workerId: this.workerId, sessionId: this.sessionId }, this.currentTarget);
+        const result = await coordinator.execute(
+          execution,
+          { workerId: this.workerId, sessionId: this.sessionId },
+          claimedTarget,
+          async () => {
+            const currentOrigin = await this.enabledOrigin();
+            if (!currentOrigin || currentOrigin !== claimedOrigin || claimedOrigin !== this.backendOrigin) {
+              throw new PreSendError("backend_configuration_changed_before_send");
+            }
+          },
+        );
         if (result.completion_diagnostic === "completion_conflict") {
           await this.status("delivery_completion_conflict");
+        } else if (result.completion_diagnostic?.startsWith("completion_rejected_")) {
+          await this.status(result.completion_diagnostic);
         } else {
           await this.status(result.outcome === "delivered" ? "delivered" : result.outcome === "failed" ? "failed_pre_send" : "uncertain");
         }

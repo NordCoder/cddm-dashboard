@@ -1,5 +1,7 @@
 import { safeDiagnostic } from "./protocol.js";
 
+export const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+
 export class BackendHTTPError extends Error {
   constructor(status, body = "") {
     super(`backend_http_${status}`);
@@ -10,25 +12,33 @@ export class BackendHTTPError extends Error {
 }
 
 export class BackendClient {
-  constructor(origin, fetchFn = globalThis.fetch, retryDelay = 25) {
+  constructor(origin, fetchFn = globalThis.fetch, retryDelay = 25, requestTimeout = DEFAULT_REQUEST_TIMEOUT_MS, timerApi = globalThis) {
     this.origin = origin.replace(/\/$/, "");
     this.fetchFn = fetchFn;
     this.retryDelay = retryDelay;
+    this.requestTimeout = requestTimeout;
+    this.timerApi = timerApi;
   }
 
   async request(path, body, retryTransport = true) {
-    const init = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+    const baseInit = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
     let lastError;
     for (let attempt = 0; attempt < (retryTransport ? 2 : 1); attempt += 1) {
+      const controller = new AbortController();
+      const timeout = this.requestTimeout > 0
+        ? this.timerApi.setTimeout(() => controller.abort(), this.requestTimeout)
+        : null;
       try {
-        const response = await this.fetchFn(`${this.origin}${path}`, init);
+        const response = await this.fetchFn(`${this.origin}${path}`, { ...baseInit, signal: controller.signal });
         const text = await response.text();
         if (!response.ok) throw new BackendHTTPError(response.status, text);
         return response.status === 204 || !text ? null : JSON.parse(text);
       } catch (error) {
-        lastError = error;
-        if (error instanceof BackendHTTPError || attempt === 1) throw error;
-        await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
+        lastError = controller.signal.aborted ? new Error("backend_request_timeout") : error;
+        if (lastError instanceof BackendHTTPError || attempt === 1) throw lastError;
+        await new Promise((resolve) => this.timerApi.setTimeout(resolve, this.retryDelay));
+      } finally {
+        if (timeout !== null) this.timerApi.clearTimeout(timeout);
       }
     }
     throw lastError;

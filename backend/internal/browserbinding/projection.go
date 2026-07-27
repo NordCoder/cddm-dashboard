@@ -32,15 +32,12 @@ func (s *Service) ListWorkerProjections(ctx context.Context) ([]WorkerProjection
 	for _, worker := range workers {
 		projection := WorkerProjection{
 			WorkerID: worker.WorkerID, ProtocolVersion: worker.ProtocolVersion,
-			Capabilities: worker.Capabilities, SessionID: worker.SessionID,
-			LastSeen: worker.LastSeen, State: worker.State,
+			Capabilities: worker.Capabilities, State: worker.State,
 		}
 		bySession := s.sessions[worker.WorkerID]
 		switch len(bySession) {
 		case 0:
 			projection.State = "stale"
-			projection.SessionID = ""
-			projection.LastSeen = nil
 		case 1:
 			for _, current := range bySession {
 				projection.SessionID = current.id
@@ -58,8 +55,6 @@ func (s *Service) ListWorkerProjections(ctx context.Context) ([]WorkerProjection
 			}
 		default:
 			projection.State = "conflict"
-			projection.SessionID = ""
-			projection.LastSeen = nil
 		}
 		out = append(out, projection)
 	}

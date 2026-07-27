@@ -48,9 +48,10 @@ function short(value: string, length = 12): string { return value.length <= leng
 function targetLabel(target: BrowserTarget): string { return `${target.origin}${target.path}` }
 function randomKey(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  if (!globalThis.crypto?.getRandomValues) throw new Error('secure_random_unavailable')
   const bytes = new Uint8Array(16)
-  globalThis.crypto?.getRandomValues?.(bytes)
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('') || `${Date.now()}-${Math.random()}`
+  globalThis.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
 }
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.status === 0 ? `Backend unavailable: ${error.message}` : `Backend error (${error.status}): ${error.message}`
@@ -106,21 +107,36 @@ class BrowserDeliveryController {
   private identity: { projectID: number; issueNumber: number }
   private confirmation: FrozenConfirmation | null = null
   private submitting = false
+  private mutating = false
   private feedback = ''
   private timer: number | undefined
+  private loadGeneration = 0
+  private loadAbort: AbortController | null = null
+  private stopped = false
 
   constructor(root: HTMLElement, identity: { projectID: number; issueNumber: number }) {
     this.root = root
     this.identity = identity
   }
 
+  private busy(): boolean { return this.submitting || this.mutating }
+
   start(): void {
+    this.stopped = false
     void this.load()
-    this.timer = globalThis.setInterval(() => { if (!this.confirmation && !this.submitting) void this.load(true) }, 5000)
+    this.timer = globalThis.setInterval(() => { if (!this.confirmation && !this.busy()) void this.load(true) }, 5000)
   }
 
-  stop(): void { if (this.timer !== undefined) globalThis.clearInterval(this.timer) }
+  stop(): void {
+    this.stopped = true
+    this.loadGeneration += 1
+    this.loadAbort?.abort()
+    this.loadAbort = null
+    if (this.timer !== undefined) globalThis.clearInterval(this.timer)
+  }
+
   refresh(): void {
+    if (this.busy()) return
     if (this.confirmation) {
       this.confirmation = null
       this.feedback = 'Confirmation cancelled by refresh. Review the current state again.'
@@ -131,20 +147,31 @@ class BrowserDeliveryController {
   }
 
   private async load(silent = false): Promise<void> {
+    const generation = ++this.loadGeneration
+    this.loadAbort?.abort()
+    const controller = new AbortController()
+    this.loadAbort = controller
     if (!silent) this.renderLoading()
     try {
       const { projectID, issueNumber } = this.identity
       const [workUnit, plan, workers, deliveries] = await Promise.all([
-        this.core.workUnitState(projectID, issueNumber), this.core.latestPlan(projectID, issueNumber), this.browser.workers(), this.browser.deliveries(projectID, issueNumber),
+        this.core.workUnitState(projectID, issueNumber, controller.signal),
+        this.core.latestPlan(projectID, issueNumber, controller.signal),
+        this.browser.workers(controller.signal),
+        this.browser.deliveries(projectID, issueNumber, controller.signal),
       ])
       let binding: BrowserBinding | null = null
-      if (workUnit.route.lane_key) binding = (await this.browser.browserBinding(projectID, issueNumber)).binding
+      if (workUnit.route.lane_key) binding = (await this.browser.browserBinding(projectID, issueNumber, controller.signal)).binding
+      if (this.stopped || generation !== this.loadGeneration) return
       this.snapshot = { workUnit, plan, binding, workers, deliveries }
       this.feedback = silent ? this.feedback : ''
       this.render()
     } catch (error) {
+      if (controller.signal.aborted || this.stopped || generation !== this.loadGeneration) return
       this.feedback = errorText(error)
       this.render()
+    } finally {
+      if (generation === this.loadGeneration) this.loadAbort = null
     }
   }
 
@@ -160,6 +187,7 @@ class BrowserDeliveryController {
   }
 
   private render(): void {
+    if (this.stopped) return
     const body = this.body()
     body.replaceChildren()
     if (this.feedback) body.append(el('p', 'cddm-browser-feedback', this.feedback))
@@ -180,12 +208,13 @@ class BrowserDeliveryController {
     if (workUnit.route.action === 'dispatch' && workUnit.route.lane_key) {
       const select = el('select', 'cddm-browser-select') as HTMLSelectElement
       select.setAttribute('aria-label', 'Live browser target')
+      select.disabled = this.busy()
       if (choices.length === 0) select.append(new Option('No live ChatGPT targets', ''))
       choices.forEach((worker, index) => select.append(new Option(`${short(worker.worker_id)} · ${targetLabel(worker.target!)}`, String(index))))
       section.append(select)
       const controls = el('div', 'cddm-browser-controls')
       const bindButton = button(binding ? 'Rebind selected target' : 'Bind selected target', 'cddm-browser-button--primary')
-      bindButton.disabled = choices.length === 0 || this.submitting
+      bindButton.disabled = choices.length === 0 || this.busy()
       bindButton.addEventListener('click', () => {
         const selected = choices[Number(select.value)]
         if (selected?.target) void this.bind(selected)
@@ -193,7 +222,7 @@ class BrowserDeliveryController {
       controls.append(bindButton)
       if (binding?.enabled) {
         const disable = button('Disable binding', 'cddm-browser-button--danger')
-        disable.disabled = this.submitting
+        disable.disabled = this.busy()
         disable.addEventListener('click', () => void this.disableBinding())
         controls.append(disable)
       }
@@ -202,34 +231,47 @@ class BrowserDeliveryController {
     return section
   }
 
+  private async mutate(action: () => Promise<void>, success: string): Promise<void> {
+    if (this.busy()) return
+    this.mutating = true
+    this.confirmation = null
+    this.feedback = ''
+    this.render()
+    try {
+      await action()
+      this.feedback = success
+    } catch (error) {
+      this.feedback = errorText(error)
+    } finally {
+      this.mutating = false
+      await this.load(true)
+    }
+  }
+
   private async bind(worker: BrowserWorker): Promise<void> {
     const snapshot = this.snapshot
     if (!snapshot?.workUnit.route.lane_key || !worker.target) return
-    this.feedback = ''
-    try {
-      await this.browser.bind(this.identity.projectID, this.identity.issueNumber, {
-        expected_lane_key: snapshot.workUnit.route.lane_key,
-        expected_binding_version: snapshot.binding?.binding_version,
-        worker_id: worker.worker_id,
-        target: worker.target,
-      })
-      this.feedback = 'Binding updated. Review the current state before delivery.'
-    } catch (error) { this.feedback = errorText(error) }
-    this.confirmation = null
-    await this.load(true)
+    const input = {
+      expected_lane_key: snapshot.workUnit.route.lane_key,
+      expected_binding_version: snapshot.binding?.binding_version,
+      worker_id: worker.worker_id,
+      target: worker.target,
+    }
+    await this.mutate(
+      () => this.browser.bind(this.identity.projectID, this.identity.issueNumber, input).then(() => undefined),
+      'Binding updated. Review the current state before delivery.',
+    )
   }
 
   private async disableBinding(): Promise<void> {
     const binding = this.snapshot?.binding
     const lane = this.snapshot?.workUnit.route.lane_key
     if (!binding || !lane) return
-    this.feedback = ''
-    try {
-      await this.browser.disableBinding(this.identity.projectID, this.identity.issueNumber, { expected_lane_key: lane, expected_binding_version: binding.binding_version })
-      this.feedback = 'Binding disabled.'
-    } catch (error) { this.feedback = errorText(error) }
-    this.confirmation = null
-    await this.load(true)
+    const input = { expected_lane_key: lane, expected_binding_version: binding.binding_version }
+    await this.mutate(
+      () => this.browser.disableBinding(this.identity.projectID, this.identity.issueNumber, input).then(() => undefined),
+      'Binding disabled.',
+    )
   }
 
   private deliverySection(): HTMLElement {
@@ -247,10 +289,10 @@ class BrowserDeliveryController {
       section.append(el('pre', 'cddm-browser-prompt', frozen.prompt))
       const controls = el('div', 'cddm-browser-controls')
       const confirm = button(this.submitting ? 'Sending confirmation…' : 'Confirm and send', 'cddm-browser-button--primary')
-      confirm.disabled = this.submitting
+      confirm.disabled = this.busy()
       confirm.addEventListener('click', () => void this.confirm())
       const cancel = button('Cancel')
-      cancel.disabled = this.submitting
+      cancel.disabled = this.busy()
       cancel.addEventListener('click', () => { this.confirmation = null; this.feedback = ''; this.render() })
       controls.append(confirm, cancel)
       section.append(controls)
@@ -258,13 +300,14 @@ class BrowserDeliveryController {
     }
 
     const review = button('Review delivery', 'cddm-browser-button--primary')
-    review.disabled = !eligibility.ready
+    review.disabled = !eligibility.ready || this.busy()
     review.addEventListener('click', () => this.openConfirmation())
     section.append(review)
     return section
   }
 
   private openConfirmation(): void {
+    if (this.busy()) return
     const snapshot = this.snapshot
     if (!snapshot?.plan?.plan || !snapshot.binding || !deliveryEligibility(snapshot.workUnit, snapshot.plan, snapshot.binding).ready) return
     const textarea = document.querySelector('textarea[aria-label="Prompt text"]') as HTMLTextAreaElement | null
@@ -273,7 +316,14 @@ class BrowserDeliveryController {
       this.render()
       return
     }
-    const key = randomKey()
+    let key: string
+    try {
+      key = randomKey()
+    } catch (error) {
+      this.feedback = errorText(error)
+      this.render()
+      return
+    }
     const input = buildConfirmationInput(snapshot.plan, snapshot.binding, key)
     this.confirmation = {
       input,
@@ -292,7 +342,7 @@ class BrowserDeliveryController {
 
   private async confirm(): Promise<void> {
     const frozen = this.confirmation
-    if (this.submitting || !frozen) return
+    if (this.busy() || !frozen) return
     this.submitting = true
     this.feedback = ''
     this.render()

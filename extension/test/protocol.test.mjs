@@ -1,5 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { isOpaqueIdentifier, randomId, sha256Hex } from "../src/protocol.js";
+
+test("opaque identifiers reject prototype keys and malformed values", () => {
+  assert.equal(isOpaqueIdentifier("claim-1"), true);
+  assert.equal(isOpaqueIdentifier("__proto__"), false);
+  assert.equal(isOpaqueIdentifier("bad/value"), false);
+  assert.equal(isOpaqueIdentifier(""), false);
+});
+
+test("random and digest primitives require secure browser crypto", async () => {
+  assert.match(randomId(), /^[A-Za-z0-9._-]{1,200}$/);
+  assert.equal(await sha256Hex("exact prompt"), "eed1d81b1a386e05e946a46581d3a07f3a1be21fb4ff482de024318f1fab19e9");
+});
+
 import { normalizeBackendOrigin, normalizeTargetUrl, sameTarget } from "../src/protocol.js";
 
 test("normalizes only credential-free backend origins", () => {

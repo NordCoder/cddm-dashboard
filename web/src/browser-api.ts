@@ -144,16 +144,30 @@ function backendMessage(value: unknown, fallback: string): string {
   return fallback
 }
 
+function ambiguousConfirmationError(error: unknown): ApiError | null {
+  if (error instanceof ApiError && (error.status === 0 || error.status === 408 || error.status >= 500)) return new ApiError(0, error.message)
+  if (error instanceof BackendResponseError) return new ApiError(0, error.message)
+  return null
+}
+
 export class BrowserApiClient {
   constructor(private readonly fetcher: FetchLike = globalThis.fetch.bind(globalThis)) {}
 
   private async request<T>(path: string, parser: (value: unknown) => T, init?: RequestInit): Promise<T> {
     let response: Response
     try { response = await this.fetcher(path, init) } catch (error) { throw new ApiError(0, error instanceof Error ? error.message : 'Backend is unavailable') }
-    const raw = await response.text()
+    let raw: string
+    try {
+      raw = await response.text()
+    } catch (error) {
+      throw new BackendResponseError('Backend response body could not be read', error)
+    }
     let body: unknown = undefined
     if (raw.trim()) {
-      try { body = JSON.parse(raw) as unknown } catch (error) { throw new BackendResponseError('Backend returned malformed JSON', error) }
+      try { body = JSON.parse(raw) as unknown } catch (error) {
+        if (!response.ok) throw new ApiError(response.status, `Backend returned HTTP ${response.status}`)
+        throw new BackendResponseError('Backend returned malformed JSON', error)
+      }
     }
     if (!response.ok) throw new ApiError(response.status, backendMessage(body, `Backend returned HTTP ${response.status}`))
     try { return parser(body) } catch (error) {
@@ -202,9 +216,15 @@ export class BrowserApiClient {
     }, { signal })
   }
 
-  confirm(projectID: number, issueNumber: number, input: DeliveryConfirmationInput): Promise<DeliveryCommand> {
-    return this.request(`/api/projects/${projectID}/work-units/${issueNumber}/deliveries`, (value) => command(value, '$'), {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
-    })
+  async confirm(projectID: number, issueNumber: number, input: DeliveryConfirmationInput): Promise<DeliveryCommand> {
+    try {
+      return await this.request(`/api/projects/${projectID}/work-units/${issueNumber}/deliveries`, (value) => command(value, '$'), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+      })
+    } catch (error) {
+      const ambiguous = ambiguousConfirmationError(error)
+      if (ambiguous) throw ambiguous
+      throw error
+    }
   }
 }

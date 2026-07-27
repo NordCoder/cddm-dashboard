@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultAddress                  = ":8080"
+	defaultAddress                  = "127.0.0.1:8080"
 	defaultDatabasePath             = "data/cddm.db"
 	defaultShutdownTimeout          = 10 * time.Second
 	defaultGitHubAPIBaseURL         = "https://api.github.com/"

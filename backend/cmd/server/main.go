@@ -80,9 +80,9 @@ func run() error {
 
 	server := &http.Server{
 		Addr: cfg.Address,
-		Handler: httpapi.NewWithPlanningAndBindingServiceAndDelivery(
+		Handler: withMutationRequestGuard(httpapi.NewWithPlanningAndBindingServiceAndDelivery(
 			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, bindingService, deliveryService,
-		),
+		)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      maxDuration(cfg.GitHubSyncTimeout, cfg.OpenCodeTimeout) + 15*time.Second,

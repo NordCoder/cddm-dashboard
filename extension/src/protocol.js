@@ -3,14 +3,27 @@ export const CHATGPT_ORIGIN = "https://chatgpt.com";
 export const WORKER_ID_KEY = "worker_id";
 export const BACKEND_ORIGIN_KEY = "backend_origin";
 
+const OPAQUE_IDENTIFIER = /^[A-Za-z0-9._-]{1,200}$/;
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function isOpaqueIdentifier(value) {
+  return typeof value === "string" && OPAQUE_IDENTIFIER.test(value) && !RESERVED_OBJECT_KEYS.has(value);
+}
+
 export function randomId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.getRandomValues) throw new Error("secure_random_unavailable");
+  if (cryptoApi.randomUUID) return cryptoApi.randomUUID();
   const bytes = new Uint8Array(16);
-  globalThis.crypto?.getRandomValues?.(bytes);
-  if (!bytes.some(Boolean)) {
-    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
-  }
+  cryptoApi.getRandomValues(bytes);
   return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+export async function sha256Hex(value) {
+  if (typeof value !== "string") throw new Error("hash_input_invalid");
+  if (!globalThis.crypto?.subtle?.digest) throw new Error("secure_hash_unavailable");
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function normalizeBackendOrigin(value) {
