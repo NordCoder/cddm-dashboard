@@ -30,14 +30,21 @@ jobs:
         id: format
         continue-on-error: true
         run: |
-          find backend/cmd/cddm-change -type f -name '*.go' -print0 | xargs -0 gofmt -l > /tmp/cddm-gofmt.list
-          test ! -s /tmp/cddm-gofmt.list
-      - name: Upload gofmt list
+          mkdir -p /tmp/cddm-gofmt
+          set +e
+          find backend/cmd/cddm-change -type f -name '*.go' -print0 | xargs -0 gofmt -l > /tmp/cddm-gofmt/stdout.txt 2> /tmp/cddm-gofmt/stderr.txt
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > /tmp/cddm-gofmt/rc.txt
+          cat /tmp/cddm-gofmt/stderr.txt >&2
+          test "$rc" -eq 0
+          test ! -s /tmp/cddm-gofmt/stdout.txt
+      - name: Upload gofmt diagnostics
         if: always() && steps.format.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: cddm-gofmt-list
-          path: /tmp/cddm-gofmt.list
+          name: cddm-gofmt-diagnostics
+          path: /tmp/cddm-gofmt
           if-no-files-found: error
       - name: Report formatting diagnostics
         if: always() && steps.format.outcome == 'failure'
@@ -49,7 +56,9 @@ jobs:
             echo '## Runtime Go formatting diagnostic'
             echo
             echo '```text'
-            cat /tmp/cddm-gofmt.list
+            echo "rc=$(cat /tmp/cddm-gofmt/rc.txt)"
+            cat /tmp/cddm-gofmt/stderr.txt
+            cat /tmp/cddm-gofmt/stdout.txt
             echo '```'
           } > /tmp/comment.md
           gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
