@@ -65,8 +65,6 @@ func readProcessIdentity(pid int) (processIdentity, error) {
 		return out, errors.New("invalid proc stat")
 	}
 	fields := strings.Fields(stat[closeParen+2:])
-	// /proc stat fields after comm start at field 3 (state). pgrp is field 5,
-	// starttime is field 22, hence indexes 2 and 19 in this sliced sequence.
 	if len(fields) <= 19 {
 		return out, errors.New("short proc stat")
 	}
@@ -93,9 +91,7 @@ func stateOwnsProcess(state RuntimeState) (processIdentity, bool) {
 	if identity.StartTicks != state.ActivePIDStartTicks || identity.PGID != *state.ActivePGID {
 		return processIdentity{}, false
 	}
-	// The native engine launches Codex through either the real `codex` binary or
-	// the controlled worker shim. Require one of those identities before signal.
-	if !strings.Contains(identity.Cmdline, "codex") && !strings.Contains(identity.Cmdline, "cddm-codex-worker-shim") {
+	if !strings.Contains(identity.Cmdline, "codex") {
 		return processIdentity{}, false
 	}
 	return identity, true
@@ -143,7 +139,15 @@ func readIntFile(path string) (int, error) {
 		return 0, err
 	}
 	value, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || value < 0 || value > 255 {
+	if err != nil || value < 0 {
+		return 0, errors.New("invalid durable integer")
+	}
+	return value, nil
+}
+
+func readExitStatus(path string) (int, error) {
+	value, err := readIntFile(path)
+	if err != nil || value > 255 {
 		return 0, errors.New("invalid durable exit status")
 	}
 	return value, nil
