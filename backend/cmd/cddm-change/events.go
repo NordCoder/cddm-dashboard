@@ -12,7 +12,7 @@ import (
 const maxEventText = 360
 
 var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(authorization\s*:\s*)([^\s]+)`),
+	regexp.MustCompile(`(?i)(authorization\s*:\s*)(?:(?:bearer|basic)\s+)?[^\s,;]+`),
 	regexp.MustCompile(`(?i)((?:password|passwd|secret|token|cookie)\s*[=:]\s*)([^\s,;]+)`),
 	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{20,}\b`),
 	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}\b`),
@@ -23,15 +23,16 @@ func redact(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	for _, re := range secretPatterns {
-		if re.NumSubexp() >= 2 {
+		if re.NumSubexp() >= 1 {
 			s = re.ReplaceAllString(s, `${1}[REDACTED]`)
 		} else {
 			s = re.ReplaceAllString(s, `[REDACTED]`)
 		}
 	}
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > maxEventText {
-		s = s[:maxEventText-1] + "…"
+	runes := []rune(s)
+	if len(runes) > maxEventText {
+		s = string(runes[:maxEventText-1]) + "…"
 	}
 	return s
 }
