@@ -32,6 +32,13 @@ jobs:
             cat /tmp/cddm-gofmt.list
             exit 1
           fi
+      - name: Upload Go formatting diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cddm-gofmt-list
+          path: /tmp/cddm-gofmt.list
+          if-no-files-found: ignore
       - name: Test Go runtime
         working-directory: backend
         run: |
@@ -43,7 +50,7 @@ jobs:
         with:
           name: cddm-runtime-test-log
           path: /tmp/cddm-runtime-test.log
-          if-no-files-found: error
+          if-no-files-found: ignore
       - name: Verify consequential native parity
         working-directory: backend
         run: |
@@ -52,7 +59,7 @@ jobs:
         run: |
           bash scripts/build-cddm-change.sh
           test "$(.worktrees/bin/cddm-change __build-revision)" = "$CANDIDATE_SHA"
-      - name: Smoke public launcher
+      - name: Smoke repository launcher
         run: |
           scripts/cddm-codex-change.sh --color=never help >/dev/null
           NO_COLOR=1 scripts/cddm-codex-change.sh status 999999 >/tmp/cddm-status.txt
@@ -64,3 +71,21 @@ jobs:
           JSON
           timeout 2 scripts/cddm-codex-change.sh --color=never watch 999998 > /tmp/cddm-watch-idle.txt
           grep -q 'observer: no active turn' /tmp/cddm-watch-idle.txt
+      - name: Smoke system-level cddm install
+        run: |
+          install_dir="$RUNNER_TEMP/cddm-bin"
+          CDDM_INSTALL_DIR="$install_dir" bash scripts/install-cddm.sh
+          test "$($install_dir/cddm __build-revision)" = "$CANDIDATE_SHA"
+          "$install_dir/cddm" version | grep -q "$CANDIDATE_SHA"
+          "$install_dir/cddm" --color=never help >/dev/null
+
+          other="$RUNNER_TEMP/other-repo"
+          git init -b main "$other"
+          git -C "$other" config user.name Runtime
+          git -C "$other" config user.email runtime@example.test
+          touch "$other/.keep"
+          git -C "$other" add .keep
+          git -C "$other" commit -m base
+          mkdir -p "$other/nested/path"
+          (cd "$other/nested/path" && "$install_dir/cddm" --color=never status 999999 > "$RUNNER_TEMP/system-status.txt")
+          grep -q 'Issue #999999' "$RUNNER_TEMP/system-status.txt"
