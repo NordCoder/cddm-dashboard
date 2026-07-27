@@ -77,7 +77,11 @@ func (u *UI) header(w io.Writer, issue int, subtitle string) {
 	title := u.style(w, ansiBold, fmt.Sprintf("Change #%d", issue))
 	fmt.Fprintf(w, "%s  %s", brand, title)
 	if subtitle != "" {
-		fmt.Fprintf(w, "  %s", u.style(w, ansiDim, subtitle))
+		if u.enabled(w) && strings.Contains(subtitle, "\x1b[") {
+			fmt.Fprintf(w, "  %s", subtitle)
+		} else {
+			fmt.Fprintf(w, "  %s", u.style(w, ansiDim, subtitle))
+		}
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, u.style(w, ansiGray, strings.Repeat("─", 72)))
