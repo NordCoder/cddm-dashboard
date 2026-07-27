@@ -141,6 +141,18 @@ func TestGitHubRepoSlugSupportsCommonOrigins(t *testing.T) {
 	}
 }
 
+func TestNewEngineUsesSelectedRepositoryOrigin(t *testing.T) {
+	repo := initGitRepo(t)
+	runGit(t, repo, "remote", "add", "origin", "https://github.com/NordCoder/example-cddm.git")
+	e, err := newEngine(newUI(ColorNever), repo, 77)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.repoSlug != "NordCoder/example-cddm" || repoSlug != "NordCoder/example-cddm" {
+		t.Fatalf("engine repo=%q package repo=%q", e.repoSlug, repoSlug)
+	}
+}
+
 func TestExecutionOptionPrecedence(t *testing.T) {
 	profile := profileConfig{Model: "profile-model", Reasoning: "low"}
 	opts := globalOptions{Model: "cli-model", Reasoning: "high"}
