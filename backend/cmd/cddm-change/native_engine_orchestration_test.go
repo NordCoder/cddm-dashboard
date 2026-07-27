@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestCodexStdoutPipeConcurrentWaitPreservesResult(t *testing.T) {
+func TestCodexStdoutPipeDrainBeforeWaitPreservesResult(t *testing.T) {
 	repo := initGitRepo(t)
 	if err := os.MkdirAll(filepath.Join(repo, ".codex", "schemas"), 0o755); err != nil {
 		t.Fatal(err)
@@ -41,17 +41,15 @@ test -s "$result"
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
 	if _, err := io.ReadAll(stdout); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-waitCh; err != nil {
+	if err := cmd.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(result)
 	if err != nil || info.Size() == 0 {
-		t.Fatalf("result missing after concurrent Wait: info=%v err=%v", info, err)
+		t.Fatalf("result missing after stdout drain and Wait: info=%v err=%v", info, err)
 	}
 }
 
