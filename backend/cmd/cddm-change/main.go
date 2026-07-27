@@ -75,26 +75,6 @@ func run(args []string) int {
 		return 1
 	}
 	execOpts := resolveExecutionOptions(opts, workspace)
-	if command == "start" && execOpts.CodexProfile != "" {
-		if len(commandArgs) == 0 {
-			ui.errorf("start requires an Issue number")
-			return 2
-		}
-		issue, err := parseIssue(commandArgs[0])
-		if err != nil {
-			ui.errorf("%v", err)
-			return 2
-		}
-		e := &engine{repo: repo, issue: issue}
-		if err := e.activateCodexProfile(execOpts.CodexProfile); err != nil {
-			ui.errorf("Codex profile: %v", err)
-			return 1
-		}
-		if err := e.persistCodexProfile(execOpts.CodexProfile); err != nil {
-			ui.errorf("persist Codex profile: %v", err)
-			return 1
-		}
-	}
 
 	switch command {
 	case "status":
