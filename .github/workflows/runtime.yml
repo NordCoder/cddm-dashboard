@@ -34,7 +34,16 @@ jobs:
           fi
       - name: Test Go runtime
         working-directory: backend
-        run: go test ./cmd/cddm-change
+        run: |
+          set -o pipefail
+          go test ./cmd/cddm-change 2>&1 | tee /tmp/cddm-runtime-test.log
+      - name: Upload runtime test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cddm-runtime-test-log
+          path: /tmp/cddm-runtime-test.log
+          if-no-files-found: error
       - name: Build Go runtime
         run: |
           bash scripts/build-cddm-change.sh
