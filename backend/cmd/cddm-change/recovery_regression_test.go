@@ -72,3 +72,44 @@ func TestRecoverReusedPIDUsesDurableEvidenceWithoutSignal(t *testing.T) {
 		t.Fatal("recovery signalled an unrelated live process")
 	}
 }
+
+func TestRepairPrethreadFailureIgnoresReusedPID(t *testing.T) {
+	repo := initGitRepo(t)
+	statePath, _, resultsDir := statePaths(repo, 124)
+	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	events := filepath.Join(resultsDir, "prethread-events.jsonl")
+	if err := os.WriteFile(events, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pid := os.Getpid()
+	identity, err := readProcessIdentity(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgid := identity.PGID
+	state := RuntimeState{
+		Version: 4, Issue: 124, Status: "START_FAILED_NO_THREAD", ThreadGeneration: 1,
+		ActivePID: &pid, ActivePGID: &pgid, ActivePIDStartTicks: identity.StartTicks + "-reused",
+		ActiveMode: "start", ActiveEvents: events,
+	}
+	if err := saveStateAtomic(statePath, state); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &engine{
+		ui: newUI(ColorNever), repo: repo, issue: 124, worktree: repo,
+		statePath: statePath, workerHome: filepath.Join(repo, ".cddm-worker-home"),
+	}
+	if err := e.repairPrethreadFailure(); err != nil {
+		t.Fatalf("repair failed: %v", err)
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("stale pre-thread state was not archived: %v", err)
+	}
+	if !processExists(pid) {
+		t.Fatal("pre-thread repair signalled an unrelated live process")
+	}
+}
