@@ -179,6 +179,7 @@ func (u *UI) printEvent(w io.Writer, elapsed time.Duration, e renderedEvent) {
 			} else {
 				color, symbol = ansiRed, "✗"
 			}
+		}
 	case "THREAD":
 		color, symbol = ansiCyan, "◆"
 	case "PLAN":
