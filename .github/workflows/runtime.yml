@@ -28,23 +28,24 @@ jobs:
         run: go version
       - name: Check Go runtime formatting
         id: format
+        continue-on-error: true
         run: |
           gofmt -d backend/cmd/cddm-change > /tmp/cddm-gofmt.diff
           test ! -s /tmp/cddm-gofmt.diff
       - name: Prepare formatted runtime artifact
-        if: failure() && steps.format.outcome == 'failure'
+        if: steps.format.outcome == 'failure'
         run: |
           cp -R backend/cmd/cddm-change /tmp/cddm-change-formatted
-          gofmt -w /tmp/cddm-change-formatted
+          find /tmp/cddm-change-formatted -name '*.go' -type f -exec gofmt -w {} +
       - name: Upload formatted runtime artifact
-        if: failure() && steps.format.outcome == 'failure'
+        if: steps.format.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: cddm-change-formatted
           path: /tmp/cddm-change-formatted
           if-no-files-found: error
       - name: Report formatting diagnostics
-        if: failure() && steps.format.outcome == 'failure'
+        if: steps.format.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -62,10 +63,11 @@ jobs:
           gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
       - name: Test Go runtime
         id: test
+        continue-on-error: true
         working-directory: backend
         run: go test ./cmd/cddm-change 2>&1 | tee /tmp/cddm-go-test.log
       - name: Report compile/test diagnostics
-        if: failure() && steps.test.outcome == 'failure'
+        if: steps.test.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -79,6 +81,10 @@ jobs:
             echo '```'
           } > /tmp/comment.md
           gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
+      - name: Enforce format and tests
+        run: |
+          test '${{ steps.format.outcome }}' = success
+          test '${{ steps.test.outcome }}' = success
       - name: Build Go runtime
         run: |
           bash scripts/build-cddm-change.sh
