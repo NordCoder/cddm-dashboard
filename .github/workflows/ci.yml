@@ -118,7 +118,8 @@ jobs:
           grep -q 'START_FAILED_NO_THREAD' scripts/cddm-codex-change-core.sh
           grep -q 'PUSHED_PENDING_GITHUB' scripts/cddm-codex-change-core.sh
           grep -q 'Pending Candidate reconciliation must succeed before another Codex turn' scripts/cddm-codex-change-core.sh
-          grep -q 'cddm-codex-change-compat.sh' scripts/cddm-codex-change.sh
+          grep -q 'cddm-codex-change-compat.sh' backend/cmd/cddm-change/main.go
+          grep -q 'CDDM Go runtime is stale' scripts/cddm-codex-change.sh
           grep -q 'CDDM_CHANGE_BIN' scripts/cddm-codex-worker-shim.sh
           grep -q '__proxy' scripts/cddm-codex-worker-shim.sh
           grep -q '__v2tee' scripts/cddm-host-tool-shim.sh
