@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,10 +14,19 @@ import (
 	"strings"
 )
 
-const (
-	repoSlug          = "NordCoder/cddm-dashboard"
-	permissionProfile = "cddm-worker"
-)
+const permissionProfile = "cddm-worker"
+
+// A CLI process targets exactly one repository. This package-level value keeps
+// legacy GitHub transport helpers compatible while repository identity is
+// resolved dynamically from the selected target's origin.
+var repoSlug string
+
+type executionOptions struct {
+	ProfileModel     string
+	ProfileReasoning string
+	Model            string
+	Reasoning        string
+}
 
 type engine struct {
 	ui          *UI
@@ -30,6 +40,7 @@ type engine struct {
 	resultsDir  string
 	contract    string
 	originURL   string
+	repoSlug    string
 }
 
 func newEngine(ui *UI, repo string, issue int) (*engine, error) {
@@ -38,7 +49,16 @@ func newEngine(ui *UI, repo string, issue int) (*engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	originURL, _ := runOutput(repo, nil, "git", "remote", "get-url", "origin")
+	originOut, err := runOutput(repo, nil, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return nil, fmt.Errorf("read origin: %w", err)
+	}
+	origin := strings.TrimSpace(originOut)
+	slug, err := githubRepoSlug(origin)
+	if err != nil {
+		return nil, err
+	}
+	repoSlug = slug
 	return &engine{
 		ui:          ui,
 		repo:        repo,
@@ -50,11 +70,16 @@ func newEngine(ui *UI, repo string, issue int) (*engine, error) {
 		historyPath: historyPath,
 		resultsDir:  resultsDir,
 		contract:    contract,
-		originURL:   strings.TrimSpace(originURL),
+		originURL:   origin,
+		repoSlug:    slug,
 	}, nil
 }
 
 func commandMutating(ui *UI, repo, command string, args []string) int {
+	return commandMutatingWithOptions(ui, repo, command, args, executionOptions{})
+}
+
+func commandMutatingWithOptions(ui *UI, repo, command string, args []string, execOpts executionOptions) int {
 	if len(args) < 1 {
 		ui.errorf("%s requires an Issue number", command)
 		return 2
@@ -72,7 +97,7 @@ func commandMutating(ui *UI, repo, command string, args []string) int {
 
 	if command == "stop" {
 		if len(args) != 1 {
-			ui.errorf("usage: stop <issue>")
+			ui.errorf("usage: cddm stop <issue>")
 			return 2
 		}
 		return e.stopCommand()
@@ -87,22 +112,34 @@ func commandMutating(ui *UI, repo, command string, args []string) int {
 
 	switch command {
 	case "start":
+		if len(args) > 3 {
+			ui.errorf("usage: cddm start <issue> [legacy-model] [legacy-reasoning]")
+			return 2
+		}
 		model := "gpt-5.6-terra"
 		reasoning := "medium"
+		if execOpts.ProfileModel != "" {
+			model = execOpts.ProfileModel
+		}
+		if execOpts.ProfileReasoning != "" {
+			reasoning = execOpts.ProfileReasoning
+		}
 		if len(args) >= 2 {
 			model = args[1]
 		}
 		if len(args) >= 3 {
 			reasoning = args[2]
 		}
-		if len(args) > 3 {
-			ui.errorf("usage: start <issue> [model] [reasoning]")
-			return 2
+		if execOpts.Model != "" {
+			model = execOpts.Model
+		}
+		if execOpts.Reasoning != "" {
+			reasoning = execOpts.Reasoning
 		}
 		return e.start(model, reasoning)
 	case "resume", "rotate":
 		if len(args) < 2 || len(args) > 4 {
-			ui.errorf("usage: %s <issue> <instruction-file|-> [model] [reasoning]", command)
+			ui.errorf("usage: cddm %s <issue> <instruction-file|-> [legacy-model] [legacy-reasoning]", command)
 			return 2
 		}
 		instruction, err := readInstruction(args[1])
@@ -114,16 +151,17 @@ func commandMutating(ui *UI, repo, command string, args []string) int {
 			ui.errorf("%s instruction is empty", command)
 			return 2
 		}
-		return e.resumeOrRotate(command, instruction, args[2:])
+		legacy := args[2:]
+		return e.resumeOrRotateWithOptions(command, instruction, legacy, execOpts)
 	case "recover":
 		if len(args) != 1 {
-			ui.errorf("usage: recover <issue>")
+			ui.errorf("usage: cddm recover <issue>")
 			return 2
 		}
 		return e.recoverCommand()
 	case "reconcile":
 		if len(args) != 1 {
-			ui.errorf("usage: reconcile <issue>")
+			ui.errorf("usage: cddm reconcile <issue>")
 			return 2
 		}
 		return e.reconcileCommand()
@@ -165,7 +203,7 @@ func (e *engine) preflight(requireCodex bool, syncMain bool) error {
 	}
 	branch, err := runOutput(e.repo, nil, "git", "branch", "--show-current")
 	if err != nil || strings.TrimSpace(branch) != "main" {
-		return errors.New("run from the controlling main checkout")
+		return errors.New("target repository must be on controlling main checkout")
 	}
 	status, err := runOutput(e.repo, nil, "git", "status", "--porcelain")
 	if err != nil {
@@ -179,9 +217,14 @@ func (e *engine) preflight(requireCodex bool, syncMain bool) error {
 		return err
 	}
 	e.originURL = strings.TrimSpace(origin)
-	if !canonicalOrigin(e.originURL) {
-		return fmt.Errorf("unexpected canonical origin: %s", e.originURL)
+	slug, err := githubRepoSlug(e.originURL)
+	if err != nil {
+		return err
 	}
+	if slug != e.repoSlug {
+		return fmt.Errorf("repository origin changed during command: expected=%s actual=%s", e.repoSlug, slug)
+	}
+	repoSlug = slug
 	if _, err := runOutput(e.repo, nil, "gh", "auth", "status"); err != nil {
 		return errors.New("GitHub CLI is not authenticated")
 	}
@@ -217,13 +260,36 @@ func (e *engine) preflight(requireCodex bool, syncMain bool) error {
 	return nil
 }
 
-func canonicalOrigin(origin string) bool {
-	switch origin {
-	case "https://github.com/NordCoder/cddm-dashboard", "https://github.com/NordCoder/cddm-dashboard.git", "git@github.com:NordCoder/cddm-dashboard.git", "ssh://git@github.com:NordCoder/cddm-dashboard.git":
-		return true
-	default:
-		return false
+func githubRepoSlug(origin string) (string, error) {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return "", errors.New("repository origin is empty")
 	}
+	var path string
+	switch {
+	case strings.HasPrefix(origin, "git@github.com:"):
+		path = strings.TrimPrefix(origin, "git@github.com:")
+	default:
+		u, err := url.Parse(origin)
+		if err != nil {
+			return "", fmt.Errorf("parse GitHub origin: %w", err)
+		}
+		if !strings.EqualFold(u.Hostname(), "github.com") {
+			return "", fmt.Errorf("unsupported non-GitHub origin: %s", origin)
+		}
+		path = strings.TrimPrefix(u.Path, "/")
+	}
+	path = strings.TrimSuffix(path, ".git")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", fmt.Errorf("cannot derive owner/repo from origin: %s", origin)
+	}
+	return parts[0] + "/" + parts[1], nil
+}
+
+func canonicalOrigin(origin string) bool {
+	_, err := githubRepoSlug(origin)
+	return err == nil
 }
 
 func readInstruction(source string) (string, error) {
@@ -236,7 +302,7 @@ func readInstruction(source string) (string, error) {
 }
 
 func (e *engine) issueContext() (string, error) {
-	out, err := runOutput(e.repo, nil, "gh", "issue", "view", strconvI(e.issue), "--repo", repoSlug, "--json", "title,body")
+	out, err := runOutput(e.repo, nil, "gh", "issue", "view", strconvI(e.issue), "--repo", e.repoSlug, "--json", "title,body")
 	if err != nil {
 		return "", err
 	}
