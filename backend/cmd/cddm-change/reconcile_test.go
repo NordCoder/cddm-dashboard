@@ -44,7 +44,7 @@ func TestReconcileOntoPreservesCandidatePatch(t *testing.T) {
 
 func TestReconcileOntoFailsClosedOnCandidateIdentityMismatch(t *testing.T) {
 	e, state, parent, candidate, newBase, bare := prepareReconcileRepo(t, 201)
-	if err := runCommand(e.worktree, nil, nil, os.Stdin, os.Stdout, os.Stderr, "git", "reset", "--hard", parent); err != nil {
+	if err := runCommand(e.worktree, nil, nil, os.Stdout, os.Stderr, "git", "reset", "--hard", parent); err != nil {
 		t.Fatal(err)
 	}
 
