@@ -35,11 +35,20 @@ func (e *engine) resumeOrRotateWithOptions(mode, instruction string, legacy []st
 		model = state.Model
 	}
 
-	profile := state.CodexProfile
+	profile := e.loadCodexProfile()
 	if opts.CodexProfile != "" {
 		profile = opts.CodexProfile
 	}
-	e.codexProfile = profile
+	if profile != "" {
+		if err := e.activateCodexProfile(profile); err != nil {
+			e.ui.errorf("Codex profile: %v", err)
+			return 1
+		}
+	}
+	if err := e.persistCodexProfile(profile); err != nil {
+		e.ui.errorf("persist Codex profile: %v", err)
+		return 1
+	}
 
 	var overrides []string
 	if model != "" {
