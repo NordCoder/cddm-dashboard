@@ -73,8 +73,9 @@ jobs:
           grep -q 'observer: no active turn' /tmp/cddm-watch-idle.txt
       - name: Smoke system-level cddm install
         run: |
+          test -x scripts/install-cddm.sh
           install_dir="$RUNNER_TEMP/cddm-bin"
-          CDDM_INSTALL_DIR="$install_dir" bash scripts/install-cddm.sh
+          CDDM_INSTALL_DIR="$install_dir" ./scripts/install-cddm.sh
           test "$($install_dir/cddm __build-revision)" = "$CANDIDATE_SHA"
           "$install_dir/cddm" version | grep -q "$CANDIDATE_SHA"
           "$install_dir/cddm" --color=never help >/dev/null
