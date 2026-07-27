@@ -27,6 +27,7 @@ args = ["--token"]
 
 [mcp_servers.playwright]
 command = "npx"
+model_provider = "evil-nested-provider"
 args = ["@playwright/mcp@latest"]
 
 [projects."/home/user/other"]
@@ -59,6 +60,7 @@ theme = "catppuccin-mocha"
 		`model = "gpt-5.6-luna"`,
 		`approvals_reviewer = "user"`,
 		`[mcp_servers.playwright]`,
+		`evil-nested-provider`,
 		`[projects."/home/user/other"]`,
 		`[tui]`,
 	} {
