@@ -155,19 +155,35 @@ func parseProxyArgs(args []string) (repo string, issue int, mode string, stall i
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--repo":
-			if i+1 >= len(args) { return "", 0, "", 0, nil, fmt.Errorf("--repo requires value") }
-			repo = args[i+1]; i++
+			if i+1 >= len(args) {
+				return "", 0, "", 0, nil, fmt.Errorf("--repo requires value")
+			}
+			repo = args[i+1]
+			i++
 		case "--issue":
-			if i+1 >= len(args) { return "", 0, "", 0, nil, fmt.Errorf("--issue requires value") }
-			issue, err = parseIssue(args[i+1]); i++
-			if err != nil { return "", 0, "", 0, nil, err }
+			if i+1 >= len(args) {
+				return "", 0, "", 0, nil, fmt.Errorf("--issue requires value")
+			}
+			issue, err = parseIssue(args[i+1])
+			i++
+			if err != nil {
+				return "", 0, "", 0, nil, err
+			}
 		case "--mode":
-			if i+1 >= len(args) { return "", 0, "", 0, nil, fmt.Errorf("--mode requires value") }
-			mode = args[i+1]; i++
+			if i+1 >= len(args) {
+				return "", 0, "", 0, nil, fmt.Errorf("--mode requires value")
+			}
+			mode = args[i+1]
+			i++
 		case "--stall-seconds":
-			if i+1 >= len(args) { return "", 0, "", 0, nil, fmt.Errorf("--stall-seconds requires value") }
-			stall, err = strconv.Atoi(args[i+1]); i++
-			if err != nil || stall < 0 { return "", 0, "", 0, nil, fmt.Errorf("invalid --stall-seconds") }
+			if i+1 >= len(args) {
+				return "", 0, "", 0, nil, fmt.Errorf("--stall-seconds requires value")
+			}
+			stall, err = strconv.Atoi(args[i+1])
+			i++
+			if err != nil || stall < 0 {
+				return "", 0, "", 0, nil, fmt.Errorf("invalid --stall-seconds")
+			}
 		case "--":
 			command = args[i+1:]
 			return
@@ -248,9 +264,15 @@ func commandRecordRecovery(args []string) int {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--repo":
-			if i+1 < len(args) { repo = args[i+1]; i++ }
+			if i+1 < len(args) {
+				repo = args[i+1]
+				i++
+			}
 		case "--issue":
-			if i+1 < len(args) { issue, _ = strconv.Atoi(args[i+1]); i++ }
+			if i+1 < len(args) {
+				issue, _ = strconv.Atoi(args[i+1])
+				i++
+			}
 		}
 	}
 	if repo == "" || issue <= 0 {
@@ -275,12 +297,16 @@ func commandRecordRecovery(args []string) int {
 
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
-		if v != "" { return v }
+		if v != "" {
+			return v
+		}
 	}
 	return ""
 }
 
 func optionalSuffix(s string) string {
-	if s == "" { return "" }
+	if s == "" {
+		return ""
+	}
 	return " · " + s
 }
