@@ -44,6 +44,13 @@ jobs:
           scripts/cddm-codex-change.sh --color=never help >/dev/null
           NO_COLOR=1 scripts/cddm-codex-change.sh status 999999 >/tmp/cddm-status.txt
           ! grep -q $'\033' /tmp/cddm-status.txt
+
+          mkdir -p .worktrees/runtime
+          cat > .worktrees/runtime/issue-999998.json <<'JSON'
+          {"version":4,"issue":999998,"branch":"change/999998","worktree":"","thread_id":"thread-idle","model":"gpt-test","reasoning":"medium","status":"CONTINUE","thread_turn_count":1,"total_turn_count":1,"thread_generation":1,"candidate_head":null,"pr":null,"active_pid":null,"active_mode":null,"active_events":null,"active_result":null,"active_v2_log":null}
+          JSON
+          timeout 2 scripts/cddm-codex-change.sh --color=never watch 999998 > /tmp/cddm-watch-idle.txt
+          grep -q 'observer: no active turn' /tmp/cddm-watch-idle.txt
       - name: Verify Host V2 gofmt guard
         run: |
           tmp="$(mktemp -d)"
