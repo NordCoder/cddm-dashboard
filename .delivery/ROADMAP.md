@@ -44,25 +44,26 @@ A user can take a current policy-approved Prompt Plan, inspect the intended brow
 
 | Change | Depends on | Risk | Current state |
 | --- | --- | --- | --- |
-| #17 — Delivery command contract | Stage 3 routing + Stage 4 planning; integrates #18 binding snapshot | High | Shaped — Ready for persistent implementation |
-| #18 — Browser identity and lane binding | Stage 3 routing | High | Shaped — Ready for persistent implementation |
-| #19 — Chrome extension execution | #17, #18 | High | Blocked |
-| #20 — Confirmed delivery UX | #17; integrates #18 binding | High | Blocked |
-| #21 — End-to-end hardening | #18, #19, #20 | High | Blocked |
+| #17 — Delivery command contract | Stage 3 routing + Stage 4 planning; integrates #18 binding snapshot | High | **Completed — merged and production-wired** |
+| #18 — Browser identity and lane binding | Stage 3 routing | High | **Completed — merged and production-wired** |
+| #19 — Chrome extension execution | #17, #18 | High | **Shaped — Ready for persistent implementation** |
+| #20 — Confirmed delivery UX | #17, #18 | High | **Shaped — Ready for persistent implementation** |
+| #21 — End-to-end hardening | #19, #20 | High | Blocked — Wave 3 integration |
 
-#17 and #18 WHAT + material HARD HOW are fixed in their canonical Change Contracts. Shared semantics are reconciled before Worker execution: Stage 3 remains lane authority; #18 provides versioned binding + ephemeral presence proof; #17 snapshots that exact binding and uses a one-way at-most-once command lifecycle where a claimed command is never automatically requeued.
+#17 and #18 contracts are implemented and reconciled in production. Stage 3 remains lane authority; #18 provides versioned binding + ephemeral presence proof; #17 snapshots that exact binding and uses a one-way at-most-once command lifecycle where a claimed command is never automatically requeued.
+
+#19 and #20 now consume those stable merged contracts in parallel. #19 owns the browser-side executor, durable claim deduplication and DOM send boundary. #20 owns operator binding/confirmation/status UX and never performs browser claim/completion itself.
 
 #### Parallel Plan
 
 ```text
 Owner approval — complete
 ↓
-Web Lead shaping:       #17 + #18 — complete
-Lead reconciliation — complete
+Wave 1 backend contracts: #17 + #18 — complete
 ↓
-Implementation Wave 1:  #17 + #18 persistent Codex sessions
-Downstream Wave 2:      #19 + #20 after dependencies
-Integration Wave 3:     #21
+Implementation Wave 2:   #19 + #20 persistent Codex sessions — READY IN PARALLEL
+↓
+Integration Wave 3:      #21 after #19 + #20
 ```
 
 Wave membership is descriptive, not a lifecycle state. Unresolved HARD HOW is never delegated into parallel Worker decisions.
