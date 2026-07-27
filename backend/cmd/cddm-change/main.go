@@ -19,6 +19,14 @@ func run(args []string) int {
 		fmt.Println(buildRevision)
 		return 0
 	}
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		printUsage(os.Stdout)
+		return 0
+	}
+	if len(args) == 1 && args[0] == "--version" {
+		fmt.Printf("cddm %s\n", buildRevision)
+		return 0
+	}
 	if len(args) > 0 && strings.HasPrefix(args[0], "__") {
 		mode := ColorAuto
 		if env := strings.TrimSpace(os.Getenv("CDDM_COLOR")); env != "" {
@@ -64,7 +72,7 @@ func run(args []string) int {
 		ui.errorf("%v", err)
 		return 1
 	}
-	execOpts := effectiveExecutionOptions(opts, profile)
+	execOpts := resolveExecutionOptions(opts, profile)
 
 	switch command {
 	case "status":
