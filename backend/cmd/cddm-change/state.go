@@ -15,32 +15,54 @@ import (
 	"time"
 )
 
+type ThreadHistoryEntry struct {
+	ThreadID  string `json:"thread_id"`
+	Model     string `json:"model"`
+	Reasoning string `json:"reasoning"`
+	TurnCount int    `json:"turn_count"`
+	RotatedAt string `json:"rotated_at"`
+	Reason    string `json:"reason"`
+}
+
 type RuntimeState struct {
-	Version          int    `json:"version"`
-	Issue            int    `json:"issue"`
-	Branch           string `json:"branch"`
-	Worktree         string `json:"worktree"`
-	ThreadID         string `json:"thread_id"`
-	Model            string `json:"model"`
-	Reasoning        string `json:"reasoning"`
-	Contract         string `json:"contract"`
-	Status           string `json:"status"`
-	ThreadTurnCount  int    `json:"thread_turn_count"`
-	TotalTurnCount   int    `json:"total_turn_count"`
-	ThreadGeneration int    `json:"thread_generation"`
-	CandidateHead    string `json:"candidate_head"`
-	PR               *int   `json:"pr"`
-	ActivePID        *int   `json:"active_pid"`
-	ActiveMode       string `json:"active_mode"`
-	ActiveEvents     string `json:"active_events"`
-	ActiveResult     string `json:"active_result"`
-	ActiveV2Log      string `json:"active_v2_log"`
-	ActiveExitStatus string `json:"active_exit_status"`
-	ActiveModel      string `json:"active_model"`
-	ActiveReasoning  string `json:"active_reasoning"`
-	LastResult       string `json:"last_result"`
-	LastResultRC     *int   `json:"last_result_rc"`
-	UpdatedAt        string `json:"updated_at"`
+	Version               int                  `json:"version"`
+	Issue                 int                  `json:"issue"`
+	Branch                string               `json:"branch"`
+	Worktree              string               `json:"worktree"`
+	ThreadID              string               `json:"thread_id"`
+	Model                 string               `json:"model"`
+	Reasoning             string               `json:"reasoning"`
+	Contract              string               `json:"contract"`
+	Status                string               `json:"status"`
+	ThreadTurnCount       int                  `json:"thread_turn_count"`
+	TotalTurnCount        int                  `json:"total_turn_count"`
+	ThreadGeneration      int                  `json:"thread_generation"`
+	ThreadHistory         []ThreadHistoryEntry `json:"thread_history"`
+	CandidateHead         string               `json:"candidate_head"`
+	CandidateParent       string               `json:"candidate_parent"`
+	CandidateRemoteBefore string               `json:"candidate_remote_before"`
+	CandidateResult       string               `json:"candidate_result"`
+	PR                    *int                 `json:"pr"`
+	ActivePID             *int                 `json:"active_pid"`
+	ActivePIDFile         string               `json:"active_pid_file"`
+	ActivePIDStartTicks   string               `json:"active_pid_start_ticks,omitempty"`
+	ActivePGID            *int                 `json:"active_pgid,omitempty"`
+	ActiveMode            string               `json:"active_mode"`
+	ActiveEvents          string               `json:"active_events"`
+	ActiveResult          string               `json:"active_result"`
+	ActiveV2Log           string               `json:"active_v2_log"`
+	ActiveExitStatus      string               `json:"active_exit_status"`
+	ActivePreviousThread  string               `json:"active_previous_thread"`
+	ActiveRotationReason  string               `json:"active_rotation_reason"`
+	ActiveModel           string               `json:"active_model"`
+	ActiveReasoning       string               `json:"active_reasoning"`
+	LastResult            string               `json:"last_result"`
+	LastResultRC          *int                 `json:"last_result_rc"`
+	LastCountedResult     string               `json:"last_counted_result"`
+	ReconcileFromHead     string               `json:"reconcile_from_head,omitempty"`
+	ReconcileBase         string               `json:"reconcile_base,omitempty"`
+	ReconcilePatch        string               `json:"reconcile_patch,omitempty"`
+	UpdatedAt             string               `json:"updated_at"`
 }
 
 type Usage struct {
@@ -80,7 +102,53 @@ func loadState(path string) (RuntimeState, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return state, err
 	}
+	if state.Version == 0 {
+		state.Version = 4
+	}
+	if state.ThreadGeneration == 0 {
+		state.ThreadGeneration = 1
+	}
 	return state, nil
+}
+
+func saveStateAtomic(path string, state RuntimeState) error {
+	state.UpdatedAt = utcNow()
+	if state.Version == 0 {
+		state.Version = 4
+	}
+	if state.ThreadGeneration == 0 {
+		state.ThreadGeneration = 1
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func loadObject(path string) map[string]any {
