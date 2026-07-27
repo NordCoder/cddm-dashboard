@@ -1,5 +1,14 @@
 package main
 
+func resolveExecutionOptions(opts globalOptions, profile profileConfig) executionOptions {
+	return executionOptions{
+		ProfileModel:     profile.Model,
+		ProfileReasoning: profile.Reasoning,
+		Model:            opts.Model,
+		Reasoning:        opts.Reasoning,
+	}
+}
+
 func (e *engine) resumeOrRotateWithOptions(mode, instruction string, legacy []string, opts executionOptions) int {
 	model := opts.ProfileModel
 	reasoning := opts.ProfileReasoning
