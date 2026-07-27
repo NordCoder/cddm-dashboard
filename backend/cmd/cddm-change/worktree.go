@@ -192,7 +192,7 @@ func (e *engine) repairPrethreadFailure() error {
 		if _, owned := stateOwnsProcess(state); owned {
 			return fmt.Errorf("prior start turn is still alive (pid=%d)", *state.ActivePID)
 		}
-		return fmt.Errorf("persisted active PID %d is alive but ownership cannot be proven", *state.ActivePID)
+		e.ui.warnf(os.Stderr, "persisted pre-thread pid=%d is live but no longer matches the recorded Codex turn; continuing evidence-based repair without signalling it", *state.ActivePID)
 	}
 	if threadFromEvents(state.ActiveEvents) != "" {
 		return errors.New("failed-start events contain a thread.started identity")
