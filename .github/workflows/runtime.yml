@@ -32,19 +32,12 @@ jobs:
         run: |
           gofmt -d backend/cmd/cddm-change > /tmp/cddm-gofmt.diff
           test ! -s /tmp/cddm-gofmt.diff
-      - name: Prepare formatted runtime artifact
-        if: always() && steps.format.outcome == 'failure'
-        run: |
-          rm -rf /tmp/cddm-change-formatted
-          mkdir -p /tmp/cddm-change-formatted
-          cp backend/cmd/cddm-change/*.go /tmp/cddm-change-formatted/
-          find /tmp/cddm-change-formatted -type f -name '*.go' -print0 | xargs -0 gofmt -w
-      - name: Upload formatted runtime artifact
+      - name: Upload gofmt diff
         if: always() && steps.format.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: cddm-change-formatted
-          path: /tmp/cddm-change-formatted
+          name: cddm-gofmt-diff
+          path: /tmp/cddm-gofmt.diff
           if-no-files-found: error
       - name: Report formatting diagnostics
         if: always() && steps.format.outcome == 'failure'
@@ -55,7 +48,7 @@ jobs:
             echo '<!-- cddm-runtime-diagnostic -->'
             echo '## Runtime Go formatting diagnostic'
             echo
-            echo 'Full gofmt output is attached to this workflow run as `cddm-change-formatted`.'
+            echo 'Exact gofmt diff is attached to this workflow run as `cddm-gofmt-diff`.'
             echo
             echo '```diff'
             head -c 8000 /tmp/cddm-gofmt.diff
