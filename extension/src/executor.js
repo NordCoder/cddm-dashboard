@@ -30,19 +30,29 @@ export class ExecutionCoordinator {
       await this.backend.complete(entry.command_id, completionPayload(entry.command_id, entry.claim_id, outcome, reason));
       return await this.ledger.acknowledge(entry.claim_id, true);
     } catch (error) {
-      if (error?.status === 409) return entry;
+      if (error?.status === 409) {
+        return await this.ledger.acknowledge(entry.claim_id, true, "completion_conflict");
+      }
       return entry;
     }
   }
 
+  resultForEntry(entry, reason = entry.diagnostic) {
+    return {
+      outcome: entry.state === CLAIM_SENT ? "delivered" : entry.state === CLAIM_FAILED_PRE_SEND ? "failed" : "uncertain",
+      reason,
+      completion_diagnostic: entry.ack_diagnostic || ""
+    };
+  }
+
   async execute(execution, identity, currentTarget) {
     const invalid = validateExecution(execution, identity, currentTarget);
-    if (invalid) return { outcome: "uncertain", reason: invalid };
+    if (invalid) return { outcome: "uncertain", reason: invalid, completion_diagnostic: "" };
     const command = execution.command;
     const existing = await this.ledger.get(execution.claim_id);
     if (existing) {
-      await this.acknowledge(existing);
-      return { outcome: existing.state === CLAIM_SENT ? "delivered" : existing.state === CLAIM_FAILED_PRE_SEND ? "failed" : "uncertain", reason: existing.diagnostic };
+      const acknowledged = await this.acknowledge(existing);
+      return this.resultForEntry(acknowledged || existing);
     }
 
     let reserved;
@@ -50,11 +60,11 @@ export class ExecutionCoordinator {
       reserved = await this.ledger.reserve(execution.claim_id, command.id);
     } catch {
       await this.tryComplete(command.id, execution.claim_id, "uncertain", "ledger_unavailable");
-      return { outcome: "uncertain", reason: "ledger_unavailable" };
+      return { outcome: "uncertain", reason: "ledger_unavailable", completion_diagnostic: "" };
     }
     if (!reserved.created) {
-      await this.acknowledge(reserved.entry);
-      return { outcome: "uncertain", reason: "duplicate_claim" };
+      const acknowledged = await this.acknowledge(reserved.entry);
+      return this.resultForEntry(acknowledged || reserved.entry, "duplicate_claim");
     }
 
     let state = CLAIM_UNCERTAIN;
@@ -79,9 +89,9 @@ export class ExecutionCoordinator {
       }
     }
     const entry = await this.ledger.mark(execution.claim_id, state, safeDiagnostic(reason));
-    await this.acknowledge(entry);
+    const acknowledged = await this.acknowledge(entry);
     await this.ledger.prune();
-    return { outcome: state === CLAIM_SENT ? "delivered" : state === CLAIM_FAILED_PRE_SEND ? "failed" : "uncertain", reason };
+    return this.resultForEntry(acknowledged || entry, reason);
   }
 
   async tryComplete(commandId, claimId, outcome, reason) {

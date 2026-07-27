@@ -40,11 +40,12 @@ export class ClaimLedger {
     return entry;
   }
 
-  async acknowledge(claimId, acknowledged = true) {
+  async acknowledge(claimId, acknowledged = true, ackDiagnostic = "") {
     const entries = await this.all();
     const entry = entries[claimId];
     if (!entry) return null;
     entry.acknowledged = Boolean(acknowledged);
+    if (ackDiagnostic) entry.ack_diagnostic = String(ackDiagnostic).slice(0, 80);
     entry.updated_at = this.now();
     entries[claimId] = entry;
     await this.save(entries);

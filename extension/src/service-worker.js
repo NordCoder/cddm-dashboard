@@ -46,9 +46,6 @@ export class RuntimeScheduler {
     if (!this.active) return;
     const handler = this.handlers[kind];
     this.timers.set(kind, this.setTimeout(async () => {
-      // Arm the next in-memory timer before awaiting I/O. This keeps the
-      // active worker on a bounded cadence even when one request is slow;
-      // the runtime itself guards overlapping heartbeat/poll work.
       this.scheduleTimer(kind, delay);
       await handler?.();
     }, delay));
@@ -56,10 +53,6 @@ export class RuntimeScheduler {
 
   scheduleAlarm(name) {
     if (!this.active || !this.alarms?.create) return;
-    // These are one-shot wakeups, never unsupported sub-30-second repeating
-    // alarms. While the worker is alive, the chained timers above provide the
-    // 10s/5s cadence; after suspension the backend TTL is allowed to expire
-    // until a fresh runtime registers a new session and proves presence.
     try {
       const result = this.alarms.create(name, { when: this.now() + ALARM_FALLBACK_DELAY_MS });
       result?.catch?.(() => {});
@@ -188,7 +181,11 @@ export class ExtensionRuntime {
       const execution = await this.backend.claimNext({ worker_id: this.workerId, worker_session_id: this.sessionId, claim_request_id: requestId });
       if (execution) {
         const result = await this.coordinator.execute(execution, { workerId: this.workerId, sessionId: this.sessionId }, this.currentTarget);
-        await this.status(result.outcome === "delivered" ? "delivered" : result.outcome === "failed" ? "failed_pre_send" : "uncertain");
+        if (result.completion_diagnostic === "completion_conflict") {
+          await this.status("delivery_completion_conflict");
+        } else {
+          await this.status(result.outcome === "delivered" ? "delivered" : result.outcome === "failed" ? "failed_pre_send" : "uncertain");
+        }
       }
     } catch (error) {
       this.conflict = error instanceof BackendHTTPError && error.status === 409;
