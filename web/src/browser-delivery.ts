@@ -86,13 +86,25 @@ type Snapshot = {
   deliveries: DeliveryCommand[]
 }
 
+type FrozenConfirmation = {
+  input: DeliveryConfirmationInput
+  planID: number
+  summary: string
+  expectedHead: string
+  lane: string
+  target: string
+  bindingVersion: number
+  bindingReadiness: string
+  prompt: string
+}
+
 class BrowserDeliveryController {
   private readonly core = new ApiClient()
   private readonly browser = new BrowserApiClient()
   private root: HTMLElement
   private snapshot: Snapshot | null = null
   private identity: { projectID: number; issueNumber: number }
-  private confirmationKey = ''
+  private confirmation: FrozenConfirmation | null = null
   private submitting = false
   private feedback = ''
   private timer: number | undefined
@@ -104,11 +116,19 @@ class BrowserDeliveryController {
 
   start(): void {
     void this.load()
-    this.timer = globalThis.setInterval(() => { if (!this.confirmationKey && !this.submitting) void this.load(true) }, 5000)
+    this.timer = globalThis.setInterval(() => { if (!this.confirmation && !this.submitting) void this.load(true) }, 5000)
   }
 
   stop(): void { if (this.timer !== undefined) globalThis.clearInterval(this.timer) }
-  refresh(): void { void this.load(false) }
+  refresh(): void {
+    if (this.confirmation) {
+      this.confirmation = null
+      this.feedback = 'Confirmation cancelled by refresh. Review the current state again.'
+      void this.load(true)
+      return
+    }
+    void this.load(false)
+  }
 
   private async load(silent = false): Promise<void> {
     if (!silent) this.renderLoading()
@@ -165,7 +185,7 @@ class BrowserDeliveryController {
       section.append(select)
       const controls = el('div', 'cddm-browser-controls')
       const bindButton = button(binding ? 'Rebind selected target' : 'Bind selected target', 'cddm-browser-button--primary')
-      bindButton.disabled = choices.length === 0
+      bindButton.disabled = choices.length === 0 || this.submitting
       bindButton.addEventListener('click', () => {
         const selected = choices[Number(select.value)]
         if (selected?.target) void this.bind(selected)
@@ -173,6 +193,7 @@ class BrowserDeliveryController {
       controls.append(bindButton)
       if (binding?.enabled) {
         const disable = button('Disable binding', 'cddm-browser-button--danger')
+        disable.disabled = this.submitting
         disable.addEventListener('click', () => void this.disableBinding())
         controls.append(disable)
       }
@@ -194,7 +215,7 @@ class BrowserDeliveryController {
       })
       this.feedback = 'Binding updated. Review the current state before delivery.'
     } catch (error) { this.feedback = errorText(error) }
-    this.confirmationKey = ''
+    this.confirmation = null
     await this.load(true)
   }
 
@@ -207,7 +228,7 @@ class BrowserDeliveryController {
       await this.browser.disableBinding(this.identity.projectID, this.identity.issueNumber, { expected_lane_key: lane, expected_binding_version: binding.binding_version })
       this.feedback = 'Binding disabled.'
     } catch (error) { this.feedback = errorText(error) }
-    this.confirmationKey = ''
+    this.confirmation = null
     await this.load(true)
   }
 
@@ -217,20 +238,20 @@ class BrowserDeliveryController {
     const snapshot = this.snapshot!
     const eligibility = deliveryEligibility(snapshot.workUnit, snapshot.plan, snapshot.binding)
     section.append(line('Eligibility', eligibility.ready ? 'ready' : 'unavailable'))
-    if (!eligibility.ready) section.append(el('p', 'cddm-browser-feedback cddm-browser-warning', eligibility.reason))
+    if (!eligibility.ready && !this.confirmation) section.append(el('p', 'cddm-browser-feedback cddm-browser-warning', eligibility.reason))
 
-    if (this.confirmationKey && snapshot.plan?.plan && snapshot.binding) {
-      const plan = snapshot.plan.plan
-      section.append(line('Plan', `#${snapshot.plan.plan_id} · ${plan.summary || plan.action}`), line('Expected Head', plan.expected_head || '—'), line('Lane', plan.lane_key), line('Target', targetLabel(snapshot.binding.target)), line('Binding', `v${snapshot.binding.binding_version} · ${snapshot.binding.readiness}`))
-      section.append(el('p', 'cddm-browser-feedback cddm-browser-warning', 'Final confirmation sends exactly this backend-generated prompt to the bound ChatGPT conversation. CDDM does not read the ChatGPT response.'))
-      section.append(el('pre', 'cddm-browser-prompt', plan.prompt))
+    if (this.confirmation) {
+      const frozen = this.confirmation
+      section.append(line('Plan', `#${frozen.planID} · ${frozen.summary}`), line('Expected Head', frozen.expectedHead || '—'), line('Lane', frozen.lane), line('Target', frozen.target), line('Binding', `v${frozen.bindingVersion} · ${frozen.bindingReadiness}`))
+      section.append(el('p', 'cddm-browser-feedback cddm-browser-warning', 'Final confirmation sends exactly this reviewed backend-generated prompt to the bound ChatGPT conversation. CDDM does not read the ChatGPT response.'))
+      section.append(el('pre', 'cddm-browser-prompt', frozen.prompt))
       const controls = el('div', 'cddm-browser-controls')
       const confirm = button(this.submitting ? 'Sending confirmation…' : 'Confirm and send', 'cddm-browser-button--primary')
       confirm.disabled = this.submitting
       confirm.addEventListener('click', () => void this.confirm())
       const cancel = button('Cancel')
       cancel.disabled = this.submitting
-      cancel.addEventListener('click', () => { this.confirmationKey = ''; this.feedback = ''; this.render() })
+      cancel.addEventListener('click', () => { this.confirmation = null; this.feedback = ''; this.render() })
       controls.append(confirm, cancel)
       section.append(controls)
       return section
@@ -252,31 +273,46 @@ class BrowserDeliveryController {
       this.render()
       return
     }
+    const key = randomKey()
+    const input = buildConfirmationInput(snapshot.plan, snapshot.binding, key)
+    this.confirmation = {
+      input,
+      planID: input.plan_id,
+      summary: snapshot.plan.plan.summary || snapshot.plan.plan.action,
+      expectedHead: input.expected_head,
+      lane: input.expected_lane_key,
+      target: targetLabel(snapshot.binding.target),
+      bindingVersion: input.expected_binding_version,
+      bindingReadiness: snapshot.binding.readiness,
+      prompt: snapshot.plan.plan.prompt,
+    }
     this.feedback = ''
-    this.confirmationKey = randomKey()
     this.render()
   }
 
   private async confirm(): Promise<void> {
-    if (this.submitting || !this.confirmationKey || !this.snapshot?.plan || !this.snapshot.binding) return
+    const frozen = this.confirmation
+    if (this.submitting || !frozen) return
     this.submitting = true
     this.feedback = ''
     this.render()
+    let refresh = true
     try {
-      const input = buildConfirmationInput(this.snapshot.plan, this.snapshot.binding, this.confirmationKey)
-      const command = await this.browser.confirm(this.identity.projectID, this.identity.issueNumber, input)
+      const command = await this.browser.confirm(this.identity.projectID, this.identity.issueNumber, frozen.input)
       this.feedback = `Delivery ${short(command.id)} created with status ${command.status}.`
-      this.confirmationKey = ''
+      this.confirmation = null
     } catch (error) {
       if (error instanceof ApiError && error.status === 0) {
-        this.feedback = 'Confirmation transport is unresolved. Review the same frozen confirmation and retry with the same idempotency key.'
+        this.feedback = 'Confirmation transport is unresolved. Retry this same frozen confirmation to reuse its idempotency key, or cancel and review current state again.'
+        refresh = false
       } else {
         this.feedback = errorText(error)
-        this.confirmationKey = ''
+        this.confirmation = null
       }
     } finally {
       this.submitting = false
-      await this.load(true)
+      if (refresh) await this.load(true)
+      else this.render()
     }
   }
 
