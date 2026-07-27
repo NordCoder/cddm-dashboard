@@ -1,0 +1,46 @@
+name: Runtime CLI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  runtime:
+    name: Go Host Runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Verify checkout identity
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Show Go version
+        run: go version
+      - name: Check Go runtime formatting
+        run: |
+          diff="$(gofmt -d backend/cmd/cddm-change)"
+          if [[ -n "$diff" ]]; then
+            printf '%s\n' "$diff"
+            exit 1
+          fi
+      - name: Test Go runtime
+        working-directory: backend
+        run: go test ./cmd/cddm-change
+      - name: Build Go runtime
+        run: |
+          bash scripts/build-cddm-change.sh
+          test "$(.worktrees/bin/cddm-change __build-revision)" = "$CANDIDATE_SHA"
+      - name: Smoke public launcher
+        run: |
+          scripts/cddm-codex-change.sh --color=never help >/dev/null
+          NO_COLOR=1 scripts/cddm-codex-change.sh status 999999 >/tmp/cddm-status.txt
+          ! grep -q $'\033' /tmp/cddm-status.txt
