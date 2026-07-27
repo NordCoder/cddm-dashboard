@@ -33,19 +33,21 @@ jobs:
           gofmt -d backend/cmd/cddm-change > /tmp/cddm-gofmt.diff
           test ! -s /tmp/cddm-gofmt.diff
       - name: Prepare formatted runtime artifact
-        if: steps.format.outcome == 'failure'
+        if: always() && steps.format.outcome == 'failure'
         run: |
-          cp -R backend/cmd/cddm-change /tmp/cddm-change-formatted
-          find /tmp/cddm-change-formatted -name '*.go' -type f -exec gofmt -w {} +
+          rm -rf /tmp/cddm-change-formatted
+          mkdir -p /tmp/cddm-change-formatted
+          cp backend/cmd/cddm-change/*.go /tmp/cddm-change-formatted/
+          find /tmp/cddm-change-formatted -type f -name '*.go' -print0 | xargs -0 gofmt -w
       - name: Upload formatted runtime artifact
-        if: steps.format.outcome == 'failure'
+        if: always() && steps.format.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: cddm-change-formatted
           path: /tmp/cddm-change-formatted
           if-no-files-found: error
       - name: Report formatting diagnostics
-        if: steps.format.outcome == 'failure'
+        if: always() && steps.format.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -63,11 +65,12 @@ jobs:
           gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
       - name: Test Go runtime
         id: test
+        if: always()
         continue-on-error: true
         working-directory: backend
         run: go test ./cmd/cddm-change 2>&1 | tee /tmp/cddm-go-test.log
       - name: Report compile/test diagnostics
-        if: steps.test.outcome == 'failure'
+        if: always() && steps.test.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -82,6 +85,7 @@ jobs:
           } > /tmp/comment.md
           gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
       - name: Enforce format and tests
+        if: always()
         run: |
           test '${{ steps.format.outcome }}' = success
           test '${{ steps.test.outcome }}' = success
