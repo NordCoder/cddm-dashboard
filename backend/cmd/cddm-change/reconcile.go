@@ -31,7 +31,10 @@ func (e *engine) reconcileCommand() int {
 	if err != nil {
 		return 1
 	}
-	newBase := strings.TrimSpace(newBaseOut)
+	return e.reconcileOnto(&state, strings.TrimSpace(newBaseOut))
+}
+
+func (e *engine) reconcileOnto(state *RuntimeState, newBase string) int {
 	localOut, err := runOutput(e.worktree, nil, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return 1
@@ -118,7 +121,7 @@ func (e *engine) reconcileCommand() int {
 	state.CandidateParent = ""
 	state.CandidateRemoteBefore = ""
 	state.CandidateResult = ""
-	if err := saveStateAtomic(e.statePath, state); err != nil {
+	if err := saveStateAtomic(e.statePath, *state); err != nil {
 		e.ui.errorf("persist reconciliation state: %v", err)
 		return 1
 	}
