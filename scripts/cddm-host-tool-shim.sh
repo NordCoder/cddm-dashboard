@@ -2,8 +2,7 @@
 set -euo pipefail
 
 tool="$(basename "$0")"
-repo_root="${CDDM_REPO_ROOT:-}"
-observer="${repo_root:+$repo_root/scripts/cddm-codex-observe.py}"
+runtime_bin="${CDDM_CHANGE_BIN:-}"
 
 real_tool() {
   case "$tool" in
@@ -20,15 +19,14 @@ real="$(real_tool)"
 [[ -n "$real" && -x "$real" ]] || { echo "CDDM Host tool shim cannot resolve real '$tool'." >&2; exit 127; }
 
 # Worker/Codex subprocesses explicitly unset this flag. Nested tools launched
-# by a top-level V2 tool inherit depth=1 and remain transparent, preventing
-# `npm test` -> `npm run clean` from being counted as another Host phase.
+# by a top-level V2 tool inherit depth=1 and remain transparent.
 if [[ "${CDDM_HOST_V2_UI:-0}" != "1" || "${CDDM_V2_TOOL_DEPTH:-0}" != "0" ]]; then
   exec "$real" "$@"
 fi
 
 if [[ "$tool" == "tee" ]]; then
-  if [[ $# -eq 1 && "$1" == *"-v2-"*".log" && -n "$observer" && -f "$observer" ]]; then
-    exec python3 "$observer" v2-tee --log "$1"
+  if [[ $# -eq 1 && "$1" == *"-v2-"*".log" && -n "$runtime_bin" && -x "$runtime_bin" ]]; then
+    exec "$runtime_bin" __v2tee --log "$1"
   fi
   exec "$real" "$@"
 fi
@@ -48,11 +46,28 @@ start_epoch="$(date +%s)"
 printf '@@CDDM_V2@@|START|%s|%s\n' "$phase" "$start_epoch" >&2
 
 if [[ "$tool" == "gofmt" ]]; then
+  gofmt_args=("$@")
+  # The legacy core invokes `gofmt -l .`. Real gofmt expects files, not a
+  # directory. Expand that exact Host-V2 form recursively so formatting and
+  # syntax errors cannot be silently accepted by the surrounding `test -z`.
+  if [[ $# -eq 2 && "$1" == "-l" && -d "$2" ]]; then
+    mapfile -d '' go_files < <(find "$2" -type f -name '*.go' -print0)
+    gofmt_args=(-l "${go_files[@]}")
+  fi
+
   set +e
-  output="$(CDDM_V2_TOOL_DEPTH=1 "$real" "$@")"
+  output="$(CDDM_V2_TOOL_DEPTH=1 "$real" "${gofmt_args[@]}")"
   rc=$?
   set -e
+
+  # Command substitution inside the legacy `test -z` would otherwise discard
+  # the non-zero exit status. A non-empty sentinel makes syntax/read failures
+  # fail closed while the real diagnostic remains on stderr.
+  if [[ $rc -ne 0 && -z "$output" ]]; then
+    output="gofmt failed (rc=$rc)"
+  fi
   [[ -z "$output" ]] || printf '%s\n' "$output"
+
   semantic_rc="$rc"
   if [[ $semantic_rc -eq 0 && -n "$output" && " $* " == *" -l "* ]]; then
     semantic_rc=1

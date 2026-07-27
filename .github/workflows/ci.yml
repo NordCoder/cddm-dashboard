@@ -32,7 +32,12 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - name: Check formatting
-        run: test -z "$(gofmt -l .)"
+        run: |
+          find . -type f -name '*.go' -print0 | xargs -0 gofmt -l > /tmp/gofmt.list
+          if [[ -s /tmp/gofmt.list ]]; then
+            cat /tmp/gofmt.list
+            exit 1
+          fi
       - name: Test
         run: |
           set -o pipefail
@@ -83,15 +88,27 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
       - name: Verify checkout identity
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
       - name: Validate Codex host scripts
         run: |
           bash -n scripts/cddm-codex-change.sh
+          bash -n scripts/cddm-codex-change-compat.sh
           bash -n scripts/cddm-codex-change-core.sh
           bash -n scripts/cddm-codex-worker-shim.sh
           bash -n scripts/cddm-host-tool-shim.sh
+          bash -n scripts/build-cddm-change.sh
           bash -n scripts/cddm-publish-branch.sh
           bash -n scripts/test-cddm-runtime-r1.sh
           python3 -m py_compile scripts/cddm-codex-observe.py scripts/cddm-codex-proxy.py
+      - name: Build Go Host runtime
+        run: |
+          bash scripts/build-cddm-change.sh
+          test "$(.worktrees/bin/cddm-change __build-revision)" = "$CANDIDATE_SHA"
+          .worktrees/bin/cddm-change --color=never help >/dev/null
       - name: Validate Codex project config
         run: python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path(".codex/config.toml").read_text())'
       - name: Validate Codex result schema
@@ -106,23 +123,22 @@ jobs:
           grep -q 'START_FAILED_NO_THREAD' scripts/cddm-codex-change-core.sh
           grep -q 'PUSHED_PENDING_GITHUB' scripts/cddm-codex-change-core.sh
           grep -q 'Pending Candidate reconciliation must succeed before another Codex turn' scripts/cddm-codex-change-core.sh
-          grep -q 'repair_prethread_start_failure' scripts/cddm-codex-change.sh
-          grep -q 'align_clean_prethread_orphan' scripts/cddm-codex-change.sh
-          grep -q 'recover_change' scripts/cddm-codex-change.sh
-          grep -q 'stop_change' scripts/cddm-codex-change.sh
-          grep -q 'status|watch|logs|turns' scripts/cddm-codex-change.sh
-          grep -q 'CDDM_BLOCK_CODEX' scripts/cddm-codex-worker-shim.sh
-          grep -q 'cddm-codex-proxy.py' scripts/cddm-codex-worker-shim.sh
-          grep -q 'raw Codex stream remains active' scripts/cddm-codex-proxy.py
-          grep -q 'CDDM_HOST_V2_UI' scripts/cddm-host-tool-shim.sh
+          grep -q 'cddm-codex-change-compat.sh' backend/cmd/cddm-change/main.go
+          grep -q 'CDDM Go runtime is stale' scripts/cddm-codex-change.sh
+          grep -q 'CDDM_CHANGE_BIN' scripts/cddm-codex-worker-shim.sh
+          grep -q '__proxy' scripts/cddm-codex-worker-shim.sh
+          grep -q '__v2tee' scripts/cddm-host-tool-shim.sh
+          grep -q 'recover_change' scripts/cddm-codex-change-compat.sh
+          grep -q 'stop_change' scripts/cddm-codex-change-compat.sh
           for prompt in .codex/prompts/change-start.md .codex/prompts/change-resume.md .codex/prompts/change-rotate.md; do
             grep -q 'Stable Change Goal:' "$prompt"
             grep -q 'Implement approved Change #{{ISSUE}} to locally candidate-ready state' "$prompt"
           done
-          test -f .codex/prompts/change-start.md
-          test -f .codex/prompts/change-resume.md
-          test -f .codex/prompts/change-rotate.md
-      - name: Runtime R1 harness
-        run: bash scripts/test-cddm-runtime-r1.sh
+      - name: Legacy R1 compatibility harness
+        run: |
+          cp scripts/cddm-codex-change.sh /tmp/cddm-go-launcher.sh
+          cp scripts/cddm-codex-change-compat.sh scripts/cddm-codex-change.sh
+          bash scripts/test-cddm-runtime-r1.sh
+          cp /tmp/cddm-go-launcher.sh scripts/cddm-codex-change.sh
       - name: Validate configuration
         run: docker compose config --quiet

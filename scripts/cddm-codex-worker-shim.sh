@@ -57,12 +57,14 @@ unset CDDM_HOST_V2_UI
 repo_root="${CDDM_REPO_ROOT:-}"
 issue="${CDDM_RUNTIME_ISSUE:-}"
 mode="${CDDM_RUNTIME_MODE:-unknown}"
-proxy="${repo_root:+$repo_root/scripts/cddm-codex-proxy.py}"
+runtime_bin="${CDDM_CHANGE_BIN:-}"
 
-if [[ $has_json -eq 1 && -n "$repo_root" && "$issue" =~ ^[0-9]+$ && -f "$proxy" ]]; then
+if [[ $has_json -eq 1 && -n "$repo_root" && "$issue" =~ ^[0-9]+$ && -n "$runtime_bin" && -x "$runtime_bin" ]]; then
   CODEX_HOME="$worker_codex_home" CODEX_SQLITE_HOME="$worker_codex_home/sqlite" \
-    exec python3 "$proxy" --repo "$repo_root" --issue "$issue" --mode "$mode" -- \
+    exec "$runtime_bin" __proxy --repo "$repo_root" --issue "$issue" --mode "$mode" -- \
       "$real_codex" "${filtered[@]}"
 fi
 
+# Presentation is fail-open: if the Go binary is unavailable, execute Codex
+# directly and preserve consequential behavior/raw JSON exactly as before.
 CODEX_HOME="$worker_codex_home" CODEX_SQLITE_HOME="$worker_codex_home/sqlite" exec "$real_codex" "${filtered[@]}"
