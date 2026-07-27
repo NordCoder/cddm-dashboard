@@ -16,6 +16,7 @@ function sameTarget(left, right) {
 }
 
 const COMPOSER_SELECTORS = [
+  "#prompt-textarea",
   "textarea[data-testid='textbox']",
   "textarea[placeholder*='Message']",
   "[contenteditable='true'][role='textbox']",
@@ -23,6 +24,7 @@ const COMPOSER_SELECTORS = [
 ];
 const SEND_SELECTORS = [
   "button[data-testid='send-button']",
+  "button[data-testid*='send-button']",
   "button[aria-label='Send prompt']",
   "button[aria-label='Send message']",
   "form button[type='submit']"
@@ -50,23 +52,46 @@ function currentTarget(expected) {
 
 function error(reason, safeNoSend = true) { return { ok: false, reason, safe_no_send: safeNoSend }; }
 
+function composerValue(element) {
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
+  return element.innerText ?? element.textContent ?? "";
+}
+
+function writePlainInput(element, prompt) {
+  const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  element.focus();
+  if (setter) setter.call(element, prompt); else element.value = prompt;
+  element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: null }));
+  return composerValue(element) === prompt;
+}
+
+function writeContentEditable(element, prompt) {
+  element.focus();
+  const selection = globalThis.getSelection?.();
+  if (!selection) return false;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  let inserted = false;
+  try { inserted = document.execCommand("insertText", false, prompt); } catch { inserted = false; }
+  selection.removeAllRanges();
+  return inserted && composerValue(element) === prompt;
+}
+
 function insert(prompt, expected) {
   if (!currentTarget(expected)) return error("target_changed_before_insert");
   if (typeof prompt !== "string") return error("prompt_invalid");
   const composer = uniqueUsable(COMPOSER_SELECTORS);
   if (!composer.element || composer.ambiguous || composer.element.disabled || composer.element.readOnly) return error("compose_unavailable");
-  if (composer.element instanceof HTMLTextAreaElement || composer.element instanceof HTMLInputElement) {
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    if (setter) setter.call(composer.element, prompt); else composer.element.value = prompt;
-  } else {
-    composer.element.replaceChildren(document.createTextNode(prompt));
-  }
-  composer.element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: null }));
-  return { ok: true };
-}
 
-function composerValue(element) {
-  return element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement ? element.value : element.textContent;
+  const written = composer.element instanceof HTMLTextAreaElement || composer.element instanceof HTMLInputElement
+    ? writePlainInput(composer.element, prompt)
+    : composer.element.isContentEditable && writeContentEditable(composer.element, prompt);
+  if (!written) return error("prompt_insert_verification_failed");
+  return { ok: true };
 }
 
 function send(expected, prompt) {
