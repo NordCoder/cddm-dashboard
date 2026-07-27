@@ -44,3 +44,22 @@ jobs:
           scripts/cddm-codex-change.sh --color=never help >/dev/null
           NO_COLOR=1 scripts/cddm-codex-change.sh status 999999 >/tmp/cddm-status.txt
           ! grep -q $'\033' /tmp/cddm-status.txt
+      - name: Verify Host V2 gofmt guard
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/src"
+          ln -s "$PWD/scripts/cddm-host-tool-shim.sh" "$tmp/gofmt"
+          real_gofmt="$(command -v gofmt)"
+
+          printf 'package sample\nfunc f(){}\n' > "$tmp/src/sample.go"
+          output="$(CDDM_HOST_V2_UI=1 CDDM_V2_TOOL_DEPTH=0 CDDM_REAL_GOFMT="$real_gofmt" "$tmp/gofmt" -l "$tmp/src")"
+          grep -q 'sample.go' <<<"$output"
+
+          printf 'package sample\nfunc {\n' > "$tmp/src/sample.go"
+          set +e
+          output="$(CDDM_HOST_V2_UI=1 CDDM_V2_TOOL_DEPTH=0 CDDM_REAL_GOFMT="$real_gofmt" "$tmp/gofmt" -l "$tmp/src" 2>/tmp/gofmt.err)"
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          grep -q 'gofmt failed' <<<"$output"
+          grep -q 'expected' /tmp/gofmt.err
