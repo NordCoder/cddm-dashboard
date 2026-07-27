@@ -321,7 +321,8 @@ func (e *engine) publishCommittedCandidate(state *RuntimeState) int {
 			return 1
 		}
 	}
-	pushErr := runCommand(e.worktree, nil, nil, io.Discard, os.Stderr, "git", "push", e.originURL, "HEAD:refs/heads/"+e.branch)
+	lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", e.branch, expected)
+	pushErr := runCommand(e.worktree, nil, nil, io.Discard, os.Stderr, "git", "push", lease, e.originURL, "HEAD:refs/heads/"+e.branch)
 	remoteAfter, confirmErr := e.remoteBranchHead()
 	if confirmErr == nil {
 		if remoteAfter == head {
