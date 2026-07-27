@@ -1,15 +1,22 @@
 package main
 
-func resolveExecutionOptions(opts globalOptions, profile profileConfig) executionOptions {
+func resolveExecutionOptions(opts globalOptions, workspace workspaceConfig) executionOptions {
 	return executionOptions{
-		ProfileModel:     profile.Model,
-		ProfileReasoning: profile.Reasoning,
+		ProfileModel:     workspace.Model,
+		ProfileReasoning: workspace.Reasoning,
 		Model:            opts.Model,
 		Reasoning:        opts.Reasoning,
+		CodexProfile:     opts.CodexProfile,
 	}
 }
 
 func (e *engine) resumeOrRotateWithOptions(mode, instruction string, legacy []string, opts executionOptions) int {
+	state, err := loadState(e.statePath)
+	if err != nil {
+		e.ui.errorf("no persistent session state for Issue #%d; use start", e.issue)
+		return 1
+	}
+
 	model := opts.ProfileModel
 	reasoning := opts.ProfileReasoning
 	if len(legacy) >= 1 {
@@ -24,17 +31,17 @@ func (e *engine) resumeOrRotateWithOptions(mode, instruction string, legacy []st
 	if opts.Reasoning != "" {
 		reasoning = opts.Reasoning
 	}
-
-	// The legacy resumeOrRotate API uses positional overrides where reasoning
-	// cannot be supplied without model. Preserve state-aware fallback for a
-	// reasoning-only profile/flag by supplying the persisted model explicitly.
 	if reasoning != "" && model == "" {
-		state, err := loadState(e.statePath)
-		if err != nil {
-			e.ui.errorf("no persistent session state for Issue #%d; use start", e.issue)
-			return 1
-		}
 		model = state.Model
+	}
+
+	profile := e.loadCodexProfile()
+	if opts.CodexProfile != "" {
+		profile = opts.CodexProfile
+	}
+	if err := e.selectCodexProfile(profile); err != nil {
+		e.ui.errorf("Codex profile: %v", err)
+		return 1
 	}
 
 	var overrides []string

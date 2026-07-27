@@ -16,9 +16,6 @@ import (
 
 const permissionProfile = "cddm-worker"
 
-// A CLI process targets exactly one repository. This package-level value keeps
-// legacy GitHub transport helpers compatible while repository identity is
-// resolved dynamically from the selected target's origin.
 var repoSlug string
 
 type executionOptions struct {
@@ -26,6 +23,7 @@ type executionOptions struct {
 	ProfileReasoning string
 	Model            string
 	Reasoning        string
+	CodexProfile     string
 }
 
 type engine struct {
@@ -60,18 +58,11 @@ func newEngine(ui *UI, repo string, issue int) (*engine, error) {
 	}
 	repoSlug = slug
 	return &engine{
-		ui:          ui,
-		repo:        repo,
-		issue:       issue,
-		branch:      fmt.Sprintf("change/%d", issue),
-		worktree:    filepath.Join(repo, ".worktrees", fmt.Sprintf("issue-%d", issue)),
-		workerHome:  filepath.Join(repo, ".worktrees", fmt.Sprintf("issue-%d", issue), ".cddm-worker-home"),
-		statePath:   statePath,
-		historyPath: historyPath,
-		resultsDir:  resultsDir,
-		contract:    contract,
-		originURL:   origin,
-		repoSlug:    slug,
+		ui: ui, repo: repo, issue: issue, branch: fmt.Sprintf("change/%d", issue),
+		worktree:   filepath.Join(repo, ".worktrees", fmt.Sprintf("issue-%d", issue)),
+		workerHome: filepath.Join(repo, ".worktrees", fmt.Sprintf("issue-%d", issue), ".cddm-worker-home"),
+		statePath:  statePath, historyPath: historyPath, resultsDir: resultsDir, contract: contract,
+		originURL: origin, repoSlug: slug,
 	}, nil
 }
 
@@ -94,7 +85,6 @@ func commandMutatingWithOptions(ui *UI, repo, command string, args []string, exe
 		ui.errorf("initialize runtime: %v", err)
 		return 1
 	}
-
 	if command == "stop" {
 		if len(args) != 1 {
 			ui.errorf("usage: cddm stop <issue>")
@@ -102,7 +92,6 @@ func commandMutatingWithOptions(ui *UI, repo, command string, args []string, exe
 		}
 		return e.stopCommand()
 	}
-
 	lock, err := acquireIssueLock(repo, issue)
 	if err != nil {
 		ui.errorf("%v", err)
@@ -116,8 +105,11 @@ func commandMutatingWithOptions(ui *UI, repo, command string, args []string, exe
 			ui.errorf("usage: cddm start <issue> [legacy-model] [legacy-reasoning]")
 			return 2
 		}
-		model := "gpt-5.6-terra"
-		reasoning := "medium"
+		if err := e.selectCodexProfile(execOpts.CodexProfile); err != nil {
+			ui.errorf("Codex profile: %v", err)
+			return 1
+		}
+		model, reasoning := "gpt-5.6-terra", "medium"
 		if execOpts.ProfileModel != "" {
 			model = execOpts.ProfileModel
 		}
@@ -151,8 +143,7 @@ func commandMutatingWithOptions(ui *UI, repo, command string, args []string, exe
 			ui.errorf("%s instruction is empty", command)
 			return 2
 		}
-		legacy := args[2:]
-		return e.resumeOrRotateWithOptions(command, instruction, legacy, execOpts)
+		return e.resumeOrRotateWithOptions(command, instruction, args[2:], execOpts)
 	case "recover":
 		if len(args) != 1 {
 			ui.errorf("usage: cddm recover <issue>")
@@ -287,10 +278,7 @@ func githubRepoSlug(origin string) (string, error) {
 	return parts[0] + "/" + parts[1], nil
 }
 
-func canonicalOrigin(origin string) bool {
-	_, err := githubRepoSlug(origin)
-	return err == nil
-}
+func canonicalOrigin(origin string) bool { _, err := githubRepoSlug(origin); return err == nil }
 
 func readInstruction(source string) (string, error) {
 	if source == "-" {

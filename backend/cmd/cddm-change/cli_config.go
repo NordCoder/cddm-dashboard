@@ -14,22 +14,24 @@ import (
 const configVersion = 1
 
 type globalOptions struct {
-	Color     ColorMode
-	Profile   string
-	Repo      string
-	Model     string
-	Reasoning string
+	Color        ColorMode
+	Workspace    string
+	CodexProfile string
+	Repo         string
+	Model        string
+	Reasoning    string
 }
 
-type profileConfig struct {
+type workspaceConfig struct {
 	Repo      string `json:"repo,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
 type userConfig struct {
-	Version  int                      `json:"version"`
-	Profiles map[string]profileConfig `json:"profiles"`
+	Version        int                        `json:"version"`
+	Workspaces     map[string]workspaceConfig `json:"workspaces"`
+	LegacyProfiles map[string]workspaceConfig `json:"profiles,omitempty"`
 }
 
 func parseCLI(args []string) (globalOptions, string, []string, error) {
@@ -46,11 +48,10 @@ func parseCLI(args []string) (globalOptions, string, []string, error) {
 	var commandArgs []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if command != "" && command == "profile" {
+		if command == "workspace" {
 			commandArgs = append(commandArgs, args[i:]...)
 			break
 		}
-
 		consumeValue := func(name string) (string, error) {
 			if i+1 >= len(args) {
 				return "", fmt.Errorf("%s requires a value", name)
@@ -58,17 +59,24 @@ func parseCLI(args []string) (globalOptions, string, []string, error) {
 			i++
 			return args[i], nil
 		}
-
 		handled := true
 		switch {
+		case arg == "-w" || arg == "--workspace":
+			value, err := consumeValue(arg)
+			if err != nil {
+				return opts, "", nil, err
+			}
+			opts.Workspace = strings.TrimSpace(value)
+		case strings.HasPrefix(arg, "--workspace="):
+			opts.Workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
 		case arg == "-p" || arg == "--profile":
 			value, err := consumeValue(arg)
 			if err != nil {
 				return opts, "", nil, err
 			}
-			opts.Profile = strings.TrimSpace(value)
+			opts.CodexProfile = strings.TrimSpace(value)
 		case strings.HasPrefix(arg, "--profile="):
-			opts.Profile = strings.TrimSpace(strings.TrimPrefix(arg, "--profile="))
+			opts.CodexProfile = strings.TrimSpace(strings.TrimPrefix(arg, "--profile="))
 		case arg == "-C" || arg == "--repo":
 			value, err := consumeValue(arg)
 			if err != nil {
@@ -115,7 +123,6 @@ func parseCLI(args []string) (globalOptions, string, []string, error) {
 		if handled {
 			continue
 		}
-
 		if command == "" {
 			if strings.HasPrefix(arg, "-") {
 				return opts, "", nil, fmt.Errorf("unknown global option %q", arg)
@@ -125,10 +132,11 @@ func parseCLI(args []string) (globalOptions, string, []string, error) {
 		}
 		commandArgs = append(commandArgs, arg)
 	}
-
-	if opts.Profile != "" {
-		if err := validateProfileName(opts.Profile); err != nil {
-			return opts, "", nil, err
+	for label, value := range map[string]string{"workspace": opts.Workspace, "profile": opts.CodexProfile} {
+		if value != "" {
+			if err := validateName(value, label); err != nil {
+				return opts, "", nil, err
+			}
 		}
 	}
 	return opts, command, commandArgs, nil
@@ -156,7 +164,7 @@ func loadUserConfig() (userConfig, error) {
 	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return userConfig{Version: configVersion, Profiles: map[string]profileConfig{}}, nil
+		return userConfig{Version: configVersion, Workspaces: map[string]workspaceConfig{}}, nil
 	}
 	if err != nil {
 		return userConfig{}, err
@@ -168,12 +176,18 @@ func loadUserConfig() (userConfig, error) {
 	if cfg.Version != configVersion {
 		return userConfig{}, fmt.Errorf("unsupported CDDM config version %d", cfg.Version)
 	}
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]profileConfig{}
+	if cfg.Workspaces == nil {
+		cfg.Workspaces = map[string]workspaceConfig{}
 	}
-	for name := range cfg.Profiles {
-		if err := validateProfileName(name); err != nil {
-			return userConfig{}, fmt.Errorf("invalid profile in config: %w", err)
+	for name, legacy := range cfg.LegacyProfiles {
+		if _, exists := cfg.Workspaces[name]; !exists {
+			cfg.Workspaces[name] = legacy
+		}
+	}
+	cfg.LegacyProfiles = nil
+	for name := range cfg.Workspaces {
+		if err := validateName(name, "workspace"); err != nil {
+			return userConfig{}, fmt.Errorf("invalid workspace in config: %w", err)
 		}
 	}
 	return cfg, nil
@@ -185,8 +199,9 @@ func saveUserConfig(cfg userConfig) error {
 		return err
 	}
 	cfg.Version = configVersion
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]profileConfig{}
+	cfg.LegacyProfiles = nil
+	if cfg.Workspaces == nil {
+		cfg.Workspaces = map[string]workspaceConfig{}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -200,8 +215,8 @@ func saveUserConfig(cfg userConfig) error {
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	name := tmp.Name()
+	defer os.Remove(name)
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
@@ -217,22 +232,24 @@ func saveUserConfig(cfg userConfig) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	return os.Rename(name, path)
 }
 
-func validateProfileName(name string) error {
+func validateName(name, kind string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return errors.New("profile name is empty")
+		return fmt.Errorf("%s name is empty", kind)
 	}
 	for _, r := range name {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
 			continue
 		}
-		return fmt.Errorf("invalid profile name %q", name)
+		return fmt.Errorf("invalid %s name %q", kind, name)
 	}
 	return nil
 }
+
+func validateProfileName(name string) error { return validateName(name, "profile") }
 
 func resolveGitRoot(path string) (string, error) {
 	var cmd *exec.Cmd
@@ -252,20 +269,19 @@ func resolveGitRoot(path string) (string, error) {
 	return filepath.Abs(strings.TrimSpace(string(out)))
 }
 
-func resolveInvocation(opts globalOptions) (string, profileConfig, error) {
-	var selected profileConfig
-	if opts.Profile != "" {
+func resolveInvocation(opts globalOptions) (string, workspaceConfig, error) {
+	var selected workspaceConfig
+	if opts.Workspace != "" {
 		cfg, err := loadUserConfig()
 		if err != nil {
 			return "", selected, err
 		}
 		var ok bool
-		selected, ok = cfg.Profiles[opts.Profile]
+		selected, ok = cfg.Workspaces[opts.Workspace]
 		if !ok {
-			return "", selected, fmt.Errorf("profile %q does not exist", opts.Profile)
+			return "", selected, fmt.Errorf("workspace %q does not exist", opts.Workspace)
 		}
 	}
-
 	candidate := strings.TrimSpace(opts.Repo)
 	if candidate == "" && selected.Repo != "" {
 		candidate = selected.Repo
@@ -275,116 +291,96 @@ func resolveInvocation(opts globalOptions) (string, profileConfig, error) {
 	}
 	root, err := resolveGitRoot(candidate)
 	if err != nil {
-		if opts.Profile != "" && selected.Repo == "" && opts.Repo == "" {
-			return "", selected, fmt.Errorf("profile %q has no repo and current directory is not a Git repository", opts.Profile)
+		if opts.Workspace != "" && selected.Repo == "" && opts.Repo == "" {
+			return "", selected, fmt.Errorf("workspace %q has no repo and current directory is not a Git repository", opts.Workspace)
 		}
 		return "", selected, fmt.Errorf("resolve target repository: %w", err)
 	}
 	return root, selected, nil
 }
 
-func effectiveExecutionOptions(opts globalOptions, profile profileConfig) executionOptions {
-	model := profile.Model
-	reasoning := profile.Reasoning
-	if opts.Model != "" {
-		model = opts.Model
-	}
-	if opts.Reasoning != "" {
-		reasoning = opts.Reasoning
-	}
-	return executionOptions{Model: model, Reasoning: reasoning}
-}
-
-func commandProfile(ui *UI, opts globalOptions, args []string) int {
+func commandWorkspace(ui *UI, opts globalOptions, args []string) int {
 	if len(args) == 0 {
-		ui.errorf("usage: cddm profile <set|list|show|remove> ...")
+		ui.errorf("usage: cddm workspace <set|list|show|remove> ...")
 		return 2
 	}
 	cfg, err := loadUserConfig()
 	if err != nil {
-		ui.errorf("load profiles: %v", err)
+		ui.errorf("load workspaces: %v", err)
 		return 1
 	}
-
 	switch args[0] {
 	case "list":
-		if len(args) != 1 {
-			ui.errorf("usage: cddm profile list")
-			return 2
-		}
-		names := make([]string, 0, len(cfg.Profiles))
-		for name := range cfg.Profiles {
+		names := make([]string, 0, len(cfg.Workspaces))
+		for name := range cfg.Workspaces {
 			names = append(names, name)
 		}
 		sort.Strings(names)
 		if len(names) == 0 {
-			fmt.Println("No CDDM profiles configured.")
+			fmt.Println("No CDDM workspaces configured.")
 			return 0
 		}
 		for _, name := range names {
-			p := cfg.Profiles[name]
-			fmt.Printf("%-18s repo=%s", name, defaultString(p.Repo, "-"))
-			if p.Model != "" {
-				fmt.Printf("  model=%s", p.Model)
+			w := cfg.Workspaces[name]
+			fmt.Printf("%-18s repo=%s", name, defaultString(w.Repo, "-"))
+			if w.Model != "" {
+				fmt.Printf("  model=%s", w.Model)
 			}
-			if p.Reasoning != "" {
-				fmt.Printf("  reasoning=%s", p.Reasoning)
+			if w.Reasoning != "" {
+				fmt.Printf("  reasoning=%s", w.Reasoning)
 			}
 			fmt.Println()
 		}
 		return 0
 	case "show":
 		if len(args) != 2 {
-			ui.errorf("usage: cddm profile show <name>")
+			ui.errorf("usage: cddm workspace show <name>")
 			return 2
 		}
-		p, ok := cfg.Profiles[args[1]]
+		w, ok := cfg.Workspaces[args[1]]
 		if !ok {
-			ui.errorf("profile %q does not exist", args[1])
+			ui.errorf("workspace %q does not exist", args[1])
 			return 1
 		}
-		data, _ := json.MarshalIndent(p, "", "  ")
+		data, _ := json.MarshalIndent(w, "", "  ")
 		fmt.Println(string(data))
 		return 0
 	case "remove":
 		if len(args) != 2 {
-			ui.errorf("usage: cddm profile remove <name>")
+			ui.errorf("usage: cddm workspace remove <name>")
 			return 2
 		}
-		if _, ok := cfg.Profiles[args[1]]; !ok {
-			ui.errorf("profile %q does not exist", args[1])
+		if _, ok := cfg.Workspaces[args[1]]; !ok {
+			ui.errorf("workspace %q does not exist", args[1])
 			return 1
 		}
-		delete(cfg.Profiles, args[1])
+		delete(cfg.Workspaces, args[1])
 		if err := saveUserConfig(cfg); err != nil {
-			ui.errorf("save profiles: %v", err)
+			ui.errorf("save workspaces: %v", err)
 			return 1
 		}
-		fmt.Printf("Removed profile %s.\n", args[1])
+		fmt.Printf("Removed workspace %s.\n", args[1])
 		return 0
 	case "set":
-		return commandProfileSet(ui, opts, cfg, args[1:])
+		return commandWorkspaceSet(ui, opts, cfg, args[1:])
 	default:
-		ui.errorf("unknown profile command %q", args[0])
+		ui.errorf("unknown workspace command %q", args[0])
 		return 2
 	}
 }
 
-func commandProfileSet(ui *UI, global globalOptions, cfg userConfig, args []string) int {
+func commandWorkspaceSet(ui *UI, global globalOptions, cfg userConfig, args []string) int {
 	if len(args) == 0 {
-		ui.errorf("usage: cddm profile set <name> [--repo <path>] [--model <model>] [--reasoning <effort>]")
+		ui.errorf("usage: cddm workspace set <name> [--repo <path>] [--model <model>] [--reasoning <effort>]")
 		return 2
 	}
 	name := args[0]
-	if err := validateProfileName(name); err != nil {
+	if err := validateName(name, "workspace"); err != nil {
 		ui.errorf("%v", err)
 		return 2
 	}
-	p := cfg.Profiles[name]
-	repoArg := strings.TrimSpace(global.Repo)
-	model := strings.TrimSpace(global.Model)
-	reasoning := strings.TrimSpace(global.Reasoning)
-
+	w := cfg.Workspaces[name]
+	repoArg, model, reasoning := strings.TrimSpace(global.Repo), strings.TrimSpace(global.Model), strings.TrimSpace(global.Reasoning)
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		value := func(flag string) (string, bool) {
@@ -421,40 +417,39 @@ func commandProfileSet(ui *UI, global globalOptions, cfg userConfig, args []stri
 		case strings.HasPrefix(arg, "--reasoning="):
 			reasoning = strings.TrimSpace(strings.TrimPrefix(arg, "--reasoning="))
 		default:
-			ui.errorf("unknown profile option %q", arg)
+			ui.errorf("unknown workspace option %q", arg)
 			return 2
 		}
 	}
-
 	if repoArg != "" {
 		root, err := resolveGitRoot(repoArg)
 		if err != nil {
-			ui.errorf("profile repo: %v", err)
+			ui.errorf("workspace repo: %v", err)
 			return 1
 		}
-		p.Repo = root
-	} else if p.Repo == "" {
+		w.Repo = root
+	} else if w.Repo == "" {
 		root, err := resolveGitRoot("")
 		if err != nil {
-			ui.errorf("new profile requires --repo when current directory is not a Git repository")
+			ui.errorf("new workspace requires --repo when current directory is not a Git repository")
 			return 1
 		}
-		p.Repo = root
+		w.Repo = root
 	}
 	if model != "" {
-		p.Model = model
+		w.Model = model
 	}
 	if reasoning != "" {
-		p.Reasoning = reasoning
+		w.Reasoning = reasoning
 	}
-	cfg.Profiles[name] = p
+	cfg.Workspaces[name] = w
 	if err := saveUserConfig(cfg); err != nil {
-		ui.errorf("save profile: %v", err)
+		ui.errorf("save workspace: %v", err)
 		return 1
 	}
-	fmt.Printf("Saved profile %s.\n", name)
-	fmt.Printf("  repo:      %s\n", p.Repo)
-	fmt.Printf("  model:     %s\n", defaultString(p.Model, "runtime default"))
-	fmt.Printf("  reasoning: %s\n", defaultString(p.Reasoning, "runtime default"))
+	fmt.Printf("Saved workspace %s.\n", name)
+	fmt.Printf("  repo:      %s\n", w.Repo)
+	fmt.Printf("  model:     %s\n", defaultString(w.Model, "runtime default"))
+	fmt.Printf("  reasoning: %s\n", defaultString(w.Reasoning, "runtime default"))
 	return 0
 }

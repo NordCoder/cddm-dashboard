@@ -11,6 +11,9 @@ import (
 var buildRevision = "dev"
 
 func main() {
+	if isCodexProfileShim() {
+		os.Exit(runCodexProfileShim(os.Args[1:]))
+	}
 	os.Exit(run(os.Args[1:]))
 }
 
@@ -46,7 +49,6 @@ func run(args []string) int {
 		return 2
 	}
 	ui := newUI(opts.Color)
-
 	if command == "" {
 		printUsage(os.Stderr)
 		return 2
@@ -63,16 +65,16 @@ func run(args []string) int {
 		fmt.Printf("cddm %s\n", buildRevision)
 		return 0
 	}
-	if command == "profile" {
-		return commandProfile(ui, opts, commandArgs)
+	if command == "workspace" {
+		return commandWorkspace(ui, opts, commandArgs)
 	}
 
-	repo, profile, err := resolveInvocation(opts)
+	repo, workspace, err := resolveInvocation(opts)
 	if err != nil {
 		ui.errorf("%v", err)
 		return 1
 	}
-	execOpts := resolveExecutionOptions(opts, profile)
+	execOpts := resolveExecutionOptions(opts, workspace)
 
 	switch command {
 	case "status":
@@ -116,7 +118,6 @@ func runInternal(ui *UI, args []string) int {
 	}
 }
 
-// parseColorMode remains for compatibility with focused tests and internal callers.
 func parseColorMode(args []string) (ColorMode, []string, error) {
 	mode := ColorAuto
 	if env := strings.TrimSpace(os.Getenv("CDDM_COLOR")); env != "" {
@@ -137,7 +138,6 @@ func parseColorMode(args []string) (ColorMode, []string, error) {
 	return mode, args, nil
 }
 
-// repoRoot preserves the old environment-aware repository resolver for compatibility.
 func repoRoot() (string, error) {
 	if root := strings.TrimSpace(os.Getenv("CDDM_REPO_ROOT")); root != "" {
 		return resolveGitRoot(root)
@@ -157,10 +157,11 @@ Usage:
   cddm [global options] <command> [args]
 
 Global options:
-  -C, --repo <path>          target repository (otherwise profile or current Git repo)
-  -p, --profile <name>       use named repository/execution profile
-      --model <model>        override Codex model for start/resume/rotate
-      --reasoning <effort>   override reasoning effort for start/resume/rotate
+  -C, --repo <path>          target repository (otherwise workspace or current Git repo)
+  -w, --workspace <name>     use named CDDM repo/model/reasoning workspace
+  -p, --profile <name>       use named Codex config profile
+      --model <model>        explicit Codex model override for start/resume/rotate
+      --reasoning <effort>   explicit reasoning override for start/resume/rotate
       --color auto|always|never
 
 Runtime:
@@ -175,20 +176,21 @@ Runtime:
   cddm logs      <issue> [--raw|--v2]
   cddm turns     <issue> [--limit N]
 
-Profiles:
-  cddm profile set <name> [--repo <path>] [--model <model>] [--reasoning <effort>]
-  cddm profile list
-  cddm profile show <name>
-  cddm profile remove <name>
+Workspaces:
+  cddm workspace set <name> [--repo <path>] [--model <model>] [--reasoning <effort>]
+  cddm workspace list
+  cddm workspace show <name>
+  cddm workspace remove <name>
 
 Examples:
   cddm status 17
-  cddm -p dashboard status 17
-  cddm -p dashboard --model gpt-5.6-luna --reasoning medium resume 17 /tmp/fix.txt
-  cddm -C ~/projects/other-repo start 42 --model gpt-5.6-terra --reasoning medium
+  cddm -p deep-review start 42
+  cddm -p experimental --model gpt-5.6-terra --reasoning high resume 17 /tmp/fix.txt
+  cddm -w dashboard status 17
+  cddm -w dashboard -p deep-review resume 17 /tmp/fix.txt
 
 Environment:
-  CDDM_CONFIG       override profile config path
+  CDDM_CONFIG       override CDDM workspace config path
   CDDM_REPO_ROOT    compatibility repository default
   CDDM_COLOR        auto|always|never
   NO_COLOR=1        disable color`)

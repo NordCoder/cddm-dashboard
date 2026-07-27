@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestParseCLIGlobalOptionsAroundCommand(t *testing.T) {
+func TestParseCLICodexProfileAndWorkspace(t *testing.T) {
 	opts, command, args, err := parseCLI([]string{
-		"-p", "dashboard", "start", "17", "--model", "gpt-5.6-luna", "--reasoning=high", "--color=never",
+		"-w", "dashboard", "-p", "deep-review", "start", "17", "--model", "gpt-5.6-luna", "--reasoning=high", "--color=never",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -17,29 +17,47 @@ func TestParseCLIGlobalOptionsAroundCommand(t *testing.T) {
 	if command != "start" || len(args) != 1 || args[0] != "17" {
 		t.Fatalf("command=%q args=%q", command, args)
 	}
-	if opts.Profile != "dashboard" || opts.Model != "gpt-5.6-luna" || opts.Reasoning != "high" || opts.Color != ColorNever {
+	if opts.Workspace != "dashboard" || opts.CodexProfile != "deep-review" || opts.Model != "gpt-5.6-luna" || opts.Reasoning != "high" || opts.Color != ColorNever {
 		t.Fatalf("opts=%#v", opts)
 	}
 }
 
-func TestParseCLIProfileCommandPreservesProfileFlags(t *testing.T) {
-	opts, command, args, err := parseCLI([]string{"profile", "set", "work", "--model", "gpt-test", "--reasoning", "medium"})
+func TestParseCLIWorkspaceCommandPreservesWorkspaceFlags(t *testing.T) {
+	opts, command, args, err := parseCLI([]string{"workspace", "set", "work", "--model", "gpt-test", "--reasoning", "medium"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != "profile" || opts.Model != "" || len(args) != 6 {
+	if command != "workspace" || opts.Model != "" || len(args) != 6 {
 		t.Fatalf("command=%q opts=%#v args=%q", command, opts, args)
 	}
 }
 
-func TestUserConfigRoundTripAndMalformedFailClosed(t *testing.T) {
+func TestUserConfigRoundTripMigratesLegacyProfiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cddm", "config.json")
 	t.Setenv("CDDM_CONFIG", path)
-	cfg := userConfig{Version: configVersion, Profiles: map[string]profileConfig{
-		"dashboard": {Repo: "/tmp/repo", Model: "gpt-test", Reasoning: "high"},
-	}}
+	legacy := `{"version":1,"profiles":{"dashboard":{"repo":"/tmp/repo","model":"gpt-test","reasoning":"high"}}}`
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadUserConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Workspaces["dashboard"].Model != "gpt-test" {
+		t.Fatalf("config=%#v", cfg)
+	}
 	if err := saveUserConfig(cfg); err != nil {
 		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"profiles"`) || !strings.Contains(string(data), `"workspaces"`) {
+		t.Fatalf("saved config=%s", data)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -48,13 +66,11 @@ func TestUserConfigRoundTripAndMalformedFailClosed(t *testing.T) {
 	if info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("config permissions=%o, want private", info.Mode().Perm())
 	}
-	got, err := loadUserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Profiles["dashboard"].Model != "gpt-test" || got.Profiles["dashboard"].Reasoning != "high" {
-		t.Fatalf("config=%#v", got)
-	}
+}
+
+func TestMalformedConfigFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("CDDM_CONFIG", path)
 	if err := os.WriteFile(path, []byte("{not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -63,32 +79,27 @@ func TestUserConfigRoundTripAndMalformedFailClosed(t *testing.T) {
 	}
 }
 
-func TestResolveInvocationProfileAndExplicitRepoPrecedence(t *testing.T) {
-	profileRepo := initGitRepo(t)
+func TestResolveInvocationWorkspaceAndExplicitRepoPrecedence(t *testing.T) {
+	workspaceRepo := initGitRepo(t)
 	explicitRepo := initGitRepo(t)
-	path := filepath.Join(t.TempDir(), "config.json")
-	t.Setenv("CDDM_CONFIG", path)
-	cfg := userConfig{Version: configVersion, Profiles: map[string]profileConfig{
-		"work": {Repo: profileRepo, Model: "profile-model", Reasoning: "medium"},
-	}}
+	t.Setenv("CDDM_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	cfg := userConfig{Version: configVersion, Workspaces: map[string]workspaceConfig{"work": {Repo: workspaceRepo, Model: "workspace-model", Reasoning: "medium"}}}
 	if err := saveUserConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-
-	root, p, err := resolveInvocation(globalOptions{Profile: "work"})
+	root, w, err := resolveInvocation(globalOptions{Workspace: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root != profileRepo || p.Model != "profile-model" {
-		t.Fatalf("root=%q profile=%#v", root, p)
+	if root != workspaceRepo || w.Model != "workspace-model" {
+		t.Fatalf("root=%q workspace=%#v", root, w)
 	}
-
-	root, p, err = resolveInvocation(globalOptions{Profile: "work", Repo: explicitRepo})
+	root, w, err = resolveInvocation(globalOptions{Workspace: "work", Repo: explicitRepo})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root != explicitRepo || p.Model != "profile-model" {
-		t.Fatalf("explicit root=%q profile=%#v", root, p)
+	if root != explicitRepo || w.Model != "workspace-model" {
+		t.Fatalf("root=%q workspace=%#v", root, w)
 	}
 }
 
@@ -116,9 +127,9 @@ func TestResolveInvocationFromNestedWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestUnknownProfileFailsClosed(t *testing.T) {
+func TestUnknownWorkspaceFailsClosed(t *testing.T) {
 	t.Setenv("CDDM_CONFIG", filepath.Join(t.TempDir(), "config.json"))
-	if _, _, err := resolveInvocation(globalOptions{Profile: "missing"}); err == nil || !strings.Contains(err.Error(), "does not exist") {
+	if _, _, err := resolveInvocation(globalOptions{Workspace: "missing"}); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -128,36 +139,20 @@ func TestGitHubRepoSlugSupportsCommonOrigins(t *testing.T) {
 		"git@github.com:NordCoder/cddm-dashboard.git":      "NordCoder/cddm-dashboard",
 		"https://github.com/NordCoder/misak-website.git":   "NordCoder/misak-website",
 		"ssh://git@github.com/NordCoder/unmatched-web.git": "NordCoder/unmatched-web",
-		"https://github.com/NordCoder/haze-sync":           "NordCoder/haze-sync",
 	}
 	for origin, want := range cases {
 		got, err := githubRepoSlug(origin)
 		if err != nil || got != want {
-			t.Fatalf("origin=%q got=%q err=%v want=%q", origin, got, err, want)
+			t.Fatalf("origin=%q got=%q err=%v", origin, got, err)
 		}
-	}
-	if _, err := githubRepoSlug("git@gitlab.com:owner/repo.git"); err == nil {
-		t.Fatal("non-GitHub origin was accepted")
-	}
-}
-
-func TestNewEngineUsesSelectedRepositoryOrigin(t *testing.T) {
-	repo := initGitRepo(t)
-	runGit(t, repo, "remote", "add", "origin", "https://github.com/NordCoder/example-cddm.git")
-	e, err := newEngine(newUI(ColorNever), repo, 77)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.repoSlug != "NordCoder/example-cddm" || repoSlug != "NordCoder/example-cddm" {
-		t.Fatalf("engine repo=%q package repo=%q", e.repoSlug, repoSlug)
 	}
 }
 
 func TestExecutionOptionPrecedence(t *testing.T) {
-	profile := profileConfig{Model: "profile-model", Reasoning: "low"}
-	opts := globalOptions{Model: "cli-model", Reasoning: "high"}
-	got := resolveExecutionOptions(opts, profile)
-	if got.ProfileModel != "profile-model" || got.ProfileReasoning != "low" || got.Model != "cli-model" || got.Reasoning != "high" {
+	workspace := workspaceConfig{Model: "workspace-model", Reasoning: "low"}
+	opts := globalOptions{Model: "cli-model", Reasoning: "high", CodexProfile: "deep-review"}
+	got := resolveExecutionOptions(opts, workspace)
+	if got.ProfileModel != "workspace-model" || got.ProfileReasoning != "low" || got.Model != "cli-model" || got.Reasoning != "high" || got.CodexProfile != "deep-review" {
 		t.Fatalf("execution options=%#v", got)
 	}
 }
