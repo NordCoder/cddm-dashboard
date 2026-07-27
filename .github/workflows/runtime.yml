@@ -30,14 +30,14 @@ jobs:
         id: format
         continue-on-error: true
         run: |
-          gofmt -d backend/cmd/cddm-change > /tmp/cddm-gofmt.diff
-          test ! -s /tmp/cddm-gofmt.diff
-      - name: Upload gofmt diff
+          find backend/cmd/cddm-change -type f -name '*.go' -print0 | xargs -0 gofmt -l > /tmp/cddm-gofmt.list
+          test ! -s /tmp/cddm-gofmt.list
+      - name: Upload gofmt list
         if: always() && steps.format.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: cddm-gofmt-diff
-          path: /tmp/cddm-gofmt.diff
+          name: cddm-gofmt-list
+          path: /tmp/cddm-gofmt.list
           if-no-files-found: error
       - name: Report formatting diagnostics
         if: always() && steps.format.outcome == 'failure'
@@ -48,11 +48,8 @@ jobs:
             echo '<!-- cddm-runtime-diagnostic -->'
             echo '## Runtime Go formatting diagnostic'
             echo
-            echo 'Exact gofmt diff is attached to this workflow run as `cddm-gofmt-diff`.'
-            echo
-            echo '```diff'
-            head -c 8000 /tmp/cddm-gofmt.diff
-            echo
+            echo '```text'
+            cat /tmp/cddm-gofmt.list
             echo '```'
           } > /tmp/comment.md
           gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
