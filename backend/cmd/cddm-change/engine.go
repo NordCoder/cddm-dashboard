@@ -27,19 +27,18 @@ type executionOptions struct {
 }
 
 type engine struct {
-	ui           *UI
-	repo         string
-	issue        int
-	branch       string
-	worktree     string
-	workerHome   string
-	statePath    string
-	historyPath  string
-	resultsDir   string
-	contract     string
-	originURL    string
-	repoSlug     string
-	codexProfile string
+	ui          *UI
+	repo        string
+	issue       int
+	branch      string
+	worktree    string
+	workerHome  string
+	statePath   string
+	historyPath string
+	resultsDir  string
+	contract    string
+	originURL   string
+	repoSlug    string
 }
 
 func newEngine(ui *UI, repo string, issue int) (*engine, error) {
@@ -106,6 +105,10 @@ func commandMutatingWithOptions(ui *UI, repo, command string, args []string, exe
 			ui.errorf("usage: cddm start <issue> [legacy-model] [legacy-reasoning]")
 			return 2
 		}
+		if err := e.selectCodexProfile(execOpts.CodexProfile); err != nil {
+			ui.errorf("Codex profile: %v", err)
+			return 1
+		}
 		model, reasoning := "gpt-5.6-terra", "medium"
 		if execOpts.ProfileModel != "" {
 			model = execOpts.ProfileModel
@@ -125,7 +128,6 @@ func commandMutatingWithOptions(ui *UI, repo, command string, args []string, exe
 		if execOpts.Reasoning != "" {
 			reasoning = execOpts.Reasoning
 		}
-		e.codexProfile = execOpts.CodexProfile
 		return e.start(model, reasoning)
 	case "resume", "rotate":
 		if len(args) < 2 || len(args) > 4 {
