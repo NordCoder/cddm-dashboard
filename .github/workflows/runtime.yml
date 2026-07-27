@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -26,15 +27,44 @@ jobs:
       - name: Show Go version
         run: go version
       - name: Check Go runtime formatting
+        id: format
         run: |
-          diff="$(gofmt -d backend/cmd/cddm-change)"
-          if [[ -n "$diff" ]]; then
-            printf '%s\n' "$diff"
-            exit 1
-          fi
+          gofmt -d backend/cmd/cddm-change > /tmp/cddm-gofmt.diff
+          test ! -s /tmp/cddm-gofmt.diff
+      - name: Report formatting diagnostics
+        if: failure() && steps.format.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '<!-- cddm-runtime-diagnostic -->'
+            echo '## Runtime Go formatting diagnostic'
+            echo
+            echo '```diff'
+            head -c 12000 /tmp/cddm-gofmt.diff
+            echo
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
       - name: Test Go runtime
+        id: test
         working-directory: backend
-        run: go test ./cmd/cddm-change
+        run: go test ./cmd/cddm-change 2>&1 | tee /tmp/cddm-go-test.log
+      - name: Report compile/test diagnostics
+        if: failure() && steps.test.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '<!-- cddm-runtime-diagnostic -->'
+            echo '## Runtime Go compile/test diagnostic'
+            echo
+            echo '```text'
+            tail -c 12000 /tmp/cddm-go-test.log
+            echo
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
       - name: Build Go runtime
         run: |
           bash scripts/build-cddm-change.sh
