@@ -48,13 +48,13 @@ func parseColor(v string) (ColorMode, error) {
 func newUI(mode ColorMode) *UI { return &UI{mode: mode} }
 
 func (u *UI) enabled(w io.Writer) bool {
-	if u.mode == ColorNever {
+	if os.Getenv("NO_COLOR") != "" || u.mode == ColorNever {
 		return false
 	}
 	if u.mode == ColorAlways {
 		return true
 	}
-	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+	if os.Getenv("TERM") == "dumb" {
 		return false
 	}
 	f, ok := w.(*os.File)
