@@ -62,7 +62,7 @@ func run(args []string) int {
 	case "turns":
 		return commandTurns(ui, repo, args[1:])
 	case "start", "resume", "rotate", "recover", "stop", "reconcile":
-		return delegateCompat(ui, repo, args)
+		return commandMutating(ui, repo, args[0], args[1:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 		return 0
@@ -117,28 +117,6 @@ func repoRoot() (string, error) {
 		return "", err
 	}
 	return filepath.Abs(strings.TrimSpace(string(out)))
-}
-
-func delegateCompat(ui *UI, repo string, args []string) int {
-	compat := filepath.Join(repo, "scripts", "cddm-codex-change-compat.sh")
-	if _, err := os.Stat(compat); err != nil {
-		ui.errorf("compatibility runtime is missing: %s", compat)
-		return 1
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		ui.errorf("cannot resolve runtime executable: %v", err)
-		return 1
-	}
-	cmd := exec.Command(compat, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "CDDM_CHANGE_BIN="+exe, "CDDM_REPO_ROOT="+repo, "CDDM_COLOR="+string(ui.mode))
-	if err := cmd.Run(); err != nil {
-		return exitCode(err)
-	}
-	return 0
 }
 
 func printUsage(w *os.File) {
