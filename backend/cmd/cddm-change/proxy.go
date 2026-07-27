@@ -42,7 +42,10 @@ func commandProxy(ui *UI, args []string) int {
 
 	statePath, historyPath, _ := statePaths(repo, issue)
 	state, _ := loadState(statePath)
-	turnKey := firstNonEmpty(state.ActiveResult, state.LastResult, state.ActiveEvents, "unknown:"+utcNow())
+	// Never fold a fresh turn into the previous turn's last_result if state is
+	// observed during a narrow startup race. Active result/events are the only
+	// valid durable identities for the current turn.
+	turnKey := firstNonEmpty(state.ActiveResult, state.ActiveEvents, "unknown:"+utcNow())
 	model := firstNonEmpty(state.ActiveModel, state.Model, "model?")
 	reasoning := firstNonEmpty(state.ActiveReasoning, state.Reasoning, "reasoning?")
 	actualMode := firstNonEmpty(state.ActiveMode, mode, "unknown")
@@ -185,6 +188,9 @@ func parseProxyArgs(args []string) (repo string, issue int, mode string, stall i
 				return "", 0, "", 0, nil, fmt.Errorf("invalid --stall-seconds")
 			}
 		case "--":
+			if repo == "" || issue == 0 {
+				return "", 0, "", 0, nil, fmt.Errorf("proxy requires --repo and --issue")
+			}
 			command = args[i+1:]
 			return
 		default:
