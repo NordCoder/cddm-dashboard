@@ -70,9 +70,6 @@ func commandMutating(ui *UI, repo, command string, args []string) int {
 		return 1
 	}
 
-	// stop must be able to signal the active Codex process while the original
-	// Host operation still owns the Issue lock. It proves process ownership,
-	// signals the Codex process group, then waits/acquires the lock for recovery.
 	if command == "stop" {
 		if len(args) != 1 {
 			ui.errorf("usage: stop <issue>")
@@ -199,10 +196,10 @@ func (e *engine) preflight(requireCodex bool, syncMain bool) error {
 		}
 	}
 	if syncMain {
-		if err := runCommand(e.repo, nil, io.Discard, os.Stderr, "git", "fetch", "--prune", "origin", "--quiet"); err != nil {
+		if err := runCommand(e.repo, nil, nil, io.Discard, os.Stderr, "git", "fetch", "--prune", "origin", "--quiet"); err != nil {
 			return err
 		}
-		if err := runCommand(e.repo, nil, io.Discard, os.Stderr, "git", "merge", "--ff-only", "origin/main", "--quiet"); err != nil {
+		if err := runCommand(e.repo, nil, nil, io.Discard, os.Stderr, "git", "merge", "--ff-only", "origin/main", "--quiet"); err != nil {
 			return err
 		}
 		local, err := runOutput(e.repo, nil, "git", "rev-parse", "HEAD")
