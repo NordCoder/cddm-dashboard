@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestColorPolicy(t *testing.T) {
@@ -22,7 +23,10 @@ func TestColorPolicy(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	auto := newUI(ColorAuto)
 	if got := auto.style(os.Stdout, ansiGreen, "ok"); got != "ok" {
-		t.Fatalf("NO_COLOR not respected: %q", got)
+		t.Fatalf("NO_COLOR not respected in auto mode: %q", got)
+	}
+	if got := always.style(&b, ansiGreen, "ok"); got != "ok" {
+		t.Fatalf("NO_COLOR must override forced color: %q", got)
 	}
 }
 
@@ -53,9 +57,26 @@ func TestRenderUnknownAndMalformedAreBounded(t *testing.T) {
 }
 
 func TestRedaction(t *testing.T) {
-	got := redact("token=supersecret authorization: bearer-value")
-	if strings.Contains(got, "supersecret") || strings.Contains(got, "bearer-value") {
+	got := redact("token=supersecret Authorization: Bearer actual-token")
+	if strings.Contains(got, "supersecret") || strings.Contains(got, "actual-token") || strings.Contains(strings.ToLower(got), "bearer") {
 		t.Fatalf("redaction failed: %q", got)
+	}
+}
+
+func TestRedactionTruncatesOnRuneBoundary(t *testing.T) {
+	got := redact(strings.Repeat("я", maxEventText+20))
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncation produced invalid UTF-8")
+	}
+	if utf8.RuneCountInString(got) != maxEventText {
+		t.Fatalf("rune count = %d, want %d", utf8.RuneCountInString(got), maxEventText)
+	}
+}
+
+func TestProxyRequiresIdentityBeforeCommandSeparator(t *testing.T) {
+	_, _, _, _, _, err := parseProxyArgs([]string{"--", "codex", "exec"})
+	if err == nil || !strings.Contains(err.Error(), "--repo and --issue") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
