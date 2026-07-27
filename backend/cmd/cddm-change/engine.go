@@ -69,6 +69,18 @@ func commandMutating(ui *UI, repo, command string, args []string) int {
 		ui.errorf("initialize runtime: %v", err)
 		return 1
 	}
+
+	// stop must be able to signal the active Codex process while the original
+	// Host operation still owns the Issue lock. It proves process ownership,
+	// signals the Codex process group, then waits/acquires the lock for recovery.
+	if command == "stop" {
+		if len(args) != 1 {
+			ui.errorf("usage: stop <issue>")
+			return 2
+		}
+		return e.stopCommand()
+	}
+
 	lock, err := acquireIssueLock(repo, issue)
 	if err != nil {
 		ui.errorf("%v", err)
@@ -112,12 +124,6 @@ func commandMutating(ui *UI, repo, command string, args []string) int {
 			return 2
 		}
 		return e.recoverCommand()
-	case "stop":
-		if len(args) != 1 {
-			ui.errorf("usage: stop <issue>")
-			return 2
-		}
-		return e.stopCommand()
 	case "reconcile":
 		if len(args) != 1 {
 			ui.errorf("usage: reconcile <issue>")
@@ -216,7 +222,7 @@ func (e *engine) preflight(requireCodex bool, syncMain bool) error {
 
 func canonicalOrigin(origin string) bool {
 	switch origin {
-	case "https://github.com/NordCoder/cddm-dashboard", "https://github.com/NordCoder/cddm-dashboard.git", "git@github.com:NordCoder/cddm-dashboard.git", "ssh://git@github.com/NordCoder/cddm-dashboard.git":
+	case "https://github.com/NordCoder/cddm-dashboard", "https://github.com/NordCoder/cddm-dashboard.git", "git@github.com:NordCoder/cddm-dashboard.git", "ssh://git@github.com:NordCoder/cddm-dashboard.git":
 		return true
 	default:
 		return false
