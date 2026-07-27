@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -27,67 +26,15 @@ jobs:
       - name: Show Go version
         run: go version
       - name: Check Go runtime formatting
-        id: format
-        continue-on-error: true
         run: |
-          mkdir -p /tmp/cddm-gofmt
-          set +e
-          find backend/cmd/cddm-change -type f -name '*.go' -print0 | xargs -0 gofmt -l > /tmp/cddm-gofmt/stdout.txt 2> /tmp/cddm-gofmt/stderr.txt
-          rc=$?
-          set -e
-          printf '%s\n' "$rc" > /tmp/cddm-gofmt/rc.txt
-          cat /tmp/cddm-gofmt/stderr.txt >&2
-          test "$rc" -eq 0
-          test ! -s /tmp/cddm-gofmt/stdout.txt
-      - name: Upload gofmt diagnostics
-        if: always() && steps.format.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: cddm-gofmt-diagnostics
-          path: /tmp/cddm-gofmt
-          if-no-files-found: error
-      - name: Report formatting diagnostics
-        if: always() && steps.format.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo '<!-- cddm-runtime-diagnostic -->'
-            echo '## Runtime Go formatting diagnostic'
-            echo
-            echo '```text'
-            echo "rc=$(cat /tmp/cddm-gofmt/rc.txt)"
-            cat /tmp/cddm-gofmt/stderr.txt
-            cat /tmp/cddm-gofmt/stdout.txt
-            echo '```'
-          } > /tmp/comment.md
-          gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
+          find backend/cmd/cddm-change -type f -name '*.go' -print0 | xargs -0 gofmt -l > /tmp/cddm-gofmt.list
+          if [[ -s /tmp/cddm-gofmt.list ]]; then
+            cat /tmp/cddm-gofmt.list
+            exit 1
+          fi
       - name: Test Go runtime
-        id: test
-        if: always()
-        continue-on-error: true
         working-directory: backend
-        run: go test ./cmd/cddm-change 2>&1 | tee /tmp/cddm-go-test.log
-      - name: Report compile/test diagnostics
-        if: always() && steps.test.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo '<!-- cddm-runtime-diagnostic -->'
-            echo '## Runtime Go compile/test diagnostic'
-            echo
-            echo '```text'
-            tail -c 12000 /tmp/cddm-go-test.log
-            echo
-            echo '```'
-          } > /tmp/comment.md
-          gh issue comment 35 --repo NordCoder/cddm-dashboard --body-file /tmp/comment.md
-      - name: Enforce format and tests
-        if: always()
-        run: |
-          test '${{ steps.format.outcome }}' = success
-          test '${{ steps.test.outcome }}' = success
+        run: go test ./cmd/cddm-change
       - name: Build Go runtime
         run: |
           bash scripts/build-cddm-change.sh
