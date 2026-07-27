@@ -46,6 +46,16 @@ func run(args []string) int {
 	case "status":
 		return commandStatus(ui, repo, args[1:])
 	case "watch":
+		if len(args) >= 2 {
+			if issue, parseErr := parseIssue(args[1]); parseErr == nil {
+				statePath, historyPath, _ := statePaths(repo, issue)
+				if state, loadErr := loadState(statePath); loadErr == nil && state.ActiveMode == "" {
+					printStatusDashboard(ui, os.Stdout, issue, state, historyPath)
+					fmt.Fprintf(os.Stdout, "\n%s\n", ui.style(os.Stdout, ansiDim, "observer: no active turn"))
+					return 0
+				}
+			}
+		}
 		return commandWatch(ui, repo, args[1:])
 	case "logs":
 		return commandLogs(ui, repo, args[1:])
@@ -149,5 +159,5 @@ Usage:
 Color:
   --color=auto|always|never
   CDDM_COLOR=auto|always|never
-  NO_COLOR=1 disables color in auto mode`)
+  NO_COLOR=1 disables color`)
 }
