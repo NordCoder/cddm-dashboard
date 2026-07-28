@@ -16,11 +16,13 @@ import (
 )
 
 const (
-	DefaultMethodology    = "cddm-minimal/v2.0"
-	DefaultResultProtocol = "cddm-worker-result/v1"
-	DeliveryModeReviewed  = "reviewed"
-	DeliveryModeAuto      = "auto"
-	QAModeManualFresh     = "manual_fresh_binding"
+	DefaultMethodology       = "cddm-minimal/v2.0"
+	DefaultResultProtocol    = "cddm-worker-result/v1"
+	DeliveryModeReviewed     = "reviewed"
+	DeliveryModeAuto         = "auto"
+	QAModeManualFresh        = "manual_fresh_binding"
+	ChatCreationModeManual   = "manual"
+	ChatCreationModeAutomatic = "automatic"
 )
 
 type PlannerHealthProvider interface {
@@ -28,14 +30,15 @@ type PlannerHealthProvider interface {
 }
 
 type ExecutionProfile struct {
-	ProjectID       int64     `json:"project_id"`
-	ResourceProfile string    `json:"resource_version"`
-	Methodology     string    `json:"methodology_version"`
-	ResultProtocol  string    `json:"result_protocol"`
-	DeliveryMode    string    `json:"delivery_mode"`
-	QASessionMode   string    `json:"qa_session_mode"`
-	AutoMerge       bool      `json:"auto_merge"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ProjectID        int64     `json:"project_id"`
+	ResourceProfile  string    `json:"resource_version"`
+	Methodology      string    `json:"methodology_version"`
+	ResultProtocol   string    `json:"result_protocol"`
+	DeliveryMode     string    `json:"delivery_mode"`
+	QASessionMode    string    `json:"qa_session_mode"`
+	ChatCreationMode string    `json:"chat_creation_mode"`
+	AutoMerge        bool      `json:"auto_merge"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type DeliveryEvidence struct {
@@ -114,7 +117,7 @@ func (s *ProjectionService) Profile(ctx context.Context, projectID int64) (Execu
 		return ExecutionProfile{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO project_execution_profiles (project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,updated_at) VALUES (?,?,?,?,?,?,0,?) ON CONFLICT(project_id) DO NOTHING`, projectID, resourcepack.DefaultProfile, DefaultMethodology, DefaultResultProtocol, DeliveryModeReviewed, QAModeManualFresh, now)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO project_execution_profiles (project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,chat_creation_mode,auto_merge,updated_at) VALUES (?,?,?,?,?,?,?,0,?) ON CONFLICT(project_id) DO NOTHING`, projectID, resourcepack.DefaultProfile, DefaultMethodology, DefaultResultProtocol, DeliveryModeReviewed, QAModeManualFresh, ChatCreationModeManual, now)
 	if err != nil {
 		return ExecutionProfile{}, err
 	}
@@ -127,11 +130,15 @@ func (s *ProjectionService) UpdateProfile(ctx context.Context, profile Execution
 	profile.ResultProtocol = strings.TrimSpace(profile.ResultProtocol)
 	profile.DeliveryMode = strings.TrimSpace(profile.DeliveryMode)
 	profile.QASessionMode = strings.TrimSpace(profile.QASessionMode)
+	profile.ChatCreationMode = strings.TrimSpace(profile.ChatCreationMode)
 	if profile.ProjectID <= 0 || profile.ResourceProfile != resourcepack.DefaultProfile || profile.Methodology != DefaultMethodology || profile.ResultProtocol != DefaultResultProtocol {
 		return ExecutionProfile{}, fmt.Errorf("unsupported execution profile identity")
 	}
 	if profile.DeliveryMode != DeliveryModeReviewed && profile.DeliveryMode != DeliveryModeAuto {
 		return ExecutionProfile{}, fmt.Errorf("delivery mode must be reviewed or auto")
+	}
+	if profile.ChatCreationMode != ChatCreationModeManual && profile.ChatCreationMode != ChatCreationModeAutomatic {
+		return ExecutionProfile{}, fmt.Errorf("chat_creation_mode must be manual or automatic")
 	}
 	if profile.QASessionMode != QAModeManualFresh || profile.AutoMerge {
 		return ExecutionProfile{}, fmt.Errorf("qa_session_mode must be manual_fresh_binding and auto_merge must remain false")
@@ -140,7 +147,7 @@ func (s *ProjectionService) UpdateProfile(ctx context.Context, profile Execution
 		return ExecutionProfile{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `UPDATE project_execution_profiles SET resource_profile=?,methodology=?,result_protocol=?,delivery_mode=?,qa_session_mode=?,auto_merge=0,updated_at=? WHERE project_id=?`, profile.ResourceProfile, profile.Methodology, profile.ResultProtocol, profile.DeliveryMode, profile.QASessionMode, now, profile.ProjectID)
+	_, err := s.db.ExecContext(ctx, `UPDATE project_execution_profiles SET resource_profile=?,methodology=?,result_protocol=?,delivery_mode=?,qa_session_mode=?,chat_creation_mode=?,auto_merge=0,updated_at=? WHERE project_id=?`, profile.ResourceProfile, profile.Methodology, profile.ResultProtocol, profile.DeliveryMode, profile.QASessionMode, profile.ChatCreationMode, now, profile.ProjectID)
 	if err != nil {
 		return ExecutionProfile{}, err
 	}
@@ -259,7 +266,7 @@ func (s *ProjectionService) readProfile(ctx context.Context, projectID int64) (E
 	var value ExecutionProfile
 	var autoMerge int
 	var updated string
-	err := s.db.QueryRowContext(ctx, `SELECT project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,updated_at FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode, &value.QASessionMode, &autoMerge, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,chat_creation_mode,auto_merge,updated_at FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode, &value.QASessionMode, &value.ChatCreationMode, &autoMerge, &updated)
 	if err != nil {
 		return ExecutionProfile{}, err
 	}
