@@ -11,11 +11,12 @@ const message = {
   issue_number: 140,
   role: "implementor",
   expected_lane_key: "nordcoder/misak-website#140:implementor",
+  chatgpt_project_url: "https://chatgpt.com/g/g-p-repository/project",
   bootstrap_prompt: "@02-implementor-trigger.md\n@gpt-gh-connector-guidelines.md\n\nWait for the command.",
 };
 const sender = { url: "http://localhost:1338/projects/7/work-units/140" };
 
-test("bootstrap provisions one exact chat worker and binds it to the asserted lane", async () => {
+test("bootstrap provisions one exact project-scoped chat worker and binds it to the asserted lane", async () => {
   const storage = memoryStorage();
   const coordinator = new ChatBootstrapCoordinator(storage, () => 1000);
   const calls = { provision: 0, bind: [] };
@@ -23,6 +24,7 @@ test("bootstrap provisions one exact chat worker and binds it to the asserted la
     async provisionConversation(request) {
       calls.provision += 1;
       assert.equal(request.role, "implementor");
+      assert.equal(request.chatGPTProjectUrl, "https://chatgpt.com/g/g-p-repository/project");
       return { workerId: "managed-worker-1", target };
     },
     backend: {
@@ -69,6 +71,18 @@ test("bootstrap rejects non-Dashboard external origins before creating a chat", 
   await assert.rejects(
     () => coordinator.execute(message, { url: "https://example.com/" }, { provisionConversation() {}, backend: {} }),
     /bootstrap_sender_not_allowed/,
+  );
+});
+
+test("bootstrap rejects invalid or conversation-shaped ChatGPT project URLs", async () => {
+  const coordinator = new ChatBootstrapCoordinator(memoryStorage());
+  await assert.rejects(
+    () => coordinator.execute({ ...message, request_id: "bad-project", chatgpt_project_url: "https://chatgpt.com/c/existing" }, sender, { provisionConversation() {}, backend: {} }),
+    /chatgpt_project_url_is_conversation/,
+  );
+  await assert.rejects(
+    () => coordinator.execute({ ...message, request_id: "evil-project", chatgpt_project_url: "https://example.com/project" }, sender, { provisionConversation() {}, backend: {} }),
+    /chatgpt_project_url_invalid/,
   );
 });
 
