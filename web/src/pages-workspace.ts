@@ -131,7 +131,7 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
       'section',
       { className: 'panel-section' },
       h('div', { className: 'card-topline' }, h('div', null, h('span', { className: 'eyebrow' }, 'Worker sessions'), h('h2', null, 'Automatic chat creation'))),
-      h('p', { className: 'muted' }, 'When enabled, this Project route watches every open Work Unit and creates the next missing Implementor or fresh QA chat from the backend route.'),
+      h('p', { className: 'muted' }, 'When enabled, the Dashboard-wide supervisor watches every open Work Unit in this Project and creates the next missing Implementor or fresh QA chat from the backend route.'),
       h('div', { className: 'segmented', role: 'group', 'aria-label': 'Project worker chat creation mode' },
         h('button', {
           type: 'button',
@@ -154,7 +154,7 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
         }, 'Auto-create Implementor + QA'),
       ),
       available
-        ? h('p', { className: 'muted' }, 'Automation remains active while a Dashboard page scoped to this Project is open. Lead chat creation stays explicit.')
+        ? h('p', { className: 'muted' }, 'Automation remains active while any Dashboard screen is open. Lead chat creation stays explicit.')
         : h('p', { className: 'inline-alert inline-alert--warning' }, 'Reload the updated CDDM extension to enable fresh-chat creation.'),
     )
 
