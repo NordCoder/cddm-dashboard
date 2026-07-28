@@ -105,7 +105,7 @@ func run() error {
 	browserDelivery := delivery.New(db, deliveryPlanning, delivery.NewBrowserBindingResolver(bindingService), delivery.Config{
 		Enabled: cfg.BrowserDeliveryEnabled, PendingTTL: cfg.BrowserDeliveryPendingTTL, ClaimTTL: cfg.BrowserDeliveryClaimTTL,
 	})
-	deliveryService := workerloop.NewDeliveryCoordinator(db, browserDelivery, planningService, commandEngine)
+	deliveryService := workerloop.NewDeliveryCoordinator(db, browserDelivery, planningService, commandEngine, workerStateService)
 	if err := deliveryService.Reconcile(startupContext); err != nil {
 		return fmt.Errorf("reconcile browser and workflow commands: %w", err)
 	}

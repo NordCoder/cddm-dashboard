@@ -56,15 +56,24 @@ type BrowserDelivery interface {
 	Reconcile(context.Context) error
 }
 
+type ProjectStateRefresher interface {
+	RefreshProject(context.Context, int64) error
+}
+
 type DeliveryCoordinator struct {
 	db       *sql.DB
 	base     BrowserDelivery
 	plans    PlanningReader
 	commands *CommandEngine
+	state    ProjectStateRefresher
 }
 
-func NewDeliveryCoordinator(db *sql.DB, base BrowserDelivery, plans PlanningReader, commands *CommandEngine) *DeliveryCoordinator {
-	return &DeliveryCoordinator{db: db, base: base, plans: plans, commands: commands}
+func NewDeliveryCoordinator(db *sql.DB, base BrowserDelivery, plans PlanningReader, commands *CommandEngine, state ...ProjectStateRefresher) *DeliveryCoordinator {
+	var refresher ProjectStateRefresher
+	if len(state) > 0 {
+		refresher = state[0]
+	}
+	return &DeliveryCoordinator{db: db, base: base, plans: plans, commands: commands, state: refresher}
 }
 
 func (c *DeliveryCoordinator) Create(ctx context.Context, projectID int64, issueNumber int, confirmation delivery.Confirmation) (delivery.Command, error) {
@@ -87,24 +96,15 @@ func (c *DeliveryCoordinator) Create(ctx context.Context, projectID int64, issue
 		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_unavailable")
 		return delivery.Command{}, err
 	}
-	if terminalCommandStatus(workflowCommand.Status) {
-		linked, linkErr := c.linkedDelivery(ctx, workflowCommand.ID)
-		if linkErr != nil {
-			c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_terminal")
-			return delivery.Command{}, linkErr
-		}
-		if linked != "" && linked != browserCommand.ID {
-			c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_terminal")
-			return delivery.Command{}, ErrConflict
-		}
-	}
 	if err := c.link(ctx, workflowCommand.ID, browserCommand.ID); err != nil {
-		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_link_failed")
-		_ = c.commands.RecordDeliveryOutcome(ctx, workflowCommand.ID, "failed")
+		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_already_linked")
 		return delivery.Command{}, err
 	}
 	if err := c.commands.RecordDeliveryOutcome(ctx, workflowCommand.ID, browserCommand.Status); err != nil {
 		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_status_failed")
+		return delivery.Command{}, err
+	}
+	if err := c.refreshProject(ctx, projectID); err != nil {
 		return delivery.Command{}, err
 	}
 	return browserCommand, nil
@@ -126,6 +126,9 @@ func (c *DeliveryCoordinator) Complete(ctx context.Context, completion delivery.
 	if err := c.syncCommand(ctx, command); err != nil {
 		return delivery.Command{}, err
 	}
+	if err := c.refreshProject(ctx, command.ProjectID); err != nil {
+		return delivery.Command{}, err
+	}
 	return command, nil
 }
 
@@ -133,21 +136,37 @@ func (c *DeliveryCoordinator) Reconcile(ctx context.Context) error {
 	if err := c.base.Reconcile(ctx); err != nil {
 		return err
 	}
-	rows, err := c.db.QueryContext(ctx, `SELECT l.workflow_command_id,d.status FROM workflow_delivery_links l JOIN delivery_commands d ON d.id=l.delivery_command_id`)
+	rows, err := c.db.QueryContext(ctx, `SELECT l.workflow_command_id,d.project_id,d.status FROM workflow_delivery_links l JOIN delivery_commands d ON d.id=l.delivery_command_id`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	projects := make(map[int64]struct{})
 	for rows.Next() {
 		var workflowID, status string
-		if err := rows.Scan(&workflowID, &status); err != nil {
+		var projectID int64
+		if err := rows.Scan(&workflowID, &projectID, &status); err != nil {
+			rows.Close()
 			return err
 		}
 		if err := c.commands.RecordDeliveryOutcome(ctx, workflowID, status); err != nil && !errors.Is(err, ErrConflict) {
+			rows.Close()
+			return err
+		}
+		projects[projectID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for projectID := range projects {
+		if err := c.refreshProject(ctx, projectID); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (c *DeliveryCoordinator) ReconcilePeriodically(ctx context.Context, interval time.Duration, report func(error)) {
@@ -181,9 +200,16 @@ func (c *DeliveryCoordinator) syncCommand(ctx context.Context, command delivery.
 }
 
 func (c *DeliveryCoordinator) link(ctx context.Context, workflowID, deliveryID string) error {
-	_, err := c.db.ExecContext(ctx, `INSERT INTO workflow_delivery_links (workflow_command_id,delivery_command_id,created_at) VALUES (?,?,?) ON CONFLICT(workflow_command_id) DO UPDATE SET delivery_command_id=excluded.delivery_command_id`, workflowID, deliveryID, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := c.db.ExecContext(ctx, `INSERT INTO workflow_delivery_links (workflow_command_id,delivery_command_id,created_at) VALUES (?,?,?) ON CONFLICT DO NOTHING`, workflowID, deliveryID, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("link workflow command to browser delivery: %w", err)
+	}
+	linked, err := c.linkedDelivery(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if linked != deliveryID {
+		return ErrConflict
 	}
 	return nil
 }
@@ -200,4 +226,11 @@ func (c *DeliveryCoordinator) linkedDelivery(ctx context.Context, workflowID str
 func (c *DeliveryCoordinator) invalidatePendingDelivery(ctx context.Context, deliveryID, reason string) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, _ = c.db.ExecContext(ctx, `UPDATE delivery_commands SET status='invalidated',terminal_at=?,outcome_reason=? WHERE id=? AND status='pending'`, now, reason, deliveryID)
+}
+
+func (c *DeliveryCoordinator) refreshProject(ctx context.Context, projectID int64) error {
+	if c.state == nil {
+		return nil
+	}
+	return c.state.RefreshProject(ctx, projectID)
 }
