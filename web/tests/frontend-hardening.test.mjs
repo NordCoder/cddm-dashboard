@@ -14,6 +14,23 @@ test('frontend UI is split into bounded feature modules', async () => {
   assert.ok(barrel.split('\n').length < 12, 'ui.ts must remain a barrel, not regrow into a monolith')
 })
 
+test('app entrypoint remains route composition rather than page implementation', async () => {
+  const app = await read('src/app.ts')
+  assert.match(app, /app-routing\.js/)
+  assert.match(app, /pages-workspace\.js/)
+  assert.match(app, /pages-work-unit\.js/)
+  assert.match(app, /pages-settings\.js/)
+  assert.ok(app.split('\n').length < 90, 'app.ts must remain a bounded composition root')
+  assert.doesNotMatch(app, /createProject|generatePlan|planningContext/)
+})
+
+test('workspace navigation exposes an explicit current-page state', async () => {
+  const shared = await read('src/ui-shared.ts')
+  assert.match(shared, /aria-current/)
+  assert.match(shared, /activeSection/)
+  assert.match(shared, /current: item\.section === activeSection/)
+})
+
 test('browser delivery has no inline visual theme or generic DOM fallbacks', async () => {
   const controller = await read('src/browser-delivery.ts')
   const view = await read('src/browser-delivery-view.ts')
