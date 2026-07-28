@@ -18,8 +18,8 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 9 {
-		t.Fatalf("user_version = %d, want 9", version)
+	if version != 10 {
+		t.Fatalf("user_version = %d, want 10", version)
 	}
 
 	for _, table := range []string{
@@ -58,7 +58,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	if err := second.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 9 {
-		t.Fatalf("migration count = %d, want 9", count)
+	if count != 10 {
+		t.Fatalf("migration count = %d, want 10", count)
 	}
 }
