@@ -83,7 +83,7 @@ func TestPilotReadinessUsesRoleBindingsWithoutRequiringQABinding(t *testing.T) {
 		Issues: []supervisor.Issue{{
 			GitHubID: 1400, Number: 140, Title: "Pilot", State: "open",
 			URL:    "https://github.com/NordCoder/misak-website/issues/140",
-			Labels: []supervisor.Label{{Name: "state:ready"}},
+			Labels: []supervisor.Label{{Name: "implementation"}},
 		}},
 	}); err != nil {
 		t.Fatal(err)
