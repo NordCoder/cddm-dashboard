@@ -80,7 +80,11 @@ func TestPilotReadinessUsesRoleBindingsWithoutRequiringQABinding(t *testing.T) {
 	projectStore := supervisor.NewStore(db)
 	if err := projectStore.ReplaceSnapshot(context.Background(), project.ID, supervisor.RepositorySnapshot{
 		FetchedAt: time.Now().UTC(),
-		Issues:    []supervisor.Issue{{GitHubID: 1400, Number: 140, Title: "Pilot", State: "open", URL: "https://github.com/NordCoder/misak-website/issues/140"}},
+		Issues: []supervisor.Issue{{
+			GitHubID: 1400, Number: 140, Title: "Pilot", State: "open",
+			URL:    "https://github.com/NordCoder/misak-website/issues/140",
+			Labels: []supervisor.Label{{Name: "state:ready"}},
+		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
