@@ -32,6 +32,11 @@
   line-height: 1.35;
 }
 
+body.delivery-auto-send-enabled .delivery-section:nth-of-type(2) > .delivery-action,
+body.delivery-auto-send-enabled .delivery-section:nth-of-type(2) > .delivery-actions {
+  display: none;
+}
+
 @media (max-width: 800px) {
   .delivery-auto-send {
     min-height: 44px;
