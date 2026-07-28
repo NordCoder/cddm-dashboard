@@ -1,4 +1,6 @@
 import { BackendResponseError } from './api.js'
+import { BrowserApiClient, BrowserWorker } from './browser-api.js'
+import { ChatCreationMode, chatCreationMode, chatCreationWorker, setChatCreationMode } from './chat-bootstrap.js'
 import { paths } from './router.js'
 import {
   Navigate,
@@ -10,6 +12,7 @@ import {
 import { api, errorMessage, isAbort, resourceContent, useResource } from './app-runtime.js'
 
 const h = React.createElement
+const browserApi = new BrowserApiClient()
 
 function CreateProjectPanel(props: { navigate: Navigate }): unknown {
   const [owner, setOwner] = React.useState('')
@@ -67,19 +70,30 @@ export function WorkspacePage(props: { navigate: Navigate }): unknown {
   }), 'Loading workspace…')
 }
 
-async function loadProject(projectID: number, signal: AbortSignal): Promise<ProjectBundle> {
-  const [project, state] = await Promise.all([api.projectMetadata(projectID, signal), api.projectState(projectID, signal)])
+type ProjectPageBundle = ProjectBundle & { workers: BrowserWorker[] }
+
+async function loadProject(projectID: number, signal: AbortSignal): Promise<ProjectPageBundle> {
+  const [project, state, workers] = await Promise.all([
+    api.projectMetadata(projectID, signal),
+    api.projectState(projectID, signal),
+    browserApi.workers(signal),
+  ])
   if (state.project.id !== project.id) {
     throw new BackendResponseError('Malformed backend response: Project metadata and workflow state identities do not match')
   }
-  return { project, state }
+  return { project, state, workers }
 }
 
 export function ProjectPage(props: { projectID: number; navigate: Navigate }): unknown {
-  const resource = useResource<ProjectBundle>(`project:${props.projectID}`, (signal) => loadProject(props.projectID, signal))
+  const resource = useResource<ProjectPageBundle>(`project:${props.projectID}`, (signal) => loadProject(props.projectID, signal))
   const [syncing, setSyncing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [feedback, setFeedback] = React.useState('')
+  const [creationMode, setCreationModeState] = React.useState<ChatCreationMode>(() => chatCreationMode(props.projectID))
+
+  React.useEffect(() => {
+    setCreationModeState(chatCreationMode(props.projectID))
+  }, [props.projectID])
 
   const sync = () => {
     if (syncing) return
@@ -111,14 +125,49 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
       })
   }
 
-  return resourceContent(resource, (bundle) => ProjectContent({
-    bundle,
-    navigate: props.navigate,
-    onRefresh: resource.refresh,
-    onSync: sync,
-    syncing,
-    syncFeedback: feedback || undefined,
-    onDelete: remove,
-    deleting,
-  }), 'Loading Project…')
+  return resourceContent(resource, (bundle) => {
+    const available = Boolean(chatCreationWorker(bundle.workers))
+    const automationPanel = h(
+      'section',
+      { className: 'panel-section' },
+      h('div', { className: 'card-topline' }, h('div', null, h('span', { className: 'eyebrow' }, 'Worker sessions'), h('h2', null, 'Automatic chat creation'))),
+      h('p', { className: 'muted' }, 'When enabled, this Project route watches every open Work Unit and creates the next missing Implementor or fresh QA chat from the backend route.'),
+      h('div', { className: 'segmented', role: 'group', 'aria-label': 'Project worker chat creation mode' },
+        h('button', {
+          type: 'button',
+          className: creationMode === 'manual' ? 'segmented__active' : '',
+          onClick: () => {
+            setChatCreationMode(props.projectID, 'manual')
+            setCreationModeState('manual')
+            setFeedback('Worker chat creation set to manual for this Project.')
+          },
+        }, 'Manual'),
+        h('button', {
+          type: 'button',
+          className: creationMode === 'automatic' ? 'segmented__active' : '',
+          disabled: !available,
+          onClick: () => {
+            setChatCreationMode(props.projectID, 'automatic')
+            setCreationModeState('automatic')
+            setFeedback('Automatic Implementor and QA chat creation enabled for this Project.')
+          },
+        }, 'Auto-create Implementor + QA'),
+      ),
+      available
+        ? h('p', { className: 'muted' }, 'Automation remains active while a Dashboard page scoped to this Project is open. Lead chat creation stays explicit.')
+        : h('p', { className: 'inline-alert inline-alert--warning' }, 'Reload the updated CDDM extension to enable fresh-chat creation.'),
+    )
+
+    return ProjectContent({
+      bundle,
+      navigate: props.navigate,
+      onRefresh: resource.refresh,
+      onSync: sync,
+      syncing,
+      syncFeedback: feedback || undefined,
+      automationPanel,
+      onDelete: remove,
+      deleting,
+    })
+  }, 'Loading Project…')
 }
