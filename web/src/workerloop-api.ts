@@ -9,6 +9,7 @@ export type ExecutionProfile = {
   result_protocol: string
   delivery_mode: 'reviewed' | 'auto'
   qa_session_mode: string
+  chat_creation_mode: 'manual' | 'automatic'
   auto_merge: boolean
   updated_at: string
 }
@@ -122,11 +123,13 @@ function profile(value: unknown, path = '$'): ExecutionProfile {
   const item = object(value, path)
   const deliveryMode = text(item.delivery_mode, `${path}.delivery_mode`)
   if (deliveryMode !== 'reviewed' && deliveryMode !== 'auto') throw new ValidationError(`${path}.delivery_mode`, 'reviewed or auto')
+  const chatCreationMode = text(item.chat_creation_mode, `${path}.chat_creation_mode`)
+  if (chatCreationMode !== 'manual' && chatCreationMode !== 'automatic') throw new ValidationError(`${path}.chat_creation_mode`, 'manual or automatic')
   return {
     project_id: number(item.project_id, `${path}.project_id`), resource_version: text(item.resource_version, `${path}.resource_version`),
     methodology_version: text(item.methodology_version, `${path}.methodology_version`), result_protocol: text(item.result_protocol, `${path}.result_protocol`),
-    delivery_mode: deliveryMode, qa_session_mode: text(item.qa_session_mode, `${path}.qa_session_mode`), auto_merge: bool(item.auto_merge, `${path}.auto_merge`),
-    updated_at: text(item.updated_at, `${path}.updated_at`),
+    delivery_mode: deliveryMode, qa_session_mode: text(item.qa_session_mode, `${path}.qa_session_mode`), chat_creation_mode: chatCreationMode,
+    auto_merge: bool(item.auto_merge, `${path}.auto_merge`), updated_at: text(item.updated_at, `${path}.updated_at`),
   }
 }
 function command(value: unknown, path: string): WorkflowCommand {
@@ -204,6 +207,9 @@ export class WorkerLoopApiClient {
     try { return parser(body) } catch (error) { if (error instanceof ValidationError) throw new BackendResponseError(error.message, error); throw error }
   }
 
+  profile(projectID: number, signal?: AbortSignal): Promise<ExecutionProfile> {
+    return this.request(`/api/projects/${projectID}/execution-profile`, profile, { signal })
+  }
   execution(projectID: number, issueNumber: number, signal?: AbortSignal): Promise<WorkUnitExecution> {
     return this.request(`/api/projects/${projectID}/work-units/${issueNumber}/execution`, execution, { signal })
   }
