@@ -1,0 +1,150 @@
+package workerloop
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
+)
+
+type PlanningReader interface {
+	Get(context.Context, int64, int, int64) (planning.GenerationResult, error)
+	ContextSummary(context.Context, int64, int) (planning.ContextSummary, error)
+}
+
+type DeliveryPlanningAdapter struct {
+	base     PlanningReader
+	commands *CommandEngine
+}
+
+func NewDeliveryPlanningAdapter(base PlanningReader, commands *CommandEngine) *DeliveryPlanningAdapter {
+	return &DeliveryPlanningAdapter{base: base, commands: commands}
+}
+
+func (a *DeliveryPlanningAdapter) Get(ctx context.Context, projectID int64, issueNumber int, planID int64) (planning.GenerationResult, error) {
+	result, err := a.base.Get(ctx, projectID, issueNumber, planID)
+	if err != nil {
+		return planning.GenerationResult{}, err
+	}
+	if result.Plan == nil {
+		return result, nil
+	}
+	_, prompt, err := a.commands.PrepareWorkflowCommand(ctx, projectID, issueNumber, result)
+	if err != nil {
+		return planning.GenerationResult{}, err
+	}
+	copy := result
+	plan := *result.Plan
+	plan.Prompt = prompt
+	copy.Plan = &plan
+	return copy, nil
+}
+
+func (a *DeliveryPlanningAdapter) ContextSummary(ctx context.Context, projectID int64, issueNumber int) (planning.ContextSummary, error) {
+	return a.base.ContextSummary(ctx, projectID, issueNumber)
+}
+
+type BrowserDelivery interface {
+	Create(context.Context, int64, int, delivery.Confirmation) (delivery.Command, error)
+	List(context.Context, int64, int) ([]delivery.Command, error)
+	ClaimNext(context.Context, delivery.ClaimRequest) (*delivery.Execution, error)
+	Complete(context.Context, delivery.Completion) (delivery.Command, error)
+	Reconcile(context.Context) error
+}
+
+type DeliveryCoordinator struct {
+	db       *sql.DB
+	base     BrowserDelivery
+	plans    PlanningReader
+	commands *CommandEngine
+}
+
+func NewDeliveryCoordinator(db *sql.DB, base BrowserDelivery, plans PlanningReader, commands *CommandEngine) *DeliveryCoordinator {
+	return &DeliveryCoordinator{db: db, base: base, plans: plans, commands: commands}
+}
+
+func (c *DeliveryCoordinator) Create(ctx context.Context, projectID int64, issueNumber int, confirmation delivery.Confirmation) (delivery.Command, error) {
+	command, err := c.base.Create(ctx, projectID, issueNumber, confirmation)
+	if err != nil {
+		return delivery.Command{}, err
+	}
+	generation, err := c.plans.Get(ctx, projectID, issueNumber, confirmation.PlanID)
+	if err != nil {
+		return delivery.Command{}, err
+	}
+	workflowID, _, err := c.commands.PrepareWorkflowCommand(ctx, projectID, issueNumber, generation)
+	if err != nil {
+		return delivery.Command{}, err
+	}
+	if err := c.link(ctx, workflowID, command.ID); err != nil {
+		return delivery.Command{}, err
+	}
+	if err := c.commands.RecordDeliveryOutcome(ctx, workflowID, command.Status); err != nil {
+		return delivery.Command{}, err
+	}
+	return command, nil
+}
+
+func (c *DeliveryCoordinator) List(ctx context.Context, projectID int64, issueNumber int) ([]delivery.Command, error) {
+	return c.base.List(ctx, projectID, issueNumber)
+}
+
+func (c *DeliveryCoordinator) ClaimNext(ctx context.Context, request delivery.ClaimRequest) (*delivery.Execution, error) {
+	return c.base.ClaimNext(ctx, request)
+}
+
+func (c *DeliveryCoordinator) Complete(ctx context.Context, completion delivery.Completion) (delivery.Command, error) {
+	command, err := c.base.Complete(ctx, completion)
+	if err != nil {
+		return delivery.Command{}, err
+	}
+	if err := c.syncCommand(ctx, command); err != nil {
+		return delivery.Command{}, err
+	}
+	return command, nil
+}
+
+func (c *DeliveryCoordinator) Reconcile(ctx context.Context) error {
+	if err := c.base.Reconcile(ctx); err != nil {
+		return err
+	}
+	rows, err := c.db.QueryContext(ctx, `SELECT l.workflow_command_id,d.status FROM workflow_delivery_links l JOIN delivery_commands d ON d.id=l.delivery_command_id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var workflowID, status string
+		if err := rows.Scan(&workflowID, &status); err != nil {
+			return err
+		}
+		if err := c.commands.RecordDeliveryOutcome(ctx, workflowID, status); err != nil && !errors.Is(err, ErrConflict) {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (c *DeliveryCoordinator) syncCommand(ctx context.Context, command delivery.Command) error {
+	var workflowID string
+	err := c.db.QueryRowContext(ctx, `SELECT workflow_command_id FROM workflow_delivery_links WHERE delivery_command_id=?`, command.ID).Scan(&workflowID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return c.commands.RecordDeliveryOutcome(ctx, workflowID, command.Status)
+}
+
+func (c *DeliveryCoordinator) link(ctx context.Context, workflowID, deliveryID string) error {
+	_, err := c.db.ExecContext(ctx, `INSERT INTO workflow_delivery_links (workflow_command_id,delivery_command_id,created_at) VALUES (?,?,?) ON CONFLICT(workflow_command_id) DO UPDATE SET delivery_command_id=excluded.delivery_command_id`, workflowID, deliveryID, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("link workflow command to browser delivery: %w", err)
+	}
+	return nil
+}
