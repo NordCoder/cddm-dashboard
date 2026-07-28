@@ -115,6 +115,7 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
       role,
       roleBinding,
       workUnit: bundle.workUnit,
+      chatGPTProjectURL: bundle.execution.profile.chatgpt_project_url,
     }).then((result) => {
       if (!result.ok) throw new Error(result.reason || 'chat_creation_failed')
       setMutationFeedback(`${role} chat created and bound${result.reused ? ' from the existing bootstrap request' : ''}.`)
