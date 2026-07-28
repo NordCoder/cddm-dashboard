@@ -19,6 +19,7 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/githubclient"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/httpapi"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/resourcepack"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 )
 
@@ -34,6 +35,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	resources, err := resourcepack.LoadDefault()
+	if err != nil {
+		return fmt.Errorf("validate worker resources: %w", err)
+	}
+	slog.Info("worker resources loaded", "profile", resources.Profile, "digest", resources.Digest)
 
 	startupContext, cancelStartup := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelStartup()
