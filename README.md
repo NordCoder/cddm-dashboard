@@ -1,32 +1,55 @@
 # CDDM Dashboard
 
-CDDM Dashboard is a local-first supervisor workspace for repository delivery state. It synchronizes GitHub Issues, Pull Requests, exact Candidate Heads and CI evidence, derives backend-owned workflow routing, prepares auditable Prompt Plans, and can deliver an approved prompt through the bundled Chrome extension without reading ChatGPT responses.
+CDDM Dashboard is a local-first supervisor and worker-loop control plane for GitHub-driven, AI-assisted software delivery.
 
-## Workspace model
+It synchronizes Issues, Pull Requests, exact Candidate Heads and CI evidence; derives deterministic routes; creates durable Workflow Commands; delivers versioned role prompts to exact ChatGPT conversations through the bundled Chrome extension; and accepts terminal worker results only from validated GitHub Issue comments.
 
-The frontend is structured as an operational workspace rather than a generic card dashboard:
+```text
+GitHub facts
+→ deterministic Work Unit route
+→ versioned Workflow Command
+→ exact Browser Delivery Command
+→ bound Lead / Implementor / QA chat
+→ GitHub Issue result comment
+→ cddm-worker-result/v1 validation
+→ external GitHub verification
+→ next route
+```
 
-- a persistent repository/health navigation rail;
-- attention-first Project and Work Unit views;
-- exact-Head, Candidate, CI and worker-result evidence surfaces;
-- immutable Prompt Plan review with separate local editing state;
-- a Browser Delivery inspector for binding, manual confirmation, automatic delivery and command lifecycle;
-- responsive desktop/tablet/mobile layouts with explicit focus, current-page and reduced-motion behavior.
+Browser delivery and worker completion are deliberately separate. The application never reads or stores ChatGPT responses.
 
-Frontend page controllers, resource runtime, route orchestration, presentation modules and browser-delivery model/view/controller are separated into bounded modules. Production and development servers enforce a strict same-origin CSP and browser security headers.
+## Implemented outcome
 
-## GitHub authentication without copying a token
+- read-only multi-repository GitHub synchronization;
+- deterministic lifecycle, Candidate, exact-Head CI, QA freshness, blockers, attention and routing;
+- Prompt Context, Prompt Plan, Policy Engine, OpenCode composition and deterministic fallback;
+- responsive desktop/tablet/mobile Supervisor workspace;
+- browser worker identity and exact lane-to-chat binding;
+- reviewed delivery, opt-in auto-send, Manual Copy fallback, at-most-once DOM execution and uncertain-delivery recovery;
+- repository-owned `resources/cddm-dashboard-resources/v1.0/` package;
+- durable Workflow Commands and `cddm-worker-result/v1` Worker Results;
+- marker validation, command correlation, conflict handling and GitHub readback verification;
+- typed Work Unit execution surfaces and Project Pilot Readiness diagnostics;
+- distinct Lead, Implementor and QA bindings with `manual_fresh_binding` QA mode;
+- restart, duplicate synchronization, delivered-without-result and downtime-result recovery fixtures.
 
-An SSH key authenticates Git transport, but GitHub Issues, Pull Requests and Actions are read through the GitHub REST API. The supported no-copy workflow uses GitHub CLI, which stores the API credential in the system keychain while Git itself can continue using SSH:
+## Install and start
+
+Recommended GitHub API credential flow:
 
 ```bash
 gh auth login --git-protocol ssh
-gh auth status
+cp .env.example .env
 ```
 
-`GITHUB_AUTH_MODE=auto` prefers an explicit `GITHUB_TOKEN`, then `gh auth token`, then anonymous access for public repositories. `gh_cli` requires a working GitHub CLI login; `token` requires `GITHUB_TOKEN`; `anonymous` disables authenticated API requests.
+Enable browser delivery in `.env`:
 
-For Docker Compose, use the launcher so the credential is resolved on the host and passed only to the running Compose process:
+```env
+GITHUB_AUTH_MODE=auto
+BROWSER_DELIVERY_ENABLED=true
+```
+
+Start with Docker Compose:
 
 ```bash
 bash scripts/cddm-up.sh -d
@@ -38,44 +61,103 @@ PowerShell:
 ./scripts/cddm-up.ps1 -d
 ```
 
-The launcher does not write the credential to `.env` or the database.
+Open:
 
-## Run with Docker Compose
+- Dashboard: `http://localhost:1338`
+- API: `http://localhost:1337`
 
-Copy the environment template:
+Both ports bind to loopback by default. This build has no public authentication layer and must not be exposed directly to an untrusted LAN or the public internet.
+
+See:
+
+- [Installation](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Browser delivery](docs/browser-delivery.md)
+- [Worker-loop protocol](docs/worker-loop.md)
+- [Controlled pilot guide](docs/pilot-guide.md)
+
+## Chrome extension
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked** and select `extension/`.
+4. Confirm extension ID `biakfbpkfdpniphmoafgldedkbnjfibp`.
+5. In extension Options, select `http://localhost:1338` or `http://localhost:1337` as the backend origin.
+6. Activate the intended `https://chatgpt.com/c/...` tab before binding it in the current Work Unit.
+
+The extension validates the exact tab, target URL, backend origin, binding version, presence proof, command identity and prompt hash before DOM execution. It never scans for an alternate conversation and never reads response content.
+
+## Role bindings and QA mode
+
+Each Work Unit has three logical lanes:
+
+```text
+<owner>/<repository>#<issue>:lead
+<owner>/<repository>#<issue>:implementor
+<owner>/<repository>#<issue>:qa
+```
+
+Lead and Implementor conversations may remain bound while they are healthy. QA uses `manual_fresh_binding`: when the current route requests QA, bind a newly opened QA conversation. After an accepted terminal QA result, Dashboard retires exactly the binding/version used for that command and leaves any newer replacement untouched.
+
+Automatic creation of a new ChatGPT conversation is not required for pilot readiness.
+
+## Delivery and authority
+
+- **Reviewed** delivery requires explicit confirmation of the current backend-approved command.
+- **Auto-send** may deliver an already authorized current command when exact route and binding guards pass.
+- Auto-send does not decide product scope, create material authority, bypass expected Head/resource guards or retry an uncertain DOM send.
+- `auto_merge=false`; merge remains explicit.
+- Historical Prompt Plan screens are evidence and never execute current workflow actions.
+
+## Project setup
+
+Create a Project through the API or the dashboard. A sample for the controlled MISAK pilot is provided without executing it:
 
 ```bash
-cp .env.example .env
+curl -X POST http://localhost:1337/api/projects \
+  -H 'Content-Type: application/json' \
+  --data @examples/misak-pilot-project.json
 ```
 
-Enable browser delivery when the unpacked extension is ready:
+The default execution profile is:
 
-```env
-BROWSER_DELIVERY_ENABLED=true
+```json
+{
+  "resource_version": "cddm-dashboard-resources/v1.0",
+  "methodology_version": "cddm-minimal/v2.0",
+  "result_protocol": "cddm-worker-result/v1",
+  "delivery_mode": "reviewed",
+  "qa_session_mode": "manual_fresh_binding",
+  "auto_merge": false
+}
 ```
 
-Then start with GitHub CLI authentication:
+## Pilot Readiness
+
+After Project synchronization and role binding, run the read-only diagnostic:
 
 ```bash
-bash scripts/cddm-up.sh -d
+bash scripts/cddm-pilot-readiness.sh http://localhost:1337 <project-id> <issue-number>
 ```
 
-Or start normally when `GITHUB_TOKEN` is already present in the process environment:
+PowerShell:
 
-```bash
-docker compose up --build -d
+```powershell
+./scripts/cddm-pilot-readiness.ps1 -ApiOrigin http://localhost:1337 -ProjectId <project-id> -IssueNumber <issue-number>
 ```
 
-Open `http://localhost:1338`. The web container proxies `/api` to the backend; the backend is also exposed at `http://localhost:1337`. Both host ports bind to `127.0.0.1` by default because the application has no public authentication layer. SQLite data is persisted in the `cddm_data` volume.
+It exits successfully only when the backend reports `status = pilot_ready` and all required checks pass. Running the diagnostic does not create or deliver a Workflow Command.
 
-For non-Docker development:
+## Development
+
+Backend:
 
 ```bash
 cd backend
 GITHUB_AUTH_MODE=gh_cli APP_ADDR=127.0.0.1:1337 APP_DATABASE_PATH=./data/cddm.db go run ./cmd/server
 ```
 
-In another terminal:
+Frontend:
 
 ```bash
 cd web
@@ -83,75 +165,12 @@ npm ci
 npm run dev
 ```
 
-The development frontend remains on `http://localhost:5173` and proxies `/api` to `http://localhost:1337` by default.
+The development frontend runs at `http://localhost:5173` and proxies `/api` to `http://localhost:1337`.
 
-## Browser delivery modes
+## Explicit boundaries
 
-The extension tracks only a supported ChatGPT conversation that the user explicitly activates. It remembers that exact tab identity for the current browser session, revalidates the same tab ID and URL before execution, and never scans for an alternate conversation. Closing or navigating the tracked tab makes delivery unavailable until a current target is proved again.
-
-Two opt-in delivery modes are available:
-
-- **Review delivery** freezes the current approved backend identities and requires **Confirm and send**.
-- **Auto-send** automatically confirms each new exact approved plan when the current browser binding is ready. It is disabled by default and stored separately for each Project/Work Unit.
-
-Auto-send is available only on the current Work Unit and current `/plans` view. It is disabled on historical `/plans/:planID` views so the displayed plan cannot differ from the plan being sent. Manual confirmation and Auto-send are mutually exclusive at both controller and presentation layers.
-
-Auto-send removes the human review screen, not the authority checks. It still uses the backend-approved immutable prompt, exact plan/head/lane/binding/presence CAS identities and one stable idempotency key. A command already created manually for the same exact plan and binding suppresses automatic duplicate creation. Ambiguous transport retries reuse the same intent. The persisted local identity contains only a fingerprint of the current presence proof, never the raw proof.
-
-The delivery safety model includes:
-
-- backend-owned plan/head/lane/binding/presence validation;
-- lane/version CAS for bind/rebind/disable;
-- one stable idempotency key per exact delivery intent;
-- strict command/claim/session identity validation and SHA-256 verification of the immutable prompt;
-- serialized durable claim reservation before DOM insertion/send;
-- claim authority bound to the exact configured backend origin;
-- exact target and backend checks before insertion and again before send;
-- identified ChatGPT composer/send selectors without broad generic fallbacks;
-- `delivered` only after bounded composer-clear submit acknowledgement; otherwise `uncertain`;
-- at-most-once DOM send for a claim;
-- restart recovery to `uncertain` rather than replay;
-- no ChatGPT response scraping, classification or persistence.
-
-See [Confirmed browser delivery](docs/browser-delivery.md) for installation and operating steps.
-
-## Project and synchronization API
-
-Create, sync and inspect Projects through the backend API:
-
-```bash
-curl -X POST http://localhost:1337/api/projects \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "owner": "NordCoder",
-    "repository": "cddm-dashboard",
-    "workflow_mode": "pull_request",
-    "polling_enabled": true,
-    "poll_interval_seconds": 300
-  }'
-
-curl http://localhost:1337/api/projects
-curl -X POST http://localhost:1337/api/projects/1/sync
-curl http://localhost:1337/api/workspace/state
-curl http://localhost:1337/api/projects/1/work-units/11/state
-```
-
-Synchronization is read-only with respect to GitHub. Each Project persists an isolated normalized snapshot of Issues, comments, linked Pull Requests, exact PR Heads and CI summaries. GitHub credentials are process configuration and are not stored in Project records.
-
-## Prompt planning API
-
-```bash
-# OpenCode-backed generation
-curl -X POST http://localhost:1337/api/projects/1/work-units/11/plans \
-  -H 'Content-Type: application/json' \
-  -d '{"mode":"opencode"}'
-
-# Explicit deterministic fallback
-curl -X POST http://localhost:1337/api/projects/1/work-units/11/plans \
-  -H 'Content-Type: application/json' \
-  -d '{"mode":"fallback"}'
-
-curl http://localhost:1337/api/projects/1/work-units/11/plans/latest
-curl 'http://localhost:1337/api/projects/1/work-units/11/plans?limit=20'
-curl http://localhost:1337/api/projects/1/work-units/11/planning/context
-```
+- GitHub facts remain authority for PR, exact Head, CI, QA freshness, mergeability and merge result.
+- A Worker Result marker is a claim until correlated and externally verified.
+- `delivered` never means worker completion.
+- ChatGPT response scraping, semantic response classification and response persistence are prohibited.
+- Public multi-user deployment, automatic fresh-conversation creation and automatic merge are future work requiring separate approval.

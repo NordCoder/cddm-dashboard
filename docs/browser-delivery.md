@@ -1,18 +1,28 @@
 # Confirmed browser delivery
 
-CDDM Dashboard can deliver one current backend-approved Prompt Plan to one explicitly bound ChatGPT conversation through the bundled Chrome Manifest V3 extension. The browser path never reads ChatGPT responses.
+CDDM Dashboard can deliver one current backend-authorized Workflow Command to one explicitly bound ChatGPT conversation through the bundled Chrome Manifest V3 extension. The browser path never reads ChatGPT responses.
+
+Browser delivery is transport only:
+
+```text
+Browser Delivery status = prompt transport evidence
+Workflow Command status = assignment execution state
+Worker Result = terminal GitHub comment evidence
+```
+
+A `delivered` browser command becomes `awaiting_result`; it does not complete the Workflow Command.
 
 ## Network boundary
 
-The dashboard and browser-delivery APIs do not provide a public authentication layer. Docker Compose therefore publishes both host ports on `127.0.0.1` by default, and the backend rejects non-loopback HTTP Host authorities for reads and mutations. This blocks direct LAN exposure and DNS-rebinding access to local Project, Prompt Plan, binding, and delivery data.
+The dashboard and browser-delivery APIs do not provide a public authentication layer. Docker Compose publishes both host ports on `127.0.0.1` by default, and the backend rejects non-loopback HTTP Host authorities for reads and mutations.
 
-`BIND_HOST` changes only socket publication; it does not relax the backend Host guard. This build is intended to be opened as `localhost`, `127.0.0.1`, or `::1`. Do not expose the API or dashboard directly to an untrusted LAN or the public internet.
+`BIND_HOST` changes socket publication only; it does not relax the backend Host guard. Use `localhost`, `127.0.0.1`, or `::1`. Do not expose the API or dashboard directly to an untrusted LAN or the public internet.
 
-State-changing browser requests must also be same-origin, and JSON bodies must use `application/json`. `chrome-extension://` access is accepted only from the stable bundled extension ID `biakfbpkfdpniphmoafgldedkbnjfibp` and only on `/api/browser/`.
+State-changing browser requests must be same-origin and JSON bodies must use `application/json`. `chrome-extension://` access is accepted only from bundled extension ID `biakfbpkfdpniphmoafgldedkbnjfibp` and only on `/api/browser/`.
 
 ## Enable the backend
 
-Browser delivery is deliberately opt-in. In `.env` set:
+Browser delivery is opt-in. In `.env` set:
 
 ```env
 BROWSER_DELIVERY_ENABLED=true
@@ -21,81 +31,88 @@ BROWSER_DELIVERY_PENDING_TTL=5m
 BROWSER_DELIVERY_CLAIM_TTL=1m
 ```
 
-Then start or restart the application:
+Start or restart:
 
 ```bash
 bash scripts/cddm-up.sh -d
 ```
 
-The normal Compose web endpoint is `http://localhost:1338`; it proxies `/api` to the backend. Direct backend access remains available at `http://localhost:1337`.
+- Dashboard: `http://localhost:1338`
+- API: `http://localhost:1337`
 
 ## Load the extension
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
-3. Select **Load unpacked** and choose the repository `extension/` directory.
-4. Confirm that the displayed extension ID is `biakfbpkfdpniphmoafgldedkbnjfibp`.
-5. Open the extension **Options** page.
-6. Set the backend origin to either the proxied app origin (`http://localhost:1338`) or direct API origin (`http://localhost:1337`). Grant only the requested origin permission.
+3. Select **Load unpacked** and choose `extension/`.
+4. Confirm ID `biakfbpkfdpniphmoafgldedkbnjfibp`.
+5. Open extension **Options**.
+6. Set the backend origin to `http://localhost:1338` or `http://localhost:1337` and grant only that origin.
 
-The manifest public key fixes the unpacked extension identity; it is not a credential. Changing the configured backend revokes the previously granted backend origin. Each durable claim is bound to the exact normalized backend origin that issued it.
+The manifest public key fixes the unpacked extension identity; it is not a credential. Changing the configured backend revokes the previous origin permission. Each durable claim is bound to the normalized backend origin that issued it.
 
-## Bind a conversation
+## Bind role conversations
 
-1. Open the intended `https://chatgpt.com/c/...` conversation and make that tab active once.
-2. Open the relevant CDDM work unit or latest Prompt Plan in the dashboard.
-3. The **Browser Delivery** panel lists only live browser targets projected by the backend. It does not accept a free-text ChatGPT URL.
-4. Select the target and choose **Bind target** or **Rebind target**.
+A Work Unit exposes independent logical bindings:
 
-After a ChatGPT tab has been explicitly activated, the extension remembers that exact tab for the current browser session. Switching to the dashboard does not lose the target: the extension revalidates the same tab ID and URL. Closing the tab, navigating it away, browser restart, conflicting extension sessions, or presence timeout makes the binding unavailable until freshness is proved again.
+```text
+<owner>/<repository>#<issue>:lead
+<owner>/<repository>#<issue>:implementor
+<owner>/<repository>#<issue>:qa
+```
 
-## Manual confirmation mode
+1. Open the intended `https://chatgpt.com/c/...` conversation and activate that tab once.
+2. Open the current Work Unit.
+3. Select the live target for the required role.
+4. Choose **Bind** or **Rebind**.
 
-Browser delivery is enabled only when the backend still projects a dispatchable current plan and the binding is `ready`.
+The UI never accepts a free-text ChatGPT URL. The extension remembers the exact activated tab for the browser session and revalidates the same tab ID and URL. Closing, navigating, restarting, conflicting extension sessions, or presence timeout makes the binding unavailable until freshness is proved again.
 
-1. Choose **Review delivery**.
-2. Verify the plan, exact Head, lane, binding version, ChatGPT target and exact immutable backend prompt.
+QA uses `manual_fresh_binding`. Keep QA unbound until the current route requires fresh QA, then open and bind a new QA conversation. After an accepted terminal QA result, the exact binding/version captured by the delivery command is retired. A newer replacement version is not retired.
+
+## Reviewed delivery
+
+Reviewed mode is the default.
+
+1. Inspect the current route, role, Candidate, exact Head, resource version, binding version and immutable prompt.
+2. Confirm the bound ChatGPT target.
 3. Choose **Confirm and send**.
 
-One confirmation intent receives one idempotency key. Network failure, unreadable or malformed success data, or HTTP `5xx` keeps that same frozen intent because the backend may already have committed it. A definitive stale/conflicting response cancels the intent and requires another review. `uncertain` delivery outcomes are never automatically replayed at the DOM layer.
+One confirmation intent receives one idempotency key. Network failure, unreadable success data or HTTP `5xx` retains the same frozen intent because the backend may already have committed it. A definitive stale/conflicting response cancels the intent. `uncertain` DOM outcomes are never automatically replayed.
 
-Manual review and automatic mode are mutually exclusive. The delivery controller rejects review or confirmation while Auto-send is active for the current Work Unit, independently of visual hiding of the controls.
+## Auto-send
 
-## Automatic mode
+Auto-send is an opt-in delivery preference stored per Project/Work Unit. It may deliver an already created, fully checked current Workflow Command when the exact binding is ready.
 
-The Browser Delivery header contains an **Auto-send** switch. It is disabled by default and stored separately in local browser storage for each Project/Work Unit.
+It does not:
 
-Auto-send is available only on the current Work Unit page and its current `/plans` view. It is unavailable on historical `/plans/:planID` routes, preventing the plan displayed on screen from differing from the latest plan considered for automatic delivery.
+- create material Owner authority;
+- bypass the current route, expected Head, context hash or resource version;
+- create another Workflow Command from the same accepted result;
+- replay an uncertain DOM send;
+- enable automatic merge.
 
-When enabled, the dashboard automatically creates one delivery command for each new exact approved Prompt Plan as soon as the current binding is `ready`. The mode skips the review screen but does not skip backend authority validation.
+The Project execution profile keeps `delivery_mode = reviewed | auto` separate from `auto_merge = false`.
 
-Automatic mode:
+Historical `/plans/:planID` screens never perform current workflow actions. Manual Copy remains available for edited text or unavailable browser transport.
 
-- uses only the immutable backend-generated prompt;
-- pauses when the visible prompt textarea has local edits;
-- derives its identity from project, issue, plan, plan hash, context hash, exact Head, lane, binding version and a fingerprint of the presence proof;
-- never persists the raw presence proof inside its local record;
-- stores one stable idempotency key for that exact identity;
-- detects a manually created command for the same exact plan and binding and does not create another;
-- throttles transport-ambiguous retries and reuses the same key;
-- blocks repeated attempts after a definitive backend rejection until the plan or binding identity changes.
+## At-most-once and recovery behavior
 
-Automatic mode requires the relevant current Work Unit or current Plans page to remain open in the dashboard. It is a browser-local per-work-unit operator preference, not a server-wide scheduler.
+- backend confirmation freezes plan, Head, lane, binding and presence identities;
+- one Workflow Command links to at most one Browser Delivery Command;
+- the extension durably reserves a claim before inserting or sending text;
+- exact target and backend checks run before insertion and again before send;
+- the prompt SHA-256 digest is verified before DOM access;
+- one claim has one executor owner;
+- a Send click is `delivered` only after bounded composer-clear acknowledgement;
+- unchanged or unrelatedly edited composer state becomes `uncertain`;
+- restart recovery never replays a completed or uncertain DOM send;
+- ordinary completion transport retry may repeat only acknowledgement for the same claim;
+- browser requests are time-bounded;
+- the extension never reads, classifies or persists response content.
 
-Local edits in the prompt textarea are intentionally not sent by either Browser Delivery mode. Use **Manual Copy** for edited prompt text or reset to the backend-generated prompt first.
+## Worker completion
 
-## Safety behavior
+The extension does not inspect the ChatGPT response. The worker publishes one GitHub Issue comment containing at most one `cddm-worker-result/v1` marker with the originating `command_id`. Dashboard synchronization validates and correlates that marker, verifies consequential GitHub facts, and derives the next route.
 
-- the backend remains authoritative for current plan, Head, lane, binding and command lifecycle;
-- confirmation requests carry only immutable/CAS identities, never replacement prompt or target authority;
-- the extension validates opaque command/claim/session identities and verifies the claimed prompt against the backend SHA-256 hash before touching the DOM;
-- the extension durably records a backend-origin-bound claim before DOM send and serializes ledger updates;
-- an in-progress reserved claim has one executor owner and cannot be completed or sent by a concurrent duplicate;
-- target identity and backend configuration are checked before insertion and again before send;
-- DOM matching is limited to identified ChatGPT composer/send controls;
-- a Send click is `delivered` only after the composer clears as bounded submit acknowledgement; an unchanged or unrelatedly edited composer is `uncertain`;
-- definitive completion rejection statuses become bounded terminal diagnostics and do not cause a DOM resend;
-- ordinary completion transport failures may retry only the acknowledgement for the same origin, never the DOM send;
-- backend requests are time-bounded;
-- the extension does not read, scrape, classify or persist ChatGPT response content;
-- Manual Copy remains available independently of browser availability.
+See [Dashboard worker loop](worker-loop.md) and [Controlled pilot guide](pilot-guide.md).

@@ -1,0 +1,10 @@
+{
+  "project_id": 0,
+  "resource_version": "cddm-dashboard-resources/v1.0",
+  "methodology_version": "cddm-minimal/v2.0",
+  "result_protocol": "cddm-worker-result/v1",
+  "delivery_mode": "reviewed",
+  "qa_session_mode": "manual_fresh_binding",
+  "auto_merge": false,
+  "updated_at": "0001-01-01T00:00:00Z"
+}

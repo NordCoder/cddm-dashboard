@@ -146,7 +146,10 @@ jobs:
           bash -n scripts/cddm-codex-change.sh
           bash -n scripts/build-cddm-change.sh
           bash -n scripts/cddm-up.sh
+          bash -n scripts/cddm-pilot-readiness.sh
+          bash -n scripts/validate-pilot-assets.sh
           pwsh -NoProfile -Command '$tokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "scripts/cddm-up.ps1"), [ref]$tokens, [ref]$parseErrors); if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { Write-Error $_ }; exit 1 }'
+          pwsh -NoProfile -Command '$tokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "scripts/cddm-pilot-readiness.ps1"), [ref]$tokens, [ref]$parseErrors); if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { Write-Error $_ }; exit 1 }'
       - name: Build Go Host runtime
         run: |
           bash scripts/build-cddm-change.sh
@@ -188,3 +191,5 @@ jobs:
           grep -q 'published: "1337"' <<<"$rendered"
           grep -q 'published: "1338"' <<<"$rendered"
           grep -q 'GITHUB_AUTH_MODE: auto' <<<"$rendered"
+      - name: Validate pilot assets
+        run: bash scripts/validate-pilot-assets.sh

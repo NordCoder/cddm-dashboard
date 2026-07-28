@@ -1,0 +1,7 @@
+{
+  "owner": "NordCoder",
+  "repository": "misak-website",
+  "workflow_mode": "pull_request",
+  "polling_enabled": true,
+  "poll_interval_seconds": 300
+}
