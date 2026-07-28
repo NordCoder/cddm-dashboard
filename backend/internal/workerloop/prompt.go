@@ -17,37 +17,60 @@ type CommandEngine struct {
 	resources resourcepack.Package
 }
 
+type PreparedWorkflowCommand struct {
+	Input  CreateCommandInput
+	Prompt string
+}
+
 func NewCommandEngine(store *Store, resources resourcepack.Package) *CommandEngine {
 	return &CommandEngine{store: store, resources: resources}
 }
 
-func (e *CommandEngine) PrepareWorkflowCommand(ctx context.Context, projectID int64, issueNumber int, generation planning.GenerationResult) (string, string, error) {
+func (e *CommandEngine) BuildWorkflowCommand(projectID int64, issueNumber int, generation planning.GenerationResult) (PreparedWorkflowCommand, error) {
 	if generation.Plan == nil || generation.PolicyDecision.Status != planning.StatusApproved {
-		return "", "", fmt.Errorf("workflow command requires a policy-approved Prompt Plan")
+		return PreparedWorkflowCommand{}, fmt.Errorf("workflow command requires a policy-approved Prompt Plan")
 	}
 	plan := generation.Plan
 	if plan.Action != "dispatch" || plan.TargetRole == "" || plan.LaneKey == "" {
-		return "", "", fmt.Errorf("workflow command requires a dispatchable role plan")
+		return PreparedWorkflowCommand{}, fmt.Errorf("workflow command requires a dispatchable role plan")
 	}
 	resource, err := e.resources.Role(plan.TargetRole)
 	if err != nil {
-		return "", "", err
+		return PreparedWorkflowCommand{}, err
 	}
 	identity := commandIdentity(generation, e.resources)
-	command, err := e.store.CreateCommand(ctx, CreateCommandInput{
-		ProjectID: projectID, IssueNumber: issueNumber, IdentityKey: identity,
+	input := CreateCommandInput{
+		ID: deterministicCommandID(identity), ProjectID: projectID, IssueNumber: issueNumber, IdentityKey: identity,
 		Role: plan.TargetRole, Action: plan.Action, ResourceProfile: e.resources.Profile,
 		ContextHash: generation.Context.ContextHash, ExpectedHead: plan.ExpectedHead,
 		Status: CommandDeliveryPending,
-	})
-	if err != nil {
-		return "", "", err
+	}
+	command := Command{
+		ID: input.ID, ProjectID: input.ProjectID, IssueNumber: input.IssueNumber,
+		Role: input.Role, Action: input.Action, ResourceProfile: input.ResourceProfile,
+		ContextHash: input.ContextHash, ExpectedHead: input.ExpectedHead, Status: input.Status,
 	}
 	prompt, err := renderCommandPrompt(command, generation, e.resources, resource)
 	if err != nil {
+		return PreparedWorkflowCommand{}, err
+	}
+	return PreparedWorkflowCommand{Input: input, Prompt: prompt}, nil
+}
+
+func (e *CommandEngine) PersistWorkflowCommand(ctx context.Context, prepared PreparedWorkflowCommand) (Command, error) {
+	return e.store.CreateCommand(ctx, prepared.Input)
+}
+
+func (e *CommandEngine) PrepareWorkflowCommand(ctx context.Context, projectID int64, issueNumber int, generation planning.GenerationResult) (string, string, error) {
+	prepared, err := e.BuildWorkflowCommand(projectID, issueNumber, generation)
+	if err != nil {
 		return "", "", err
 	}
-	return command.ID, prompt, nil
+	command, err := e.PersistWorkflowCommand(ctx, prepared)
+	if err != nil {
+		return "", "", err
+	}
+	return command.ID, prepared.Prompt, nil
 }
 
 func (e *CommandEngine) RecordDeliveryOutcome(ctx context.Context, commandID, outcome string) error {
@@ -94,6 +117,13 @@ func commandIdentity(generation planning.GenerationResult, resources resourcepac
 	}
 	sum := sha256.Sum256([]byte(strings.Join(values, "\x00")))
 	return hex.EncodeToString(sum[:])
+}
+
+func deterministicCommandID(identity string) string {
+	if len(identity) > 32 {
+		identity = identity[:32]
+	}
+	return "cmd-" + identity
 }
 
 func renderCommandPrompt(command Command, generation planning.GenerationResult, resources resourcepack.Package, roleResource string) (string, error) {
