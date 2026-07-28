@@ -34,11 +34,11 @@ type Manifest struct {
 }
 
 type Package struct {
-	Profile   string            `json:"profile"`
-	Manifest  Manifest          `json:"manifest"`
-	Files     map[string]string `json:"-"`
-	Digests   map[string]string `json:"digests"`
-	Digest    string            `json:"digest"`
+	Profile  string            `json:"profile"`
+	Manifest Manifest          `json:"manifest"`
+	Files    map[string]string `json:"-"`
+	Digests  map[string]string `json:"digests"`
+	Digest   string            `json:"digest"`
 }
 
 func Load(profile string) (Package, error) {
@@ -85,8 +85,10 @@ func loadFS(files fs.FS, root, profile string) (Package, error) {
 	}
 
 	result := Package{
-		Profile: profile, Manifest: manifest,
-		Files: make(map[string]string, len(manifest.Resources)), Digests: make(map[string]string, len(manifest.Resources)+1),
+		Profile:  profile,
+		Manifest: manifest,
+		Files:    make(map[string]string, len(manifest.Resources)),
+		Digests:  make(map[string]string, len(manifest.Resources)+1),
 	}
 	result.Digests["manifest.yaml"] = digest(manifestBytes)
 	for key, name := range manifest.Resources {
@@ -179,9 +181,13 @@ func parseManifest(contents string) (Manifest, error) {
 		}
 		switch section {
 		case "base_methodology":
-			assignIdentity(&manifest.BaseMethodology, key, value)
+			if err := assignIdentity(&manifest.BaseMethodology, key, value); err != nil {
+				return Manifest{}, err
+			}
 		case "result_protocol":
-			assignIdentity(&manifest.ResultProtocol, key, value)
+			if err := assignIdentity(&manifest.ResultProtocol, key, value); err != nil {
+				return Manifest{}, err
+			}
 		case "resources":
 			manifest.Resources[key] = value
 		default:
@@ -194,13 +200,16 @@ func parseManifest(contents string) (Manifest, error) {
 	return manifest, nil
 }
 
-func assignIdentity(identity *Identity, key, value string) {
+func assignIdentity(identity *Identity, key, value string) error {
 	switch key {
 	case "package":
 		identity.Package = value
 	case "version":
 		identity.Version = value
+	default:
+		return fmt.Errorf("unknown identity key %q", key)
 	}
+	return nil
 }
 
 func unquote(value string) string {
