@@ -92,7 +92,13 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
   const [syncing, setSyncing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [profileBusy, setProfileBusy] = React.useState(false)
+  const [projectURLDraft, setProjectURLDraft] = React.useState('')
   const [feedback, setFeedback] = React.useState('')
+  const loadedProjectURL = resource.state.kind === 'ready' ? resource.state.data.profile.chatgpt_project_url : ''
+
+  React.useEffect(() => {
+    setProjectURLDraft(loadedProjectURL)
+  }, [props.projectID, loadedProjectURL])
 
   const sync = () => {
     if (syncing) return
@@ -126,23 +132,52 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
 
   return resourceContent(resource, (bundle) => {
     const available = Boolean(chatCreationWorker(bundle.workers))
-    const updateMode = (mode: 'manual' | 'automatic') => {
-      if (profileBusy || (mode === 'automatic' && !available)) return
+    const updateProfile = (profile: ExecutionProfile, success: string) => {
+      if (profileBusy) return
       setProfileBusy(true)
       setFeedback('')
-      void workerLoopApi.updateProfile(props.projectID, { ...bundle.profile, chat_creation_mode: mode })
-        .then(() => {
-          setFeedback(mode === 'automatic' ? 'Automatic Implementor and QA chat creation enabled for this Project.' : 'Worker chat creation set to manual for this Project.')
+      void workerLoopApi.updateProfile(props.projectID, profile)
+        .then((updated) => {
+          setProjectURLDraft(updated.chatgpt_project_url)
+          setFeedback(success)
           resource.refresh()
         })
         .catch((error: unknown) => setFeedback(errorMessage(error)))
         .finally(() => setProfileBusy(false))
+    }
+    const updateMode = (mode: 'manual' | 'automatic') => {
+      if (mode === 'automatic' && !available) return
+      updateProfile(
+        { ...bundle.profile, chat_creation_mode: mode },
+        mode === 'automatic' ? 'Automatic Implementor and QA chat creation enabled for this Project.' : 'Worker chat creation set to manual for this Project.',
+      )
+    }
+    const saveProjectURL = () => {
+      const normalized = projectURLDraft.trim()
+      updateProfile(
+        { ...bundle.profile, chatgpt_project_url: normalized },
+        normalized ? 'ChatGPT Project URL saved for this repository.' : 'Chat creation will use global ChatGPT for this repository.',
+      )
     }
     const automationPanel = h(
       'section',
       { className: 'panel-section' },
       h('div', { className: 'card-topline' }, h('div', null, h('span', { className: 'eyebrow' }, 'Worker sessions'), h('h2', null, 'Automatic chat creation'))),
       h('p', { className: 'muted' }, 'When enabled, the Dashboard-wide supervisor watches every open Work Unit in this Project and creates the next missing Implementor or fresh QA chat from the backend route.'),
+      h('label', { htmlFor: `chatgpt-project-url-${props.projectID}` },
+        h('span', null, 'ChatGPT Project URL'),
+        h('input', {
+          id: `chatgpt-project-url-${props.projectID}`,
+          type: 'url',
+          value: projectURLDraft,
+          disabled: profileBusy,
+          autoComplete: 'off',
+          placeholder: 'https://chatgpt.com/g/.../project',
+          onChange: (event: { currentTarget: HTMLInputElement }) => setProjectURLDraft(event.currentTarget.value),
+        }),
+      ),
+      h('p', { className: 'muted' }, 'Paste the exact ChatGPT Project page for this repository. Leave empty to create chats in global ChatGPT.'),
+      h('button', { type: 'button', className: 'button button--secondary', disabled: profileBusy, onClick: saveProjectURL }, profileBusy ? 'Saving…' : 'Save ChatGPT Project'),
       h('div', { className: 'segmented', role: 'group', 'aria-label': 'Project worker chat creation mode' },
         h('button', {
           type: 'button',
@@ -158,7 +193,9 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
         }, 'Auto-create Implementor + QA'),
       ),
       available
-        ? h('p', { className: 'muted' }, 'The durable Project setting remains active while any Dashboard screen is open. Lead chat creation stays explicit.')
+        ? h('p', { className: 'muted' }, bundle.profile.chatgpt_project_url
+            ? 'New Lead, Implementor and QA chats are opened inside the configured ChatGPT Project. The durable setting remains active while any Dashboard screen is open.'
+            : 'No ChatGPT Project is configured; new chats use global ChatGPT. Lead chat creation stays explicit.')
         : h('p', { className: 'inline-alert inline-alert--warning' }, 'Reload the updated CDDM extension to enable fresh-chat creation.'),
     )
 
