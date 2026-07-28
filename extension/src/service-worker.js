@@ -1,5 +1,6 @@
 import { BackendClient, BackendHTTPError } from "./api.js";
 import { ChromeTargetAdapter } from "./adapter.js";
+import { ChatBootstrapCoordinator } from "./chat-bootstrap.js";
 import { ExecutionCoordinator, PreSendError } from "./executor.js";
 import { ClaimLedger } from "./ledger.js";
 import {
@@ -72,6 +73,7 @@ export class ExtensionRuntime {
     this.storage = dependencies.storage || chromeApi.storage.local;
     this.adapter = dependencies.adapter || new ChromeTargetAdapter(chromeApi);
     this.ledger = dependencies.ledger || new ClaimLedger(this.storage);
+    this.chatBootstrap = dependencies.chatBootstrap || new ChatBootstrapCoordinator(this.storage);
     this.clientFactory = dependencies.clientFactory || ((origin) => new BackendClient(origin));
     this.sessionId = dependencies.sessionId || SESSION_ID;
     this.workerId = null;
@@ -152,7 +154,13 @@ export class ExtensionRuntime {
       }
       const target = await this.adapter.currentTarget();
       this.currentTarget = target;
-      const payload = { worker_id: this.workerId, worker_session_id: this.sessionId, protocol_version: "m6-c3", capabilities: ["chatgpt_conversation", "exact_prompt_send"], observation: { target } };
+      const payload = {
+        worker_id: this.workerId,
+        worker_session_id: this.sessionId,
+        protocol_version: "m8-c1",
+        capabilities: ["chatgpt_conversation", "exact_prompt_send", "chatgpt_conversation_create"],
+        observation: { target },
+      };
       const result = this.registered ? await this.backend.heartbeat(this.workerId, payload) : await this.backend.register(payload);
       this.registered = true;
       this.conflict = result?.state === "conflict";
@@ -237,6 +245,26 @@ export class ExtensionRuntime {
     } finally { this.pollInFlight = false; }
   }
 
+  async handleExternalMessage(message, sender) {
+    if (message?.type !== "create-worker-chat") return { ok: false, reason: "unsupported_external_message" };
+    if (!this.workerId) return { ok: false, reason: "extension_startup_incomplete" };
+    const origin = await this.enabledOrigin();
+    if (!origin) return { ok: false, reason: "disabled_backend" };
+    if (origin !== this.backendOrigin || !this.backend) await this.heartbeatCycle();
+    if (!this.backend || origin !== this.backendOrigin) return { ok: false, reason: "backend_unavailable" };
+    const result = await this.chatBootstrap.execute(message, sender, {
+      adapter: this.adapter,
+      backend: this.backend,
+      workerId: this.workerId,
+      heartbeat: async () => {
+        await this.heartbeatCycle();
+        if (!this.presenceCurrent || !this.currentTarget) throw new Error("created_target_presence_unavailable");
+      },
+    });
+    await this.status(result.ok ? "chat_created_and_bound" : result.reason || "chat_creation_failed");
+    return result;
+  }
+
   async status(code) {
     await this.storage.set({ [STATUS_KEY]: { code: safeDiagnostic(code), worker_id: this.workerId, worker_session_id: this.sessionId, updated_at: Date.now() } });
   }
@@ -257,5 +285,9 @@ if (globalThis.chrome?.storage?.local) {
   });
   globalThis.chrome.tabs?.onActivated?.addListener(({ tabId }) => {
     runtime.handleTabActivated(tabId).catch(() => runtime.status("target_activation_failed"));
+  });
+  globalThis.chrome.runtime?.onMessageExternal?.addListener((message, sender, respond) => {
+    runtime.handleExternalMessage(message, sender).then(respond, (error) => respond({ ok: false, reason: safeDiagnostic(error?.message || "chat_creation_failed") }));
+    return true;
   });
 }
