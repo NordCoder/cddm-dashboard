@@ -31,6 +31,8 @@ Browser delivery and worker completion are deliberately separate. The applicatio
 - marker validation, command correlation, conflict handling and GitHub readback verification;
 - typed Work Unit execution surfaces and Project Pilot Readiness diagnostics;
 - distinct Lead, Implementor and QA bindings with `manual_fresh_binding` QA mode;
+- manual or Project-scoped automatic fresh-chat creation for routed Implementor and QA lanes;
+- one persistent exact-tab browser worker identity per Dashboard-created chat;
 - restart, duplicate synchronization, delivered-without-result and downtime-result recovery fixtures.
 
 ## Install and start
@@ -83,9 +85,11 @@ See:
 3. Choose **Load unpacked** and select `extension/`.
 4. Confirm extension ID `biakfbpkfdpniphmoafgldedkbnjfibp`.
 5. In extension Options, select `http://localhost:1338` or `http://localhost:1337` as the backend origin.
-6. Activate the intended `https://chatgpt.com/c/...` tab before binding it in the current Work Unit.
+6. Reload the extension after upgrading so the bounded `tabs` and local Dashboard connection permissions are active.
 
-The extension validates the exact tab, target URL, backend origin, binding version, presence proof, command identity and prompt hash before DOM execution. It never scans for an alternate conversation and never reads response content.
+For manual binding, activate the intended `https://chatgpt.com/c/...` tab once and bind that live target. For Dashboard-created chats, the extension opens a new ChatGPT tab, sends only the role bootstrap, waits for the resulting exact `/c/<id>` URL, registers a persistent worker identity for that tab and binds it through the current route guard.
+
+The extension validates the exact tab, target URL, backend origin, binding version, presence proof, command identity and prompt hash before DOM execution. It never reads response content.
 
 ## Role bindings and QA mode
 
@@ -97,9 +101,16 @@ Each Work Unit has three logical lanes:
 <owner>/<repository>#<issue>:qa
 ```
 
-Lead and Implementor conversations may remain bound while they are healthy. QA uses `manual_fresh_binding`: when the current route requests QA, bind a newly opened QA conversation. After an accepted terminal QA result, Dashboard retires exactly the binding/version used for that command and leaves any newer replacement untouched.
+Lead and Implementor conversations may remain bound while they are healthy. QA uses `manual_fresh_binding`: every routed QA cycle requires a fresh conversation. After an accepted terminal QA result, Dashboard retires exactly the binding/version used for that command and leaves any newer replacement untouched.
 
-Automatic creation of a new ChatGPT conversation is not required for pilot readiness.
+The Work Unit UI supports:
+
+- **Manual** chat creation and binding;
+- **Auto-create Implementor + QA**, stored per Project in the current browser.
+
+Automatic mode reacts only to a current backend route with `action=dispatch`. It creates a missing Implementor lane for the Issue or a fresh missing QA lane, then binds the exact created target. Lead chat creation remains explicit. Bootstrap messages contain the role Library references and no `command_id`; the first real assignment still arrives through the normal durable Workflow Command and Browser Delivery path.
+
+Automatic creation is not required for pilot readiness. Existing manual bindings remain supported.
 
 ## Delivery and authority
 
@@ -131,6 +142,8 @@ The default execution profile is:
   "auto_merge": false
 }
 ```
+
+The fresh-chat creation preference is browser-local and Project-scoped; it is not durable GitHub authority and is intentionally separate from the backend execution profile.
 
 ## Pilot Readiness
 
@@ -172,5 +185,6 @@ The development frontend runs at `http://localhost:5173` and proxies `/api` to `
 - GitHub facts remain authority for PR, exact Head, CI, QA freshness, mergeability and merge result.
 - A Worker Result marker is a claim until correlated and externally verified.
 - `delivered` never means worker completion.
+- Chat bootstrap is initialization only and never creates workflow authority.
 - ChatGPT response scraping, semantic response classification and response persistence are prohibited.
-- Public multi-user deployment, automatic fresh-conversation creation and automatic merge are future work requiring separate approval.
+- Public multi-user deployment, generalized browser automation and automatic merge require separate approval.
