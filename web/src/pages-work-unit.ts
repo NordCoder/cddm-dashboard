@@ -1,13 +1,6 @@
 import { ApiClient, BackendResponseError, PlanningMode } from './api.js'
 import { BrowserApiClient, BrowserWorker } from './browser-api.js'
-import {
-  ChatCreationMode,
-  WorkerRole,
-  chatCreationMode,
-  chatCreationWorker,
-  createWorkerChat,
-  setChatCreationMode,
-} from './chat-bootstrap.js'
+import { WorkerRole, chatCreationWorker, createWorkerChat } from './chat-bootstrap.js'
 import { GenerationResult, WorkUnitState } from './domain.js'
 import { paths } from './router.js'
 import {
@@ -87,12 +80,7 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
   const generation = usePlanGeneration(props.projectID, props.issueNumber, props.navigate)
   const [mutationBusy, setMutationBusy] = React.useState(false)
   const [mutationFeedback, setMutationFeedback] = React.useState('')
-  const [creationMode, setCreationModeState] = React.useState<ChatCreationMode>(() => chatCreationMode(props.projectID))
   const creationInFlight = React.useRef(false)
-
-  React.useEffect(() => {
-    setCreationModeState(chatCreationMode(props.projectID))
-  }, [props.projectID])
 
   const mutate = (action: () => Promise<unknown>, success: string) => {
     if (mutationBusy || creationInFlight.current) return
@@ -148,14 +136,13 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
     onRefresh: resource.refresh,
     mutationBusy,
     mutationFeedback: mutationFeedback || undefined,
-    chatCreationMode: creationMode,
+    chatCreationMode: bundle.execution.profile.chat_creation_mode,
     chatCreationAvailable: Boolean(chatCreationWorker(bundle.workers)),
     onCreateRole: (role) => provisionChat(bundle, role),
-    onChatCreationMode: (mode) => {
-      setChatCreationMode(props.projectID, mode)
-      setCreationModeState(mode)
-      setMutationFeedback(mode === 'automatic' ? 'Automatic Implementor and QA chat creation enabled for this Project.' : 'Worker chat creation set to manual for this Project.')
-    },
+    onChatCreationMode: (mode) => mutate(
+      () => workerLoopApi.updateProfile(props.projectID, { ...bundle.execution.profile, chat_creation_mode: mode }),
+      mode === 'automatic' ? 'Automatic Implementor and QA chat creation enabled for this Project.' : 'Worker chat creation set to manual for this Project.',
+    ),
     onBindRole: (role, worker) => {
       if (!worker.target) return
       const current = bundle.execution.role_bindings.find((item) => item.role === role)?.binding
