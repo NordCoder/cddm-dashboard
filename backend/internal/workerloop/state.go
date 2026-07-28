@@ -3,8 +3,8 @@ package workerloop
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workflow"
@@ -28,19 +28,14 @@ func NewStateService(snapshots SnapshotStore, results *Store) *StateService {
 }
 
 func (s *StateService) ProjectWorkflowState(ctx context.Context, projectID int64) (supervisor.ProjectSnapshot, workflow.ProjectState, error) {
+	if err := s.RefreshProject(ctx, projectID); err != nil {
+		return supervisor.ProjectSnapshot{}, workflow.ProjectState{}, err
+	}
 	snapshot, err := s.snapshots.ProjectSnapshot(ctx, projectID)
 	if err != nil {
 		return supervisor.ProjectSnapshot{}, workflow.ProjectState{}, err
 	}
-	rows, err := s.results.ResultsForProject(ctx, projectID)
-	if err != nil {
-		return supervisor.ProjectSnapshot{}, workflow.ProjectState{}, err
-	}
-	external := make(map[int64]workflow.ExternalResult, len(rows))
-	for _, result := range rows {
-		external[result.GitHubCommentID] = projectResult(snapshot, result)
-	}
-	return snapshot, workflow.DeriveProjectWithExternal(snapshot, external), nil
+	return snapshot, workflow.DeriveProject(snapshot), nil
 }
 
 func projectResult(snapshot supervisor.ProjectSnapshot, result Result) workflow.ExternalResult {
@@ -112,6 +107,9 @@ func eventFromMarker(snapshot supervisor.ProjectSnapshot, issueNumber int, comme
 		case "ready_to_merge":
 			event.Status, event.Head = "completed", payload.ApprovedHead
 			putExtension(event.Extensions, "pr", payload.PR)
+			if !candidateMatches(snapshot, issueNumber, payload.PR, payload.ApprovedHead) {
+				return event, []workflow.Warning{{CommentID: commentID, Code: "worker_result_merge_candidate_mismatch", Message: "Lead merge claim does not match the current linked primary PR and approved Head"}}
+			}
 		case "owner_required":
 			event.Status, event.EscalateTo = "blocked", "owner"
 		case "hold":
@@ -131,7 +129,7 @@ func candidateMatches(snapshot supervisor.ProjectSnapshot, issueNumber, prNumber
 		}
 		open := make([]supervisor.PullRequest, 0)
 		for _, pr := range issue.PullRequests {
-			if pr.State == "open" {
+			if strings.EqualFold(pr.State, "open") {
 				open = append(open, pr)
 			}
 		}
@@ -160,29 +158,4 @@ func putExtension(target map[string]json.RawMessage, key string, value any) {
 	if err == nil {
 		target[key] = encoded
 	}
-}
-
-func externalString(result workflow.ResultEvidence, key string) string {
-	value := result.Extensions[key]
-	var decoded string
-	if len(value) > 0 {
-		_ = json.Unmarshal(value, &decoded)
-	}
-	return decoded
-}
-
-func externalInt(result workflow.ResultEvidence, key string) int {
-	value := result.Extensions[key]
-	var decoded int
-	if len(value) > 0 {
-		_ = json.Unmarshal(value, &decoded)
-	}
-	return decoded
-}
-
-func validateProjectedResult(result workflow.ResultEvidence) error {
-	if result.CommentID <= 0 || result.Role == "" || result.Status == "" {
-		return fmt.Errorf("projected result is incomplete")
-	}
-	return nil
 }
