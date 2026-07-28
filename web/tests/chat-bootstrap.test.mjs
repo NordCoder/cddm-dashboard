@@ -59,18 +59,21 @@ test('chat creation capability is discovered independently from an active target
   assert.equal(worker.worker_id, 'creator')
 })
 
-test('bootstrap request identity is deterministic across tabs and rotates with lane or binding generation', () => {
-  const first = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
-  const duplicate = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
-  const nextCycle = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 2)
-  const otherLane = bootstrapRequestID(1, 141, 'qa', 'repo#141:qa', 1)
+test('bootstrap request identity rotates with binding generation, lane or ChatGPT project scope', () => {
+  const projectURL = 'https://chatgpt.com/g/g-p-repository/project'
+  const first = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1, projectURL)
+  const duplicate = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1, projectURL)
+  const nextCycle = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 2, projectURL)
+  const otherLane = bootstrapRequestID(1, 141, 'qa', 'repo#141:qa', 1, projectURL)
+  const otherProject = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1, 'https://chatgpt.com/g/g-p-other/project')
   assert.equal(duplicate, first)
   assert.match(first, /^chat-p1-i140-qa-v1-[0-9a-f]{8}$/)
   assert.notEqual(nextCycle, first)
   assert.notEqual(otherLane, first)
+  assert.notEqual(otherProject, first)
 })
 
-test('Dashboard sends a bounded external bootstrap request and accepts extension binding evidence', async () => {
+test('Dashboard sends the configured ChatGPT project in a bounded external bootstrap request', async () => {
   let sent
   const chromeApi = {
     runtime: {
@@ -86,11 +89,13 @@ test('Dashboard sends a bounded external bootstrap request and accepts extension
     role: 'implementor',
     roleBinding: { role: 'implementor', lane_key: 'nordcoder/misak-website#140:implementor' },
     workUnit: workUnit(),
+    chatGPTProjectURL: 'https://chatgpt.com/g/g-p-repository/project',
     chromeApi,
   })
   assert.equal(result.ok, true)
   assert.equal(sent.extensionID, 'biakfbpkfdpniphmoafgldedkbnjfibp')
   assert.equal(sent.message.expected_lane_key, 'nordcoder/misak-website#140:implementor')
+  assert.equal(sent.message.chatgpt_project_url, 'https://chatgpt.com/g/g-p-repository/project')
   assert.match(sent.message.request_id, /^chat-p1-i140-implementor-v0-[0-9a-f]{8}$/)
   assert.match(sent.message.bootstrap_prompt, /@02-implementor-trigger\.md/)
   assert.equal(sent.message.command_id, undefined)
