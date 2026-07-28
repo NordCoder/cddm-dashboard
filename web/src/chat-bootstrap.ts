@@ -1,5 +1,5 @@
 import { BrowserBinding, BrowserWorker } from './browser-api.js'
-import { WorkUnitState } from './domain.js'
+import { ProjectState, WorkUnitState } from './domain.js'
 import { RoleBinding } from './workerloop-api.js'
 
 export type ChatCreationMode = 'manual' | 'automatic'
@@ -56,6 +56,12 @@ export function bootstrapPrompt(role: WorkerRole, workUnit: WorkUnitState): stri
     ? `This is a fresh independent QA conversation for ${identity}.`
     : `This conversation is initialized as the ${role} lane for ${identity}.`
   return `${references}\n\n${roleLine}\n\nRead the attached role resources. This bootstrap message is not a Dashboard Workflow Command and contains no authority to change the repository. Wait for the next CDDM Dashboard command before performing any work.`
+}
+
+export function projectChatCandidates(state: ProjectState): WorkUnitState[] {
+  return state.work_units
+    .filter((item) => item.route.action === 'dispatch' && (item.route.target_role === 'implementor' || item.route.target_role === 'qa'))
+    .sort((left, right) => left.identity.issue_number - right.identity.issue_number)
 }
 
 export function routedCreationRole(workUnit: WorkUnitState, bindings: RoleBinding[]): WorkerRole | undefined {
