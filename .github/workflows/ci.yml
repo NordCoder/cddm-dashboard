@@ -191,5 +191,9 @@ jobs:
           grep -q 'published: "1337"' <<<"$rendered"
           grep -q 'published: "1338"' <<<"$rendered"
           grep -q 'GITHUB_AUTH_MODE: auto' <<<"$rendered"
-      - name: Validate pilot assets
-        run: bash scripts/validate-pilot-assets.sh
+      - name: Validate packaged worker resources
+        run: bash scripts/validate-pilot-assets.sh resources
+      - name: Validate pilot sample configuration
+        run: bash scripts/validate-pilot-assets.sh samples
+      - name: Validate pilot documentation
+        run: bash scripts/validate-pilot-assets.sh docs
