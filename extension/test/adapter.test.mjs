@@ -12,6 +12,7 @@ function fixture(options = {}) {
   let nextTabId = 40;
   const session = {};
   const messages = [];
+  const createdURLs = [];
   const chrome = {
     storage: { session: {
       async get(key) { return { [key]: session[key] }; },
@@ -22,6 +23,7 @@ function fixture(options = {}) {
       async query() { const tab = tabs.get(activeId); return tab ? [{ ...tab }] : []; },
       async get(id) { const tab = tabs.get(id); if (!tab) throw new Error("missing tab"); return { ...tab }; },
       async create(createOptions) {
+        createdURLs.push(createOptions.url);
         const tab = { id: nextTabId++, url: createOptions.url };
         tabs.set(tab.id, tab);
         if (createOptions.active) activeId = tab.id;
@@ -39,7 +41,7 @@ function fixture(options = {}) {
     }
   };
   return {
-    adapter: new ChromeTargetAdapter(chrome), tabs, messages,
+    adapter: new ChromeTargetAdapter(chrome), tabs, messages, createdURLs,
     activate(id) { activeId = id; },
     close(id) { tabs.delete(id); },
     navigate(id, url) { tabs.get(id).url = url; }
@@ -104,6 +106,7 @@ test("fresh managed global chat is created, bootstrapped and retained as an exac
   const f = fixture();
   await f.adapter.currentTarget();
   const created = await f.adapter.createConversation("@02-implementor-trigger.md\n\nWait for the command.");
+  assert.equal(f.createdURLs[0], "https://chatgpt.com/");
   assert.deepEqual(created.target, { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/fresh" });
   assert.equal(f.adapter.isManagedTab(created.tabId), true);
   assert.deepEqual(f.messages.at(-1), { id: created.tabId, message: { type: "bootstrap-new-chat", prompt: "@02-implementor-trigger.md\n\nWait for the command.", project_url: "" } });
@@ -123,6 +126,7 @@ test("fresh managed chat is opened and verified inside the configured ChatGPT pr
   const f = fixture();
   const projectURL = "https://chatgpt.com/g/g-p-repository/project";
   const created = await f.adapter.createConversation("project bootstrap", projectURL);
+  assert.equal(f.createdURLs[0], projectURL);
   assert.equal(f.tabs.get(created.tabId).url, "https://chatgpt.com/g/g-p-repository/c/fresh");
   assert.deepEqual(created.target, { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/fresh" });
   assert.deepEqual(f.messages.at(-1), { id: created.tabId, message: { type: "bootstrap-new-chat", prompt: "project bootstrap", project_url: projectURL } });
