@@ -2,6 +2,7 @@ const TARGET_KIND = "chatgpt_conversation";
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const SEND_ACK_TIMEOUT_MS = 1500;
 const SEND_ACK_INTERVAL_MS = 50;
+const COMPOSER_WAIT_TIMEOUT_MS = 20_000;
 
 function normalizeTargetUrl(value) {
   let parsed;
@@ -15,6 +16,12 @@ function normalizeTargetRef(value) {
 }
 function sameTarget(left, right) {
   return Boolean(left && right && left.kind === right.kind && left.origin === right.origin && left.path === right.path);
+}
+function bootstrapSurface() {
+  try {
+    const parsed = new URL(location.href);
+    return parsed.origin === CHATGPT_ORIGIN && (parsed.pathname === "/" || parsed.pathname === "");
+  } catch { return false; }
 }
 
 const COMPOSER_SELECTORS = [
@@ -72,22 +79,44 @@ function writeContentEditable(element, prompt) {
   selection.removeAllRanges();
   return inserted && composerValue(element) === prompt;
 }
+function writeComposer(element, prompt) {
+  return element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
+    ? writePlainInput(element, prompt)
+    : element.isContentEditable && writeContentEditable(element, prompt);
+}
 function insert(prompt, expected) {
   if (!currentTarget(expected)) return error("target_changed_before_insert");
   if (typeof prompt !== "string") return error("prompt_invalid");
   const composer = uniqueUsable(COMPOSER_SELECTORS);
   if (!composer.element || composer.ambiguous || composer.element.disabled || composer.element.readOnly) return error("compose_unavailable");
-  const written = composer.element instanceof HTMLTextAreaElement || composer.element instanceof HTMLInputElement
-    ? writePlainInput(composer.element, prompt)
-    : composer.element.isContentEditable && writeContentEditable(composer.element, prompt);
-  if (!written) return error("prompt_insert_verification_failed");
+  if (!writeComposer(composer.element, prompt)) return error("prompt_insert_verification_failed");
   return { ok: true };
 }
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
-async function submitAcknowledged(expected, prompt) {
+async function waitForComposer() {
+  const deadline = Date.now() + COMPOSER_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const composer = uniqueUsable(COMPOSER_SELECTORS);
+    if (composer.ambiguous) return { ambiguous: true };
+    if (composer.element && !composer.element.disabled && !composer.element.readOnly) return composer;
+    await delay(SEND_ACK_INTERVAL_MS);
+  }
+  return {};
+}
+async function submitAcknowledged(expected) {
   const deadline = Date.now() + SEND_ACK_TIMEOUT_MS;
   do {
     if (!currentTarget(expected)) return false;
+    const composer = uniqueUsable(COMPOSER_SELECTORS);
+    if (composer.ambiguous) return false;
+    if (composer.element && composerValue(composer.element) === "") return true;
+    await delay(SEND_ACK_INTERVAL_MS);
+  } while (Date.now() < deadline);
+  return false;
+}
+async function submitBootstrapAcknowledged() {
+  const deadline = Date.now() + SEND_ACK_TIMEOUT_MS;
+  do {
     const composer = uniqueUsable(COMPOSER_SELECTORS);
     if (composer.ambiguous) return false;
     if (composer.element && composerValue(composer.element) === "") return true;
@@ -103,7 +132,19 @@ async function send(expected, prompt) {
   const control = uniqueUsable(SEND_SELECTORS);
   if (!control.element || control.ambiguous || control.element.disabled || control.element.getAttribute("aria-disabled") === "true") return error("send_control_unavailable");
   try { control.element.click(); } catch { return error("send_outcome_unknown", false); }
-  return await submitAcknowledged(expected, prompt) ? { ok: true } : error("send_outcome_unknown", false);
+  return await submitAcknowledged(expected) ? { ok: true } : error("send_outcome_unknown", false);
+}
+async function bootstrap(prompt) {
+  if (!bootstrapSurface()) return error("bootstrap_surface_invalid");
+  if (typeof prompt !== "string" || !prompt.trim()) return error("bootstrap_prompt_invalid");
+  const composer = await waitForComposer();
+  if (!composer.element || composer.ambiguous || composer.element.disabled || composer.element.readOnly) return error("compose_unavailable");
+  if (composerValue(composer.element).trim() !== "") return error("bootstrap_composer_not_empty");
+  if (!writeComposer(composer.element, prompt)) return error("prompt_insert_verification_failed");
+  const control = uniqueUsable(SEND_SELECTORS);
+  if (!control.element || control.ambiguous || control.element.disabled || control.element.getAttribute("aria-disabled") === "true") return error("send_control_unavailable");
+  try { control.element.click(); } catch { return error("send_outcome_unknown", false); }
+  return await submitBootstrapAcknowledged() ? { ok: true } : error("send_outcome_unknown", false);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
@@ -117,6 +158,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message?.type === "send-prompt") {
     send(message.expected_target, message.prompt).then(respond, () => respond(error("send_outcome_unknown", false)));
+    return true;
+  }
+  if (message?.type === "bootstrap-new-chat") {
+    bootstrap(message.prompt).then(respond, () => respond(error("send_outcome_unknown", false)));
     return true;
   }
   return false;
