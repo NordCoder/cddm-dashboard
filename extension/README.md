@@ -1,6 +1,6 @@
 # CDDM Browser Delivery
 
-This is the M6-C3 Manifest V3 executor. Load the `extension/` directory as an unpacked extension, verify the stable ID `biakfbpkfdpniphmoafgldedkbnjfibp`, open its options page, enter the configured loopback backend origin (for example `http://localhost:8080`), and grant access only to that origin. The manifest public key fixes the unpacked extension ID; it is not a credential.
+This is the M6-C3 Manifest V3 executor. Load the `extension/` directory as an unpacked extension, verify the stable ID `biakfbpkfdpniphmoafgldedkbnjfibp`, open its options page, enter the configured loopback origin (`http://localhost:1338` through the dashboard proxy or `http://localhost:1337` directly), and grant access only to that origin. The manifest public key fixes the unpacked extension ID; it is not a credential.
 
 The service worker creates one durable installation `worker_id`, one fresh runtime `worker_session_id`, registers/heartbeats only the explicitly activated supported ChatGPT conversation, and polls serially. A claimed command is validated against its SHA-256 prompt hash and reserved in a serialized, backend-origin-bound `chrome.storage.local` ledger before the content script may insert or send its exact prompt. Restart recovery marks unresolved reservations `uncertain` and retries only same-origin backend completion acknowledgement. A concurrent duplicate that observes `reserved` cannot send or complete the in-progress claim.
 
