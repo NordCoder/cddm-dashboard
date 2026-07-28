@@ -1,5 +1,14 @@
 import { ApiClient, BackendResponseError, PlanningMode } from './api.js'
 import { BrowserApiClient, BrowserWorker } from './browser-api.js'
+import {
+  ChatCreationMode,
+  WorkerRole,
+  chatCreationMode,
+  chatCreationWorker,
+  createWorkerChat,
+  routedCreationRole,
+  setChatCreationMode,
+} from './chat-bootstrap.js'
 import { GenerationResult, WorkUnitState } from './domain.js'
 import { paths } from './router.js'
 import {
@@ -79,9 +88,17 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
   const generation = usePlanGeneration(props.projectID, props.issueNumber, props.navigate)
   const [mutationBusy, setMutationBusy] = React.useState(false)
   const [mutationFeedback, setMutationFeedback] = React.useState('')
+  const [creationMode, setCreationModeState] = React.useState<ChatCreationMode>(() => chatCreationMode(props.projectID))
+  const creationInFlight = React.useRef(false)
+  const automaticAttempts = React.useRef(new Set<string>())
+
+  React.useEffect(() => {
+    setCreationModeState(chatCreationMode(props.projectID))
+    automaticAttempts.current.clear()
+  }, [props.projectID])
 
   const mutate = (action: () => Promise<unknown>, success: string) => {
-    if (mutationBusy) return
+    if (mutationBusy || creationInFlight.current) return
     setMutationBusy(true)
     setMutationFeedback('')
     void action()
@@ -93,6 +110,52 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
       .finally(() => setMutationBusy(false))
   }
 
+  const provisionChat = (bundle: WorkUnitBundle, role: WorkerRole, automatic: boolean) => {
+    if (mutationBusy || creationInFlight.current) return
+    const roleBinding = bundle.execution.role_bindings.find((item) => item.role === role)
+    if (!roleBinding) {
+      setMutationFeedback(`Chat creation failed: ${role} lane is unavailable.`)
+      return
+    }
+    if (!chatCreationWorker(bundle.workers)) {
+      setMutationFeedback('Chat creation failed: reload the updated CDDM extension and refresh browser workers.')
+      return
+    }
+    creationInFlight.current = true
+    setMutationBusy(true)
+    setMutationFeedback(automatic ? `Creating and binding a fresh ${role} chat…` : `Creating a fresh ${role} chat…`)
+    void createWorkerChat({
+      projectID: props.projectID,
+      issueNumber: props.issueNumber,
+      role,
+      roleBinding,
+      workUnit: bundle.workUnit,
+    }).then((result) => {
+      if (!result.ok) throw new Error(result.reason || 'chat_creation_failed')
+      setMutationFeedback(`${role} chat created and bound${result.reused ? ' from the existing bootstrap request' : ''}.`)
+      resource.refresh()
+    }).catch((error: unknown) => {
+      setMutationFeedback(`Chat creation failed: ${errorMessage(error)}`)
+    }).finally(() => {
+      creationInFlight.current = false
+      setMutationBusy(false)
+    })
+  }
+
+  React.useEffect(() => {
+    if (creationMode !== 'automatic' || resource.state.kind !== 'ready' || mutationBusy || creationInFlight.current) return
+    const bundle = resource.state.data
+    if (!chatCreationWorker(bundle.workers)) return
+    const role = routedCreationRole(bundle.workUnit, bundle.execution.role_bindings)
+    if (!role) return
+    const roleBinding = bundle.execution.role_bindings.find((item) => item.role === role)
+    if (!roleBinding) return
+    const attemptKey = `${props.projectID}:${props.issueNumber}:${role}:${roleBinding.lane_key}:${roleBinding.binding?.binding_version ?? 0}:${bundle.workUnit.route.reason_code}`
+    if (automaticAttempts.current.has(attemptKey)) return
+    automaticAttempts.current.add(attemptKey)
+    provisionChat(bundle, role, true)
+  }, [creationMode, resource.state, mutationBusy, props.projectID, props.issueNumber])
+
   return resourceContent(resource, (bundle) => WorkUnitContent({
     workUnit: bundle.workUnit,
     execution: bundle.execution,
@@ -102,6 +165,14 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
     onRefresh: resource.refresh,
     mutationBusy,
     mutationFeedback: mutationFeedback || undefined,
+    chatCreationMode: creationMode,
+    chatCreationAvailable: Boolean(chatCreationWorker(bundle.workers)),
+    onCreateRole: (role) => provisionChat(bundle, role, false),
+    onChatCreationMode: (mode) => {
+      setChatCreationMode(props.projectID, mode)
+      setCreationModeState(mode)
+      setMutationFeedback(mode === 'automatic' ? 'Automatic Implementor and QA chat creation enabled for this Project.' : 'Worker chat creation set to manual for this Project.')
+    },
     onBindRole: (role, worker) => {
       if (!worker.target) return
       const current = bundle.execution.role_bindings.find((item) => item.role === role)?.binding
