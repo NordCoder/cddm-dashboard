@@ -20,8 +20,8 @@ export class BackendClient {
     this.timerApi = timerApi;
   }
 
-  async request(path, body, retryTransport = true) {
-    const baseInit = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+  async request(path, body, retryTransport = true, method = "POST") {
+    const baseInit = { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
     let lastError;
     for (let attempt = 0; attempt < (retryTransport ? 2 : 1); attempt += 1) {
       const controller = new AbortController();
@@ -48,6 +48,9 @@ export class BackendClient {
   heartbeat(workerId, payload) { return this.request(`/api/browser/workers/${encodeURIComponent(workerId)}/heartbeat`, payload); }
   claimNext(payload) { return this.request("/api/browser/deliveries/claim-next", payload, true); }
   complete(commandId, payload) { return this.request(`/api/browser/deliveries/${encodeURIComponent(commandId)}/complete`, payload, true); }
+  bindCurrent(projectId, issueNumber, payload) {
+    return this.request(`/api/projects/${encodeURIComponent(projectId)}/work-units/${encodeURIComponent(issueNumber)}/browser-binding`, payload, true, "PUT");
+  }
 }
 
 export function completionPayload(commandId, claimId, outcome, reason) {
