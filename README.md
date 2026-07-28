@@ -92,9 +92,11 @@ The extension tracks only a supported ChatGPT conversation that the user explici
 Two opt-in delivery modes are available:
 
 - **Review delivery** freezes the current approved backend identities and requires **Confirm and send**.
-- **Auto-send** automatically confirms each new exact approved plan when the current browser binding is ready. It is disabled by default and stored as a local browser preference.
+- **Auto-send** automatically confirms each new exact approved plan when the current browser binding is ready. It is disabled by default and stored separately for each Project/Work Unit.
 
-Auto-send removes the human review screen, not the authority checks. It still uses the backend-approved immutable prompt, exact plan/head/lane/binding/presence CAS identities and one stable idempotency key. A command already created manually for the same exact plan and binding suppresses automatic duplicate creation. Ambiguous transport retries reuse the same intent.
+Auto-send is available only on the current Work Unit and current `/plans` view. It is disabled on historical `/plans/:planID` views so the displayed plan cannot differ from the plan being sent. Manual confirmation and Auto-send are mutually exclusive at both controller and presentation layers.
+
+Auto-send removes the human review screen, not the authority checks. It still uses the backend-approved immutable prompt, exact plan/head/lane/binding/presence CAS identities and one stable idempotency key. A command already created manually for the same exact plan and binding suppresses automatic duplicate creation. Ambiguous transport retries reuse the same intent. The persisted local identity contains only a fingerprint of the current presence proof, never the raw proof.
 
 The delivery safety model includes:
 
