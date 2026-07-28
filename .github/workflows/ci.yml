@@ -83,9 +83,48 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Test
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log
+      - name: Upload frontend test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-log
+          path: web/test.log
+          if-no-files-found: error
       - name: Build
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+      - name: Upload frontend build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-log
+          path: web/build.log
+          if-no-files-found: error
+
+  extension:
+    name: Chrome extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Verify checkout identity
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test extension
+        working-directory: extension
+        run: npm test
+      - name: Validate extension JavaScript modules
+        run: |
+          find extension/src -type f -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
   compose:
     name: Docker Compose config
@@ -140,4 +179,7 @@ jobs:
             grep -q 'Implement approved Change #{{ISSUE}} to locally candidate-ready state' "$prompt"
           done
       - name: Validate configuration
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          rendered="$(docker compose config)"
+          test "$(grep -c 'host_ip: 127.0.0.1' <<<"$rendered")" -eq 2

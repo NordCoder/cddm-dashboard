@@ -6,6 +6,7 @@ services:
       APP_ADDR: ":8080"
       APP_DATABASE_PATH: /data/cddm.db
       APP_SHUTDOWN_TIMEOUT: ${APP_SHUTDOWN_TIMEOUT:-10s}
+      GITHUB_AUTH_MODE: ${GITHUB_AUTH_MODE:-auto}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com/}
       GITHUB_REQUEST_TIMEOUT: ${GITHUB_REQUEST_TIMEOUT:-15s}
@@ -27,10 +28,14 @@ services:
       PROMPT_FALLBACK_ENABLED: ${PROMPT_FALLBACK_ENABLED:-true}
       PROMPT_EVIDENCE_LIMIT: ${PROMPT_EVIDENCE_LIMIT:-12}
       PROMPT_EVIDENCE_CHARS: ${PROMPT_EVIDENCE_CHARS:-4000}
+      BROWSER_BINDING_TTL: ${BROWSER_BINDING_TTL:-30s}
+      BROWSER_DELIVERY_ENABLED: ${BROWSER_DELIVERY_ENABLED:-false}
+      BROWSER_DELIVERY_PENDING_TTL: ${BROWSER_DELIVERY_PENDING_TTL:-5m}
+      BROWSER_DELIVERY_CLAIM_TTL: ${BROWSER_DELIVERY_CLAIM_TTL:-1m}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${BIND_HOST:-127.0.0.1}:${API_PORT:-1337}:8080"
     volumes:
       - cddm_data:/data
     healthcheck:
@@ -47,7 +52,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${WEB_PORT:-3000}:80"
+      - "${BIND_HOST:-127.0.0.1}:${WEB_PORT:-1338}:80"
 
 volumes:
   cddm_data:

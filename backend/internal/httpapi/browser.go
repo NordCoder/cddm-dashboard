@@ -47,7 +47,7 @@ func (h *browserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *browserHandler) workers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		workers, err := h.bindings.ListWorkers(r.Context())
+		workers, err := h.bindings.ListWorkerProjections(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -163,6 +163,17 @@ func findWorkUnit(state workflow.ProjectState, issue int) (workflow.WorkUnitStat
 }
 func (h *browserHandler) writeBrowserResult(w http.ResponseWriter, status int, value any, err error) {
 	if err == nil {
+		// Binding.LastSeen may originate from process-local mutable presence state.
+		// Live timestamps are exposed through the worker projection, which snapshots
+		// them under the service mutex; never serialize the mutable pointer here.
+		if binding, ok := value.(browserbinding.Binding); ok {
+			binding.LastSeen = nil
+			value = binding
+		}
+		if worker, ok := value.(browserbinding.Worker); ok {
+			worker.LastSeen = nil
+			value = worker
+		}
 		writeJSON(w, status, value)
 		return
 	}

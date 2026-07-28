@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	defaultAddress                  = ":8080"
+	defaultAddress                  = "127.0.0.1:1337"
 	defaultDatabasePath             = "data/cddm.db"
 	defaultShutdownTimeout          = 10 * time.Second
+	defaultGitHubAuthMode           = "auto"
 	defaultGitHubAPIBaseURL         = "https://api.github.com/"
 	defaultGitHubRequestTimeout     = 15 * time.Second
 	defaultGitHubSyncTimeout        = 2 * time.Minute
@@ -36,6 +37,7 @@ type Config struct {
 	Address                   string
 	DatabasePath              string
 	ShutdownTimeout           time.Duration
+	GitHubAuthMode            string
 	GitHubToken               string
 	GitHubAPIBaseURL          string
 	GitHubRequestTimeout      time.Duration
@@ -141,6 +143,7 @@ func Load() (Config, error) {
 		Address:                   stringFromEnv("APP_ADDR", defaultAddress),
 		DatabasePath:              stringFromEnv("APP_DATABASE_PATH", defaultDatabasePath),
 		ShutdownTimeout:           shutdownTimeout,
+		GitHubAuthMode:            strings.ToLower(stringFromEnv("GITHUB_AUTH_MODE", defaultGitHubAuthMode)),
 		GitHubToken:               strings.TrimSpace(os.Getenv("GITHUB_TOKEN")),
 		GitHubAPIBaseURL:          stringFromEnv("GITHUB_API_BASE_URL", defaultGitHubAPIBaseURL),
 		GitHubRequestTimeout:      requestTimeout,
@@ -166,6 +169,9 @@ func Load() (Config, error) {
 		BrowserDeliveryEnabled:    deliveryEnabled,
 		BrowserDeliveryPendingTTL: deliveryPendingTTL,
 		BrowserDeliveryClaimTTL:   deliveryClaimTTL,
+	}
+	if config.GitHubAuthMode != "auto" && config.GitHubAuthMode != "token" && config.GitHubAuthMode != "gh_cli" && config.GitHubAuthMode != "anonymous" {
+		return Config{}, fmt.Errorf("GITHUB_AUTH_MODE must be auto, token, gh_cli, or anonymous")
 	}
 	if config.OpenCodeEnabled && (config.OpenCodeProvider == "" || config.OpenCodeModel == "") {
 		return Config{}, fmt.Errorf("OPENCODE_PROVIDER and OPENCODE_MODEL are required when OPENCODE_ENABLED=true")

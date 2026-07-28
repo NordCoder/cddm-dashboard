@@ -1,0 +1,361 @@
+/* Mobile workspace overrides. Loaded after the shared desktop design system. */
+
+@media (max-width: 800px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  body {
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+  }
+
+  body.delivery-inspector-open {
+    overflow: hidden;
+  }
+
+  .app-shell,
+  .workspace-frame {
+    min-height: 100dvh;
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 1200;
+    inset: auto 0 0;
+    display: block;
+    min-height: auto;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    border: 0;
+    border-top: 1px solid var(--nav-line);
+    background: rgba(16, 23, 34, 0.98);
+    box-shadow: 0 -8px 24px rgba(10, 18, 30, 0.18);
+    backdrop-filter: blur(14px);
+  }
+
+  .primary-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .nav-link {
+    display: grid;
+    min-width: 0;
+    min-height: 48px;
+    place-items: center;
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  .nav-link > span {
+    display: block;
+    min-width: 0;
+  }
+
+  .nav-link strong {
+    display: block;
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-link small,
+  .brand,
+  .sidebar__context,
+  .sidebar__boundary {
+    display: none;
+  }
+
+  .workspace-topbar {
+    min-height: calc(50px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 12px 0;
+    background: rgba(255, 255, 255, 0.98);
+  }
+
+  .workspace-topbar > div:first-child {
+    min-width: 0;
+  }
+
+  .workspace-topbar strong {
+    max-width: min(72vw, 540px);
+  }
+
+  .main-content {
+    width: 100%;
+    padding: 16px 12px calc(92px + env(safe-area-inset-bottom));
+  }
+
+  .main-content > * + * {
+    margin-top: 14px;
+  }
+
+  .page-header {
+    gap: 12px;
+    padding-bottom: 14px;
+  }
+
+  .page-header h1 {
+    margin-top: 3px;
+    font-size: clamp(24px, 8vw, 32px);
+    line-height: 1.08;
+  }
+
+  .page-summary {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .page-actions,
+  .prompt-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
+
+  .page-actions > *,
+  .prompt-actions > * {
+    width: 100%;
+  }
+
+  .button,
+  button,
+  .delivery-action {
+    min-height: 44px;
+  }
+
+  input,
+  select,
+  textarea,
+  .delivery-select {
+    font-size: 16px;
+  }
+
+  .panel-section,
+  .detail-card,
+  .plan-review,
+  .planning-layout__history,
+  .danger-zone,
+  .prompt-editor,
+  .overview-card,
+  .project-card,
+  .work-unit-card,
+  .attention-group,
+  .result-card {
+    padding: 12px;
+  }
+
+  .overview-card {
+    min-height: auto;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-row > div {
+    min-width: 0;
+  }
+
+  .details-list {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .details-list div {
+    display: grid;
+    gap: 3px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .details-list div:last-child {
+    border-bottom: 0;
+  }
+
+  .details-list dd {
+    font-size: 11px;
+  }
+
+  .history-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .card-topline,
+  .history-row__top,
+  .delivery-command__header,
+  .evidence-entry header {
+    align-items: flex-start;
+  }
+
+  .work-unit-card__route,
+  .plan-review__copy-meta {
+    width: 100%;
+  }
+
+  .segmented {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .segmented button {
+    width: 100%;
+  }
+
+  .plan-launcher > .button,
+  .plan-launcher > button {
+    width: 100%;
+  }
+
+  .prompt-editor textarea {
+    min-height: 42dvh;
+    max-height: 64dvh;
+  }
+
+  .plain-list {
+    padding-left: 18px;
+  }
+
+  .delivery-inspector {
+    width: 100vw;
+    height: 100dvh;
+    border-left: 0;
+    box-shadow: none;
+    overscroll-behavior: contain;
+  }
+
+  .delivery-inspector__header {
+    min-height: calc(58px + env(safe-area-inset-top));
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  }
+
+  .delivery-inspector__body {
+    padding: 10px 10px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .delivery-inspector-launcher {
+    right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    min-height: 46px;
+  }
+
+  .delivery-section {
+    padding: 11px;
+  }
+
+  .delivery-action--quiet {
+    min-height: 40px;
+  }
+
+  .delivery-select {
+    min-height: 44px;
+  }
+
+  .delivery-prompt {
+    max-height: 34dvh;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .workspace-topbar__authority,
+  .workspace-topbar__label {
+    display: none;
+  }
+
+  .workspace-topbar strong {
+    max-width: calc(100vw - 24px);
+  }
+
+  .main-content {
+    padding-inline: 10px;
+  }
+
+  .page-actions,
+  .prompt-actions,
+  .metric-row {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header h1 {
+    font-size: clamp(23px, 9vw, 29px);
+  }
+
+  .section-heading {
+    display: grid;
+  }
+
+  .count-pill {
+    justify-self: start;
+  }
+
+  .badge-row {
+    align-items: flex-start;
+  }
+
+  .status-badge {
+    white-space: normal;
+  }
+
+  .delivery-inspector__header {
+    align-items: flex-start;
+  }
+
+  .delivery-inspector__header-actions {
+    flex: 0 0 auto;
+  }
+
+  .delivery-field,
+  .delivery-fields--compact .delivery-field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .delivery-field__value {
+    text-align: left;
+  }
+
+  .delivery-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .delivery-actions > * {
+    width: 100%;
+  }
+
+  .delivery-section__header {
+    grid-template-columns: 26px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 800px) and (orientation: landscape) and (max-height: 520px) {
+  .sidebar {
+    padding-top: 5px;
+    padding-bottom: calc(5px + env(safe-area-inset-bottom));
+  }
+
+  .nav-link {
+    min-height: 40px;
+  }
+
+  .main-content {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .delivery-inspector-launcher {
+    bottom: calc(62px + env(safe-area-inset-bottom));
+  }
+}

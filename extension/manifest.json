@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "CDDM Browser Delivery",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0l56sFLjV2Xek4id4hthNro1Ua4lZQuFaxL8lTTGcfx9Cs7Mf+gOyn1Md+zyDMq1BwfFylYccTnTRZuXH++es1IUxocC9Ius+0t4MUgVE3hAoe/sq/w8BzMK7/t1hFjafYEsFiMlu4NXlKjQgIWSJLWfMwam4O64QN1h6j2wx9PrIgUUW6yn3n8P6qfjuUzuEUB4Z3esoKZtTAUQw6fIzOe9knY5AGcGeMRikKVxXloYAUcojwlsOuvGqNrK2bZyY1mGTVVVbLM0Mmcyr/OdsTUrUbVm4NZiuOfV5rkeNzxkX0EvQ00kHrS/keaJtnL5yHbBqNbMHkOJht00E0pF0QIDAQAB",
+  "description": "Executes explicitly claimed CDDM prompts in the current ChatGPT conversation.",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["https://chatgpt.com/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "src/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_title": "CDDM Browser Delivery" },
+  "options_page": "options.html"
+}
