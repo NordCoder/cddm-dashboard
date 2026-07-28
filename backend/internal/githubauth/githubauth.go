@@ -11,9 +11,9 @@ import (
 type Source string
 
 const (
-	SourceAnonymous Source = "anonymous"
+	SourceAnonymous   Source = "anonymous"
 	SourceEnvironment Source = "environment"
-	SourceGitHubCLI Source = "gh_cli"
+	SourceGitHubCLI   Source = "gh_cli"
 )
 
 var ErrCLIUnavailable = errors.New("GitHub CLI is unavailable")
