@@ -167,7 +167,7 @@ func markerStaleForCommand(command Command, payload MarkerPayload) bool {
 	if payload.Role == "qa" {
 		return payload.ReviewedHead != command.ExpectedHead
 	}
-	if payload.Role == "lead" && payload.Result == "ready_to_merge" {
+	if payload.Role == "lead" && (payload.Result == "ready_to_merge" || payload.Result == "merged") {
 		return payload.ApprovedHead != command.ExpectedHead
 	}
 	return false
@@ -185,7 +185,7 @@ func statusForResult(result Result) (string, error) {
 		}
 		return CommandCompleted, nil
 	case "qa":
-		if payload.Result == "blocked_inconclusive" {
+		if payload.Result == "blocked_inconclusive" || payload.Result == "blocked" || payload.Result == "inconclusive" {
 			return CommandInconclusive, nil
 		}
 		return CommandCompleted, nil
