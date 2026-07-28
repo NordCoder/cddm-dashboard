@@ -7,11 +7,12 @@ import {
   createWorkerChat,
   routedCreationRole,
 } from '../dist/assets/chat-bootstrap.js'
+import { projectChatCandidates } from '../dist/assets/project-chat-automation.js'
 
-function workUnit(role = 'implementor', action = 'dispatch') {
+function workUnit(role = 'implementor', action = 'dispatch', issueNumber = 140) {
   return {
     identity: {
-      owner: 'NordCoder', repository: 'misak-website', issue_number: 140,
+      project_id: 1, owner: 'NordCoder', repository: 'misak-website', issue_number: issueNumber,
     },
     route: { action, target_role: role, reason_code: 'test_route' },
   }
@@ -36,6 +37,18 @@ test('automatic routing creates only missing Implementor or fresh QA lanes', () 
   assert.equal(routedCreationRole(workUnit('qa', 'hold'), bindings), undefined)
   bindings[2].binding = { enabled: true, readiness: 'ready' }
   assert.equal(routedCreationRole(workUnit('qa'), bindings), undefined)
+})
+
+test('Project supervisor considers every routed Implementor and QA Work Unit in stable order', () => {
+  const candidates = projectChatCandidates({
+    work_units: [
+      workUnit('qa', 'dispatch', 151),
+      workUnit('lead', 'dispatch', 149),
+      workUnit('implementor', 'dispatch', 150),
+      workUnit('qa', 'hold', 148),
+    ],
+  })
+  assert.deepEqual(candidates.map((item) => [item.identity.issue_number, item.route.target_role]), [[150, 'implementor'], [151, 'qa']])
 })
 
 test('chat creation capability is discovered independently from an active target', () => {
