@@ -135,11 +135,11 @@ func testGeneration(projectID int64, role, expectedHead string) planning.Generat
 	return planning.GenerationResult{
 		Status: planning.StatusApproved,
 		Context: planning.PromptContext{
-			Version: planning.PromptContextVersion,
-			Repository: planning.RepositoryIdentity{ProjectID: projectID, Owner: "NordCoder", Repository: "misak-website", WorkflowMode: "pull_request"},
-			Issue: planning.IssueIdentity{GitHubID: 1400, Number: 140, Title: "Pilot", Lifecycle: "implementation"},
-			CurrentHead: expectedHead,
-			Route: workflow.Route{Action: "dispatch", TargetRole: role, LaneKey: "nordcoder/misak-website#140:" + role, ExpectedHead: expectedHead},
+			Version:       planning.PromptContextVersion,
+			Repository:    planning.RepositoryIdentity{ProjectID: projectID, Owner: "NordCoder", Repository: "misak-website", WorkflowMode: "pull_request"},
+			Issue:         planning.IssueIdentity{GitHubID: 1400, Number: 140, Title: "Pilot", Lifecycle: "implementation"},
+			CurrentHead:   expectedHead,
+			Route:         workflow.Route{Action: "dispatch", TargetRole: role, LaneKey: "nordcoder/misak-website#140:" + role, ExpectedHead: expectedHead},
 			ExpectedEvent: "worker_result",
 			Warnings:      []workflow.Warning{},
 			Evidence:      []planning.Evidence{},
