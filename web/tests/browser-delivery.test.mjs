@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildConfirmationInput, deliveryEligibility, deliveryRouteIdentity } from '../dist/assets/browser-delivery.js'
+import { initialInspectorOpen } from '../dist/assets/browser-delivery-view.js'
 import { contextHash, generation, head, workUnit } from './fixtures.mjs'
 
 function readyPlan() {
@@ -36,6 +37,13 @@ test('delivery inspector route identity covers work-unit and plan deep links onl
   assert.equal(deliveryRouteIdentity('/projects/4'), null)
   assert.equal(deliveryRouteIdentity('/projects/4/work-units/0'), null)
   assert.equal(deliveryRouteIdentity('/projects/4/work-units/81/unknown'), null)
+})
+
+test('delivery inspector defaults open on desktop and closed on compact viewports', () => {
+  assert.equal(initialInspectorOpen(null, false), true)
+  assert.equal(initialInspectorOpen(null, true), false)
+  assert.equal(initialInspectorOpen('true', true), true)
+  assert.equal(initialInspectorOpen('false', false), false)
 })
 
 test('delivery eligibility requires current dispatch plan and ready binding', () => {
