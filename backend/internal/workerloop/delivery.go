@@ -129,6 +129,24 @@ func (c *DeliveryCoordinator) Reconcile(ctx context.Context) error {
 	return rows.Err()
 }
 
+func (c *DeliveryCoordinator) ReconcilePeriodically(ctx context.Context, interval time.Duration, report func(error)) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.Reconcile(ctx); err != nil && report != nil {
+				report(err)
+			}
+		}
+	}
+}
+
 func (c *DeliveryCoordinator) syncCommand(ctx context.Context, command delivery.Command) error {
 	var workflowID string
 	err := c.db.QueryRowContext(ctx, `SELECT workflow_command_id FROM workflow_delivery_links WHERE delivery_command_id=?`, command.ID).Scan(&workflowID)
