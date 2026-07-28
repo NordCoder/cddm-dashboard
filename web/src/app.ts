@@ -2,12 +2,12 @@ import { useRoute, routeLabel } from './app-routing.js'
 import { PlanningPage, WorkUnitPage } from './pages-work-unit.js'
 import { ProjectPage, WorkspacePage } from './pages-workspace.js'
 import { SettingsPage } from './pages-settings.js'
-import { paths } from './router.js'
-import { AppShell, InternalLink } from './ui.js'
+import { paths, RouteState } from './router.js'
+import { AppShell, InternalLink, Navigate } from './ui.js'
 
 const h = React.createElement
 
-function routePage(route: ReturnType<typeof useRoute>[0], navigate: ReturnType<typeof useRoute>[1]): unknown {
+function routePage(route: RouteState, navigate: Navigate): unknown {
   switch (route.kind) {
     case 'workspace':
       return h(WorkspacePage, { navigate })
