@@ -49,7 +49,7 @@ func TestUnsupportedProfileRejected(t *testing.T) {
 
 func TestMissingResourceRejected(t *testing.T) {
 	files := fstest.MapFS{
-		"root/manifest.yaml": {Data: []byte(testManifest)},
+		"root/manifest.yaml":   {Data: []byte(testManifest)},
 		"root/lead-trigger.md": {Data: []byte("lead")},
 	}
 	if _, err := loadFS(files, "root", DefaultProfile); err == nil {
@@ -65,13 +65,21 @@ func TestMalformedSchemaRejected(t *testing.T) {
 	}
 }
 
+func TestUnknownIdentityFieldRejected(t *testing.T) {
+	files := completeTestFS()
+	files["root/manifest.yaml"] = &fstest.MapFile{Data: []byte(testManifest + "  extra: forbidden\n")}
+	if _, err := loadFS(files, "root", DefaultProfile); err == nil {
+		t.Fatal("unknown nested identity field was accepted")
+	}
+}
+
 func completeTestFS() fstest.MapFS {
 	return fstest.MapFS{
-		"root/manifest.yaml": {Data: []byte(testManifest)},
-		"root/lead-trigger.md": {Data: []byte("lead")},
-		"root/implementor-trigger.md": {Data: []byte("implementor")},
-		"root/qa-trigger.md": {Data: []byte("qa")},
-		"root/worker-result-marker.md": {Data: []byte("marker")},
+		"root/manifest.yaml":             {Data: []byte(testManifest)},
+		"root/lead-trigger.md":           {Data: []byte("lead")},
+		"root/implementor-trigger.md":    {Data: []byte("implementor")},
+		"root/qa-trigger.md":             {Data: []byte("qa")},
+		"root/worker-result-marker.md":   {Data: []byte("marker")},
 		"root/worker-result.schema.json": {Data: []byte(`{"$id":"cddm-worker-result/v1","type":"object"}`)},
 	}
 }
