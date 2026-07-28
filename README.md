@@ -103,14 +103,14 @@ Each Work Unit has three logical lanes:
 
 Lead and Implementor conversations may remain bound while they are healthy. QA uses `manual_fresh_binding`: every routed QA cycle requires a fresh conversation. After an accepted terminal QA result, Dashboard retires exactly the binding/version used for that command and leaves any newer replacement untouched.
 
-The Work Unit UI supports:
+The Project and Work Unit UI support:
 
 - **Manual** chat creation and binding;
 - **Auto-create Implementor + QA**, stored per Project in the current browser.
 
-Automatic mode reacts only to a current backend route with `action=dispatch`. It creates a missing Implementor lane for the Issue or a fresh missing QA lane, then binds the exact created target. Lead chat creation remains explicit. Bootstrap messages contain the role Library references and no `command_id`; the first real assignment still arrives through the normal durable Workflow Command and Browser Delivery path.
+Automatic mode reacts only to current backend routes with `action=dispatch`. While any Dashboard screen remains open, the supervisor scans every enabled Project, creates at most one missing Implementor or fresh QA chat per poll cycle, and binds the exact created target. Lead chat creation remains explicit. Bootstrap messages contain the role Library references and no `command_id`; the first real assignment still arrives through the normal durable Workflow Command and Browser Delivery path.
 
-Automatic creation is not required for pilot readiness. Existing manual bindings remain supported.
+Automatic creation is not required for pilot readiness. Existing manual bindings remain supported. Fully closing the Dashboard browser stops the browser-local supervisor; no background GitHub authority is introduced.
 
 ## Delivery and authority
 
