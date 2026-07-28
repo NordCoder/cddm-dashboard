@@ -35,10 +35,15 @@ func DeriveWorkspace(snapshot supervisor.WorkspaceSnapshot) WorkspaceState {
 }
 
 func DeriveProject(snapshot supervisor.ProjectSnapshot) ProjectState {
-	return DeriveProjectWithExternal(snapshot, projectExternal(snapshot.Project.ID))
+	results, commands := projectExternal(snapshot.Project.ID)
+	return deriveProjectWithExternalState(snapshot, results, commands)
 }
 
 func DeriveProjectWithExternal(snapshot supervisor.ProjectSnapshot, external map[int64]ExternalResult) ProjectState {
+	return deriveProjectWithExternalState(snapshot, external, nil)
+}
+
+func deriveProjectWithExternalState(snapshot supervisor.ProjectSnapshot, external map[int64]ExternalResult, commands map[int]ExternalCommand) ProjectState {
 	identity := ProjectIdentity{
 		ID:           snapshot.Project.ID,
 		Owner:        snapshot.Project.Owner,
@@ -59,7 +64,12 @@ func DeriveProjectWithExternal(snapshot supervisor.ProjectSnapshot, external map
 		Attention: make([]AttentionItem, 0),
 	}
 	for _, issue := range issues {
-		workUnit := deriveWorkUnit(identity, snapshot.Project.WorkflowMode, issue, external)
+		var command *ExternalCommand
+		if value, ok := commands[issue.Number]; ok {
+			copy := value
+			command = &copy
+		}
+		workUnit := deriveWorkUnit(identity, snapshot.Project.WorkflowMode, issue, external, command)
 		state.WorkUnits = append(state.WorkUnits, workUnit)
 		if workUnit.Attention.Kind != AttentionNormal && workUnit.Attention.Kind != AttentionTerminal {
 			state.Attention = append(state.Attention, AttentionItem{
@@ -81,7 +91,7 @@ func FindWorkUnit(project ProjectState, issueNumber int) (WorkUnitState, bool) {
 	return WorkUnitState{}, false
 }
 
-func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervisor.Issue, external map[int64]ExternalResult) WorkUnitState {
+func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervisor.Issue, external map[int64]ExternalResult, command *ExternalCommand) WorkUnitState {
 	state := WorkUnitState{
 		Identity: WorkUnitIdentity{
 			ProjectID: project.ID, Owner: project.Owner, Repository: project.Repository,
@@ -156,8 +166,35 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 
 	state.Warnings = stableWarnings(state.Warnings)
 	state.Route = deriveRoute(project, workflowMode, issue.State, state, results)
+	state.Route = routeWithExternalCommand(project, state, state.Route, command)
 	state.Attention = deriveAttention(issue.State, state)
 	return state
+}
+
+func routeWithExternalCommand(project ProjectIdentity, state WorkUnitState, route Route, command *ExternalCommand) Route {
+	if command == nil {
+		return route
+	}
+	switch command.Status {
+	case "created", "delivery_pending":
+		return Route{
+			Action: "none", ReasonCode: "workflow_delivery_pending",
+			Reason: "a Dashboard workflow command already exists and is awaiting confirmed browser delivery",
+			ExpectedHead: command.ExpectedHead, Guards: append(guardsForHead(command.ExpectedHead), "active_workflow_command", "no_duplicate_dispatch"), Warnings: state.Warnings,
+		}
+	case "awaiting_result":
+		return Route{
+			Action: "none", ReasonCode: "awaiting_worker_result",
+			Reason: "the prompt was delivered; execution remains open until a correlated GitHub worker-result marker is accepted",
+			ExpectedHead: command.ExpectedHead, Guards: append(guardsForHead(command.ExpectedHead), "active_workflow_command", "github_result_required", "no_duplicate_dispatch"), Warnings: state.Warnings,
+		}
+	case "ambiguous":
+		return manualLeadRoute(project, state, "workflow_command_ambiguous", "workflow execution has conflicting or uncertain terminal evidence")
+	case "failed":
+		return manualLeadRoute(project, state, "workflow_command_failed", "workflow command delivery or execution failed and requires explicit Lead review")
+	default:
+		return route
+	}
 }
 
 func applyExternalResult(parsed *ParsedComment, external ExternalResult) {
