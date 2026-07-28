@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -73,13 +75,14 @@ func ParseMarker(body string) ParsedMarker {
 
 func requireJSONEOF(decoder *json.Decoder) error {
 	var extra any
-	if err := decoder.Decode(&extra); err == nil {
-		return fmt.Errorf("additional JSON value")
+	err := decoder.Decode(&extra)
+	if errors.Is(err, io.EOF) {
+		return nil
 	}
-	if decoder.More() {
-		return fmt.Errorf("additional JSON token")
+	if err != nil {
+		return err
 	}
-	return nil
+	return fmt.Errorf("additional JSON value")
 }
 
 func validatePayload(payload MarkerPayload) (string, string) {
