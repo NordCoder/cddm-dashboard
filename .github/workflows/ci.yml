@@ -83,9 +83,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Test
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log
+      - name: Upload frontend test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-log
+          path: web/test.log
+          if-no-files-found: error
       - name: Build
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+      - name: Upload frontend build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-log
+          path: web/build.log
+          if-no-files-found: error
 
   extension:
     name: Chrome extension
