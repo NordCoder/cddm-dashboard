@@ -99,10 +99,10 @@ A completed bootstrap request is idempotent. An ambiguous or failed consumed req
 
 ## Automatic Implementor and QA creation
 
-The Work Unit UI provides a browser-local, Project-scoped preference:
+The Project and Work Unit UI provide a browser-local, Project-scoped preference:
 
 - **Manual** — chat creation and binding remain explicit;
-- **Auto-create Implementor + QA** — while the Work Unit page is open, Dashboard provisions the current routed lane when it is missing or not ready.
+- **Auto-create Implementor + QA** — while any Dashboard screen remains open, a global browser-local supervisor scans every enabled Project and provisions one current routed lane per poll cycle when its binding is missing or not ready.
 
 Automatic mode never creates Lead authority or rotates the Lead chat. It reacts only to backend-derived `dispatch` routes:
 
@@ -122,6 +122,8 @@ QA:          @03-qa-trigger.md + @gpt-gh-connector-guidelines.md
 The bootstrap explicitly tells the worker to wait. It contains no `command_id`, does not modify GitHub and cannot complete a workflow action. The next real command uses the normal Planner → Workflow Command → confirmed Browser Delivery path.
 
 QA retains `manual_fresh_binding` semantics at the backend level: every accepted terminal QA result retires exactly the binding/version captured by its delivery command. Automatic creation is transport assistance, not a relaxation of QA independence.
+
+The supervisor stops when the Dashboard browser is fully closed. It does not introduce a server-side background dispatcher or new GitHub authority.
 
 ## Reviewed delivery
 
