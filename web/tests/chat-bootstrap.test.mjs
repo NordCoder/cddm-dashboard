@@ -5,9 +5,9 @@ import {
   bootstrapRequestID,
   chatCreationWorker,
   createWorkerChat,
+  projectChatCandidates,
   routedCreationRole,
 } from '../dist/assets/chat-bootstrap.js'
-import { projectChatCandidates } from '../dist/assets/project-chat-automation.js'
 
 function workUnit(role = 'implementor', action = 'dispatch', issueNumber = 140) {
   return {
