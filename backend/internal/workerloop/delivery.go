@@ -132,6 +132,12 @@ func (c *DeliveryCoordinator) Complete(ctx context.Context, completion delivery.
 	return command, nil
 }
 
+type linkedDeliveryStatus struct {
+	workflowID string
+	projectID  int64
+	status     string
+}
+
 func (c *DeliveryCoordinator) Reconcile(ctx context.Context) error {
 	if err := c.base.Reconcile(ctx); err != nil {
 		return err
@@ -140,19 +146,14 @@ func (c *DeliveryCoordinator) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	projects := make(map[int64]struct{})
+	linked := make([]linkedDeliveryStatus, 0)
 	for rows.Next() {
-		var workflowID, status string
-		var projectID int64
-		if err := rows.Scan(&workflowID, &projectID, &status); err != nil {
+		var value linkedDeliveryStatus
+		if err := rows.Scan(&value.workflowID, &value.projectID, &value.status); err != nil {
 			rows.Close()
 			return err
 		}
-		if err := c.commands.RecordDeliveryOutcome(ctx, workflowID, status); err != nil && !errors.Is(err, ErrConflict) {
-			rows.Close()
-			return err
-		}
-		projects[projectID] = struct{}{}
+		linked = append(linked, value)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -160,6 +161,14 @@ func (c *DeliveryCoordinator) Reconcile(ctx context.Context) error {
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+
+	projects := make(map[int64]struct{})
+	for _, value := range linked {
+		if err := c.commands.RecordDeliveryOutcome(ctx, value.workflowID, value.status); err != nil && !errors.Is(err, ErrConflict) {
+			return err
+		}
+		projects[value.projectID] = struct{}{}
 	}
 	for projectID := range projects {
 		if err := c.refreshProject(ctx, projectID); err != nil {
