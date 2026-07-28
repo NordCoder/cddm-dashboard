@@ -1,16 +1,17 @@
 # Confirmed browser delivery
 
-CDDM Dashboard can deliver one current backend-authorized Workflow Command to one explicitly bound ChatGPT conversation through the bundled Chrome Manifest V3 extension. The browser path never reads ChatGPT responses.
+CDDM Dashboard can provision exact ChatGPT worker conversations and deliver one current backend-authorized Workflow Command to one explicitly bound conversation through the bundled Chrome Manifest V3 extension. The browser path never reads ChatGPT responses.
 
 Browser delivery is transport only:
 
 ```text
+Chat bootstrap = role-session initialization
 Browser Delivery status = prompt transport evidence
 Workflow Command status = assignment execution state
 Worker Result = terminal GitHub comment evidence
 ```
 
-A `delivered` browser command becomes `awaiting_result`; it does not complete the Workflow Command.
+A bootstrap message contains no Workflow Command authority. A `delivered` browser command becomes `awaiting_result`; it does not complete the Workflow Command.
 
 ## Network boundary
 
@@ -18,7 +19,7 @@ The dashboard and browser-delivery APIs do not provide a public authentication l
 
 `BIND_HOST` changes socket publication only; it does not relax the backend Host guard. Use `localhost`, `127.0.0.1`, or `::1`. Do not expose the API or dashboard directly to an untrusted LAN or the public internet.
 
-State-changing browser requests must be same-origin and JSON bodies must use `application/json`. `chrome-extension://` access is accepted only from bundled extension ID `biakfbpkfdpniphmoafgldedkbnjfibp` and only on `/api/browser/`.
+State-changing browser requests must be same-origin and JSON bodies must use `application/json`. `chrome-extension://` access is accepted only from bundled extension ID `biakfbpkfdpniphmoafgldedkbnjfibp` and only on `/api/browser/`. Dashboard-to-extension chat provisioning is accepted only from the enumerated local Dashboard origins in the extension manifest.
 
 ## Enable the backend
 
@@ -48,10 +49,13 @@ bash scripts/cddm-up.sh -d
 4. Confirm ID `biakfbpkfdpniphmoafgldedkbnjfibp`.
 5. Open extension **Options**.
 6. Set the backend origin to `http://localhost:1338` or `http://localhost:1337` and grant only that origin.
+7. Reload the extension after upgrades so its current bounded permissions are applied.
 
 The manifest public key fixes the unpacked extension identity; it is not a credential. Changing the configured backend revokes the previous origin permission. Each durable claim is bound to the normalized backend origin that issued it.
 
-## Bind role conversations
+The extension uses the `tabs` permission only to create and revalidate exact ChatGPT tabs. It does not request history, cookies, webRequest, clipboard-read or broad page origins.
+
+## Role conversations
 
 A Work Unit exposes independent logical bindings:
 
@@ -61,14 +65,63 @@ A Work Unit exposes independent logical bindings:
 <owner>/<repository>#<issue>:qa
 ```
 
+### Manual binding
+
 1. Open the intended `https://chatgpt.com/c/...` conversation and activate that tab once.
 2. Open the current Work Unit.
 3. Select the live target for the required role.
 4. Choose **Bind** or **Rebind**.
 
-The UI never accepts a free-text ChatGPT URL. The extension remembers the exact activated tab for the browser session and revalidates the same tab ID and URL. Closing, navigating, restarting, conflicting extension sessions, or presence timeout makes the binding unavailable until freshness is proved again.
+The UI never accepts a free-text ChatGPT URL. The extension remembers the exact activated tab for the primary manual browser worker and revalidates the same tab ID and URL.
 
-QA uses `manual_fresh_binding`. Keep QA unbound until the current route requires fresh QA, then open and bind a new QA conversation. After an accepted terminal QA result, the exact binding/version captured by the delivery command is retired. A newer replacement version is not retired.
+### Dashboard-created chat
+
+When the current route has `action=dispatch`, choose **Create new chat** for the routed role. The Dashboard sends one bounded external request to the extension containing:
+
+- Project, Issue, role and expected logical lane;
+- current binding version when replacing a lane;
+- one role bootstrap message;
+- an idempotent bootstrap request identity.
+
+The extension then:
+
+1. creates a new active `https://chatgpt.com/` tab;
+2. sends the role bootstrap only on an empty root composer;
+3. waits for the resulting exact `https://chatgpt.com/c/<conversation-id>` URL;
+4. creates a persistent browser `worker_id` dedicated to that exact tab;
+5. registers fresh backend presence for that worker/target;
+6. calls the existing current-route browser-binding endpoint;
+7. returns the verified binding evidence to the Dashboard.
+
+Every managed chat keeps its own worker identity, session identity and exact tab adapter. Activating another ChatGPT tab does not replace or invalidate it. Closing or navigating its exact tab makes only that managed binding unavailable.
+
+A completed bootstrap request is idempotent. An ambiguous or failed consumed request is not replayed automatically because a conversation may already have been created. The operator can inspect the opened tabs and manually bind a proven target instead of risking a duplicate.
+
+## Automatic Implementor and QA creation
+
+The Work Unit UI provides a browser-local, Project-scoped preference:
+
+- **Manual** — chat creation and binding remain explicit;
+- **Auto-create Implementor + QA** — while the Work Unit page is open, Dashboard provisions the current routed lane when it is missing or not ready.
+
+Automatic mode never creates Lead authority or rotates the Lead chat. It reacts only to backend-derived `dispatch` routes:
+
+- a new Issue routed to Implementor receives a new Implementor chat;
+- after an accepted Implementor result routes to QA, a fresh QA chat is created and bound;
+- after terminal QA, the command-bound QA binding is retired as before;
+- a later QA cycle receives another fresh chat because the retired binding version is no longer ready.
+
+The bootstrap resources are fixed in this Change:
+
+```text
+Lead:        @01-workflow.md + @cddm-minimal-issue-sizing-standard.md
+Implementor: @02-implementor-trigger.md + @gpt-gh-connector-guidelines.md
+QA:          @03-qa-trigger.md + @gpt-gh-connector-guidelines.md
+```
+
+The bootstrap explicitly tells the worker to wait. It contains no `command_id`, does not modify GitHub and cannot complete a workflow action. The next real command uses the normal Planner → Workflow Command → confirmed Browser Delivery path.
+
+QA retains `manual_fresh_binding` semantics at the backend level: every accepted terminal QA result retires exactly the binding/version captured by its delivery command. Automatic creation is transport assistance, not a relaxation of QA independence.
 
 ## Reviewed delivery
 
@@ -100,6 +153,7 @@ Historical `/plans/:planID` screens never perform current workflow actions. Manu
 
 - backend confirmation freezes plan, Head, lane, binding and presence identities;
 - one Workflow Command links to at most one Browser Delivery Command;
+- every managed chat is addressed by its persistent exact tab ID;
 - the extension durably reserves a claim before inserting or sending text;
 - exact target and backend checks run before insertion and again before send;
 - the prompt SHA-256 digest is verified before DOM access;
