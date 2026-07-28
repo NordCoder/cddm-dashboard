@@ -72,12 +72,12 @@ function opaqueRequestID(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-function requestStorageKey(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string): string {
-  return `${REQUEST_KEY_PREFIX}${projectID}:${issueNumber}:${role}:${laneKey}`
+function requestStorageKey(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): string {
+  return `${REQUEST_KEY_PREFIX}${projectID}:${issueNumber}:${role}:${laneKey}:v${bindingVersion}`
 }
 
-export function bootstrapRequestID(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string): string {
-  const key = requestStorageKey(projectID, issueNumber, role, laneKey)
+export function bootstrapRequestID(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): string {
+  const key = requestStorageKey(projectID, issueNumber, role, laneKey, bindingVersion)
   const current = storage()?.getItem(key)
   if (current) return current
   const created = `chat-${opaqueRequestID()}`
@@ -85,8 +85,8 @@ export function bootstrapRequestID(projectID: number, issueNumber: number, role:
   return created
 }
 
-export function resetBootstrapRequest(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string): void {
-  storage()?.removeItem(requestStorageKey(projectID, issueNumber, role, laneKey))
+export function resetBootstrapRequest(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): void {
+  storage()?.removeItem(requestStorageKey(projectID, issueNumber, role, laneKey, bindingVersion))
 }
 
 function parseResponse(value: unknown): ChatBootstrapResponse {
@@ -111,7 +111,8 @@ export function createWorkerChat(input: {
 }): Promise<ChatBootstrapResponse> {
   const runtime = input.chromeApi?.runtime ?? (globalThis as typeof globalThis & { chrome?: ChromeLike }).chrome?.runtime
   if (!runtime?.sendMessage) return Promise.resolve({ ok: false, reason: 'cddm_extension_unavailable' })
-  const requestID = bootstrapRequestID(input.projectID, input.issueNumber, input.role, input.roleBinding.lane_key)
+  const bindingVersion = input.roleBinding.binding?.binding_version ?? 0
+  const requestID = bootstrapRequestID(input.projectID, input.issueNumber, input.role, input.roleBinding.lane_key, bindingVersion)
   const payload: Record<string, unknown> = {
     type: 'create-worker-chat',
     request_id: requestID,
