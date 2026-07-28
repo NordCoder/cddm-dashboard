@@ -20,11 +20,7 @@ test("manifest keeps page access, identity, and fresh-chat permissions bounded",
   assert.ok(!manifest.permissions.includes("clipboardRead"));
   assert.equal(manifest.content_scripts[0].matches[0], "https://chatgpt.com/*");
   assert.deepEqual(manifest.externally_connectable.matches.sort(), [
-    "http://127.0.0.1:1337/*",
-    "http://127.0.0.1:1338/*",
-    "http://127.0.0.1:5173/*",
-    "http://localhost:1337/*",
-    "http://localhost:1338/*",
-    "http://localhost:5173/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*",
   ]);
 });
