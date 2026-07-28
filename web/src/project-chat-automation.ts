@@ -8,18 +8,19 @@ import {
 } from './chat-bootstrap.js'
 import { WorkUnitState } from './domain.js'
 import { api } from './app-runtime.js'
-import { WorkerLoopApiClient } from './workerloop-api.js'
+import { ExecutionProfile, WorkerLoopApiClient } from './workerloop-api.js'
 
 const browserApi = new BrowserApiClient()
 const workerLoopApi = new WorkerLoopApiClient()
 const PROJECT_AUTOMATION_INTERVAL_MS = 5_000
 
-function attemptKey(workUnit: WorkUnitState, role: WorkerRole, bindingVersion: number): string {
-  return `${workUnit.identity.project_id}:${workUnit.identity.issue_number}:${role}:${workUnit.route.lane_key ?? ''}:v${bindingVersion}:${workUnit.route.reason_code}`
+function attemptKey(workUnit: WorkUnitState, role: WorkerRole, bindingVersion: number, chatGPTProjectURL: string): string {
+  return `${workUnit.identity.project_id}:${workUnit.identity.issue_number}:${role}:${workUnit.route.lane_key ?? ''}:v${bindingVersion}:${chatGPTProjectURL || 'global'}:${workUnit.route.reason_code}`
 }
 
 export async function provisionNextProjectChat(input: {
   projectID: number
+  profile: ExecutionProfile
   attempted: Set<string>
   signal?: AbortSignal
 }): Promise<{ status: 'unavailable' | 'idle' | 'created' | 'failed'; issueNumber?: number; role?: WorkerRole; reason?: string }> {
@@ -36,7 +37,7 @@ export async function provisionNextProjectChat(input: {
     const roleBinding = execution.role_bindings.find((item) => item.role === role)
     if (!roleBinding) continue
     const version = roleBinding.binding?.binding_version ?? 0
-    const key = attemptKey(workUnit, role, version)
+    const key = attemptKey(workUnit, role, version, input.profile.chatgpt_project_url)
     if (input.attempted.has(key)) continue
     input.attempted.add(key)
 
@@ -46,6 +47,7 @@ export async function provisionNextProjectChat(input: {
       role,
       roleBinding,
       workUnit,
+      chatGPTProjectURL: input.profile.chatgpt_project_url,
     })
     if (!result.ok) {
       return {
@@ -71,7 +73,7 @@ export async function provisionNextEnabledProjectChat(input: {
     const profile = await workerLoopApi.profile(project.id, input.signal)
     if (profile.chat_creation_mode !== 'automatic') continue
     enabled = true
-    const result = await provisionNextProjectChat({ projectID: project.id, attempted: input.attempted, signal: input.signal })
+    const result = await provisionNextProjectChat({ projectID: project.id, profile, attempted: input.attempted, signal: input.signal })
     if (result.status === 'created' || result.status === 'failed' || result.status === 'unavailable') {
       return { ...result, projectID: project.id }
     }
