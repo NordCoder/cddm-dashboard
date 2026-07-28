@@ -1,7 +1,6 @@
 import { BrowserApiClient } from './browser-api.js'
 import {
   WorkerRole,
-  chatCreationMode,
   chatCreationWorker,
   createWorkerChat,
   projectChatCandidates,
@@ -23,9 +22,7 @@ export async function provisionNextProjectChat(input: {
   projectID: number
   attempted: Set<string>
   signal?: AbortSignal
-}): Promise<{ status: 'disabled' | 'unavailable' | 'idle' | 'created' | 'failed'; issueNumber?: number; role?: WorkerRole; reason?: string }> {
-  if (chatCreationMode(input.projectID) !== 'automatic') return { status: 'disabled' }
-
+}): Promise<{ status: 'unavailable' | 'idle' | 'created' | 'failed'; issueNumber?: number; role?: WorkerRole; reason?: string }> {
   const [state, workers] = await Promise.all([
     api.projectState(input.projectID, input.signal),
     browserApi.workers(input.signal),
@@ -68,16 +65,18 @@ export async function provisionNextEnabledProjectChat(input: {
   signal?: AbortSignal
 }): Promise<{ status: 'disabled' | 'unavailable' | 'idle' | 'created' | 'failed'; projectID?: number; issueNumber?: number; role?: WorkerRole; reason?: string }> {
   const projects = await api.projects(input.signal)
-  const enabled = projects.filter((project) => chatCreationMode(project.id) === 'automatic')
-  if (enabled.length === 0) return { status: 'disabled' }
+  let enabled = false
 
-  for (const project of enabled) {
+  for (const project of projects) {
+    const profile = await workerLoopApi.profile(project.id, input.signal)
+    if (profile.chat_creation_mode !== 'automatic') continue
+    enabled = true
     const result = await provisionNextProjectChat({ projectID: project.id, attempted: input.attempted, signal: input.signal })
     if (result.status === 'created' || result.status === 'failed' || result.status === 'unavailable') {
       return { ...result, projectID: project.id }
     }
   }
-  return { status: 'idle' }
+  return { status: enabled ? 'idle' : 'disabled' }
 }
 
 export function ChatAutomationSupervisor(): unknown {
