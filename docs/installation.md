@@ -51,13 +51,13 @@ Both host ports remain loopback-bound. Do not expose this build directly to an u
 
 ## Verify packaged resources
 
-The server validates and embeds:
+The distributable resource package is:
 
 ```text
 resources/cddm-dashboard-resources/v1.0/
 ```
 
-Startup fails if its manifest, role prompts, result marker instructions, schema, version, or digest are invalid.
+The Go runtime embeds a byte-identical copy from `backend/internal/resourcepack/assets/`. CI prevents drift between the distributable and embedded copies. Server startup fails if the embedded manifest, role prompts, result marker instructions, schema, version, or digest are invalid.
 
 ## Database
 

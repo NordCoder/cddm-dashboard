@@ -20,7 +20,7 @@ GitHub facts
 
 ## Versioned resources
 
-The repository owns `cddm-dashboard-resources/v1.0` with Lead, Implementor, and QA prompts, marker instructions, and JSON Schema. The package is embedded, deterministically loaded, digest-checked, and startup-validated. Operational prompts are not loaded from Google Drive.
+The repository distributes `resources/cddm-dashboard-resources/v1.0/` with Lead, Implementor, and QA prompts, marker instructions, and JSON Schema. The Go runtime embeds a byte-identical copy under `backend/internal/resourcepack/assets/`; CI prevents drift. The runtime deterministically loads and startup-validates the embedded manifest, version, files and digest. Operational prompts are not loaded from Google Drive.
 
 ## Command lifecycle
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-profile="resources/cddm-dashboard-resources/v1.0"
+release_profile="resources/cddm-dashboard-resources/v1.0"
+runtime_profile="backend/internal/resourcepack/assets/cddm-dashboard-resources/v1.0"
+
 for file in manifest.yaml lead-trigger.md implementor-trigger.md qa-trigger.md worker-result-marker.md worker-result.schema.json; do
-  test -s "$profile/$file"
+  test -s "$release_profile/$file"
+  test -s "$runtime_profile/$file"
+  cmp --silent "$release_profile/$file" "$runtime_profile/$file"
 done
 
-python3 -m json.tool "$profile/worker-result.schema.json" >/dev/null
+python3 -m json.tool "$release_profile/worker-result.schema.json" >/dev/null
 python3 -m json.tool examples/misak-pilot-project.json >/dev/null
 python3 -m json.tool examples/misak-pilot-execution-profile.json >/dev/null
 
