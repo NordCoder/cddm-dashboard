@@ -21,6 +21,7 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/resourcepack"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/workerloop"
 )
 
 func main() {
@@ -65,7 +66,9 @@ func run() error {
 		return err
 	}
 	store := supervisor.NewStore(db)
+	workerLoopService := workerloop.NewService(workerloop.NewStore(db))
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
+	syncService.SetSnapshotObserver(workerLoopService)
 	poller := supervisor.NewPoller(store, syncService, cfg.GitHubPollScanInterval)
 
 	opencodePlanner, err := planning.NewOpenCodePlanner(planning.OpenCodeConfig{

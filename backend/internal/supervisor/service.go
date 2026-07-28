@@ -11,9 +11,14 @@ type GitHubClient interface {
 	Snapshot(ctx context.Context, owner, repository string) (RepositorySnapshot, error)
 }
 
+type SnapshotObserver interface {
+	ObserveProjectSnapshot(ctx context.Context, snapshot ProjectSnapshot) error
+}
+
 type Service struct {
 	store          *Store
 	client         GitHubClient
+	observer       SnapshotObserver
 	syncTimeout    time.Duration
 	maxConcurrency int
 }
@@ -36,6 +41,10 @@ func NewService(store *Store, client GitHubClient, syncTimeout time.Duration, ma
 		syncTimeout:    syncTimeout,
 		maxConcurrency: maxConcurrency,
 	}
+}
+
+func (s *Service) SetSnapshotObserver(observer SnapshotObserver) {
+	s.observer = observer
 }
 
 func (s *Service) SyncProject(ctx context.Context, projectID int64) (ProjectSnapshot, error) {
@@ -67,7 +76,20 @@ func (s *Service) SyncProject(ctx context.Context, projectID int64) (ProjectSnap
 		}
 		return ProjectSnapshot{}, wrapped
 	}
-	return s.store.ProjectSnapshot(ctx, projectID)
+	stored, err := s.store.ProjectSnapshot(ctx, projectID)
+	if err != nil {
+		return ProjectSnapshot{}, err
+	}
+	if s.observer != nil {
+		if err := s.observer.ObserveProjectSnapshot(syncContext, stored); err != nil {
+			wrapped := fmt.Errorf("observe %s/%s snapshot: %w", project.Owner, project.Repository, err)
+			if markErr := s.store.MarkSyncFailed(context.WithoutCancel(ctx), projectID, wrapped); markErr != nil {
+				return ProjectSnapshot{}, fmt.Errorf("%v; record failure: %w", wrapped, markErr)
+			}
+			return ProjectSnapshot{}, wrapped
+		}
+	}
+	return stored, nil
 }
 
 func (s *Service) SyncProjects(ctx context.Context, projectIDs []int64) []SyncResult {
