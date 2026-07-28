@@ -1,9 +1,10 @@
 package workflow
 
 import (
-	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 	"sort"
 	"strings"
+
+	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 )
 
 func DeriveWorkspace(snapshot supervisor.WorkspaceSnapshot) WorkspaceState {
@@ -34,6 +35,10 @@ func DeriveWorkspace(snapshot supervisor.WorkspaceSnapshot) WorkspaceState {
 }
 
 func DeriveProject(snapshot supervisor.ProjectSnapshot) ProjectState {
+	return DeriveProjectWithExternal(snapshot, nil)
+}
+
+func DeriveProjectWithExternal(snapshot supervisor.ProjectSnapshot, external map[int64]ExternalResult) ProjectState {
 	identity := ProjectIdentity{
 		ID:           snapshot.Project.ID,
 		Owner:        snapshot.Project.Owner,
@@ -54,7 +59,7 @@ func DeriveProject(snapshot supervisor.ProjectSnapshot) ProjectState {
 		Attention: make([]AttentionItem, 0),
 	}
 	for _, issue := range issues {
-		workUnit := deriveWorkUnit(identity, snapshot.Project.WorkflowMode, issue)
+		workUnit := deriveWorkUnit(identity, snapshot.Project.WorkflowMode, issue, external)
 		state.WorkUnits = append(state.WorkUnits, workUnit)
 		if workUnit.Attention.Kind != AttentionNormal && workUnit.Attention.Kind != AttentionTerminal {
 			state.Attention = append(state.Attention, AttentionItem{
@@ -76,7 +81,7 @@ func FindWorkUnit(project ProjectState, issueNumber int) (WorkUnitState, bool) {
 	return WorkUnitState{}, false
 }
 
-func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervisor.Issue) WorkUnitState {
+func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervisor.Issue, external map[int64]ExternalResult) WorkUnitState {
 	state := WorkUnitState{
 		Identity: WorkUnitIdentity{
 			ProjectID: project.ID, Owner: project.Owner, Repository: project.Repository,
@@ -100,6 +105,9 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 	state.Warnings = append(state.Warnings, duplicateWarnings...)
 	for _, comment := range comments {
 		parsed := ParseComment(project.ID, issue.Number, comment)
+		if overlay, ok := external[comment.GitHubID]; ok {
+			applyExternalResult(&parsed, overlay)
+		}
 		state.ParsedComments = append(state.ParsedComments, parsed)
 		state.Warnings = append(state.Warnings, parsed.Warnings...)
 	}
@@ -149,4 +157,16 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 	state.Route = deriveRoute(project, workflowMode, issue.State, state, results)
 	state.Attention = deriveAttention(issue.State, state)
 	return state
+}
+
+func applyExternalResult(parsed *ParsedComment, external ExternalResult) {
+	parsed.Level = ParseLevelEnvelope
+	parsed.Meaningful = true
+	parsed.TransitionSafe = external.TransitionSafe
+	parsed.Event = external.Event
+	parsed.HardError = external.HardError
+	parsed.Warnings = append(parsed.Warnings[:0], external.Warnings...)
+	if parsed.HardError != nil {
+		parsed.Warnings = append(parsed.Warnings, warning(parsed.CommentID, parsed.HardError.Code, parsed.HardError.Message))
+	}
 }
