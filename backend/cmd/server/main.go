@@ -69,8 +69,9 @@ func run() error {
 	workerStore := workerloop.NewStore(db)
 	workerResultService := workerloop.NewService(workerStore)
 	workerStateService := workerloop.NewStateService(store, workerStore)
+	qaBindingRetirer := workerloop.NewQABindingRetirer(db)
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
-	syncService.SetSnapshotObserver(workerloop.NewSyncObserver(workerResultService, workerStateService))
+	syncService.SetSnapshotObserver(workerloop.NewSyncObserver(workerResultService, workerStateService, qaBindingRetirer))
 	poller := supervisor.NewPoller(store, syncService, cfg.GitHubPollScanInterval)
 
 	projects, err := store.ListProjects(startupContext)
@@ -109,12 +110,14 @@ func run() error {
 	if err := deliveryService.Reconcile(startupContext); err != nil {
 		return fmt.Errorf("reconcile browser and workflow commands: %w", err)
 	}
+	projectionService := workerloop.NewProjectionService(db, store, workerStore, bindingService, resources, planningService)
+	baseHandler := httpapi.NewWithPlanningAndBindingServiceAndDelivery(
+		db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, bindingService, deliveryService,
+	)
 
 	server := &http.Server{
-		Addr: cfg.Address,
-		Handler: withMutationRequestGuard(httpapi.NewWithPlanningAndBindingServiceAndDelivery(
-			db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, bindingService, deliveryService,
-		)),
+		Addr:              cfg.Address,
+		Handler:           withMutationRequestGuard(httpapi.WithWorkerLoop(baseHandler, store, projectionService, bindingService)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      maxDuration(cfg.GitHubSyncTimeout, cfg.OpenCodeTimeout) + 15*time.Second,

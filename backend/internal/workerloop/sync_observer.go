@@ -11,15 +11,25 @@ import (
 type SyncObserver struct {
 	results *Service
 	state   *StateService
+	retire  *QABindingRetirer
 }
 
-func NewSyncObserver(results *Service, state *StateService) *SyncObserver {
-	return &SyncObserver{results: results, state: state}
+func NewSyncObserver(results *Service, state *StateService, retire ...*QABindingRetirer) *SyncObserver {
+	observer := &SyncObserver{results: results, state: state}
+	if len(retire) > 0 {
+		observer.retire = retire[0]
+	}
+	return observer
 }
 
 func (o *SyncObserver) ObserveProjectSnapshot(ctx context.Context, snapshot supervisor.ProjectSnapshot) error {
 	if err := o.results.ObserveProjectSnapshot(ctx, snapshot); err != nil {
 		return err
+	}
+	if o.retire != nil {
+		if err := o.retire.RetireAcceptedTerminalQA(ctx, snapshot.Project.ID); err != nil {
+			return err
+		}
 	}
 	return o.state.RefreshProject(ctx, snapshot.Project.ID)
 }
