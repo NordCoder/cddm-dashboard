@@ -73,3 +73,54 @@ test("created chat receives its own persistent worker identity and exact target 
   await runtime.heartbeatCycle();
   assert.ok(calls.heartbeat.some((payload) => payload.worker_id === result.worker_id));
 });
+
+test("managed worker registration conflict remains retryable after the previous extension session expires", async () => {
+  const storage = memoryStorage({
+    backend_origin: "http://localhost:1338",
+    worker_id: "primary-worker",
+    managed_chat_workers: {
+      "managed-worker": {
+        worker_id: "managed-worker",
+        tab_id: 77,
+        target,
+        project_id: 9,
+        issue_number: 140,
+        role: "qa",
+        lane_key: "nordcoder/misak-website#140:qa",
+        created_at: 1,
+      },
+    },
+  });
+  let managedRegisters = 0;
+  let managedHeartbeats = 0;
+  const adapter = {
+    async currentTarget() { return null; },
+    reserveManagedTab() {},
+    exactTab() { return { async currentTarget() { return target; } }; },
+  };
+  const backend = {
+    async register(payload) {
+      if (payload.worker_id !== "managed-worker") return { state: "live" };
+      managedRegisters += 1;
+      return { state: managedRegisters === 1 ? "conflict" : "live" };
+    },
+    async heartbeat(workerID) {
+      if (workerID === "managed-worker") managedHeartbeats += 1;
+      return { state: "live" };
+    },
+    async claimNext() { return null; },
+    async complete() {},
+  };
+  const chrome = {
+    storage: { local: storage },
+    permissions: { async contains() { return true; } },
+    alarms: { async create() {} },
+  };
+  const scheduler = { active: true, start() {}, async alarm() {} };
+  const runtime = new ExtensionRuntime(chrome, { storage, adapter, sessionId: "new-runtime", scheduler, clientFactory: () => backend });
+  await runtime.start();
+  await runtime.heartbeatCycle();
+
+  assert.equal(managedRegisters, 2);
+  assert.equal(managedHeartbeats, 0);
+});
