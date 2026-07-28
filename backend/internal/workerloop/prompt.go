@@ -76,6 +76,12 @@ func (e *CommandEngine) RecordDeliveryOutcome(ctx context.Context, commandID, ou
 	if command.Status == status {
 		return nil
 	}
+	if terminalCommandStatus(command.Status) {
+		// A terminal GitHub marker may be synchronized before a delayed browser
+		// completion callback or restart reconciliation. Transport state must never
+		// regress completed execution state.
+		return nil
+	}
 	_, err = e.store.SetCommandStatus(ctx, commandID, status)
 	return err
 }
