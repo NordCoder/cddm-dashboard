@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import {
+  bootstrapPrompt,
+  chatCreationWorker,
+  createWorkerChat,
+  routedCreationRole,
+} from '../dist/assets/chat-bootstrap.js'
+
+function workUnit(role = 'implementor', action = 'dispatch') {
+  return {
+    identity: {
+      owner: 'NordCoder', repository: 'misak-website', issue_number: 140,
+    },
+    route: { action, target_role: role, reason_code: 'test_route' },
+  }
+}
+
+test('role bootstrap prompts attach only the expected reusable Library resources', () => {
+  assert.match(bootstrapPrompt('lead', workUnit('lead')), /^@01-workflow\.md\n@cddm-minimal-issue-sizing-standard\.md/)
+  assert.match(bootstrapPrompt('implementor', workUnit()), /^@02-implementor-trigger\.md\n@gpt-gh-connector-guidelines\.md/)
+  assert.match(bootstrapPrompt('qa', workUnit('qa')), /^@03-qa-trigger\.md\n@gpt-gh-connector-guidelines\.md/)
+  assert.match(bootstrapPrompt('qa', workUnit('qa')), /not a Dashboard Workflow Command/)
+})
+
+test('automatic routing creates only missing Implementor or fresh QA lanes', () => {
+  const bindings = [
+    { role: 'lead', lane_key: 'repo#140:lead' },
+    { role: 'implementor', lane_key: 'repo#140:implementor' },
+    { role: 'qa', lane_key: 'repo#140:qa' },
+  ]
+  assert.equal(routedCreationRole(workUnit('implementor'), bindings), 'implementor')
+  assert.equal(routedCreationRole(workUnit('qa'), bindings), 'qa')
+  assert.equal(routedCreationRole(workUnit('lead'), bindings), undefined)
+  assert.equal(routedCreationRole(workUnit('qa', 'hold'), bindings), undefined)
+  bindings[2].binding = { enabled: true, readiness: 'ready' }
+  assert.equal(routedCreationRole(workUnit('qa'), bindings), undefined)
+})
+
+test('chat creation capability is discovered independently from an active target', () => {
+  const worker = chatCreationWorker([
+    { worker_id: 'old', capabilities: ['exact_prompt_send'], state: 'live' },
+    { worker_id: 'creator', capabilities: ['chatgpt_conversation_create'], state: 'live' },
+  ])
+  assert.equal(worker.worker_id, 'creator')
+})
+
+test('Dashboard sends a bounded external bootstrap request and accepts extension binding evidence', async () => {
+  let sent
+  const chromeApi = {
+    runtime: {
+      sendMessage(extensionID, message, callback) {
+        sent = { extensionID, message }
+        callback({ ok: true, binding: { binding_id: 'binding-1' }, target: { kind: 'chatgpt_conversation', origin: 'https://chatgpt.com', path: '/c/fresh' } })
+      },
+    },
+  }
+  const result = await createWorkerChat({
+    projectID: 1,
+    issueNumber: 140,
+    role: 'implementor',
+    roleBinding: { role: 'implementor', lane_key: 'nordcoder/misak-website#140:implementor' },
+    workUnit: workUnit(),
+    chromeApi,
+  })
+  assert.equal(result.ok, true)
+  assert.equal(sent.extensionID, 'biakfbpkfdpniphmoafgldedkbnjfibp')
+  assert.equal(sent.message.expected_lane_key, 'nordcoder/misak-website#140:implementor')
+  assert.match(sent.message.bootstrap_prompt, /@02-implementor-trigger\.md/)
+  assert.equal(sent.message.command_id, undefined)
+})
