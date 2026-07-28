@@ -67,8 +67,16 @@ function stableToken(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
-export function bootstrapRequestID(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): string {
-  return `chat-p${projectID}-i${issueNumber}-${role}-v${bindingVersion}-${stableToken(laneKey)}`
+export function bootstrapRequestID(
+  projectID: number,
+  issueNumber: number,
+  role: WorkerRole,
+  laneKey: string,
+  bindingVersion: number,
+  chatGPTProjectURL = '',
+): string {
+  const scope = chatGPTProjectURL.trim() || 'global-chatgpt'
+  return `chat-p${projectID}-i${issueNumber}-${role}-v${bindingVersion}-${stableToken(`${laneKey}|${scope}`)}`
 }
 
 function parseResponse(value: unknown): ChatBootstrapResponse {
@@ -89,12 +97,14 @@ export function createWorkerChat(input: {
   role: WorkerRole
   roleBinding: RoleBinding
   workUnit: WorkUnitState
+  chatGPTProjectURL?: string
   chromeApi?: ChromeLike
 }): Promise<ChatBootstrapResponse> {
   const runtime = input.chromeApi?.runtime ?? (globalThis as typeof globalThis & { chrome?: ChromeLike }).chrome?.runtime
   if (!runtime?.sendMessage) return Promise.resolve({ ok: false, reason: 'cddm_extension_unavailable' })
   const bindingVersion = input.roleBinding.binding?.binding_version ?? 0
-  const requestID = bootstrapRequestID(input.projectID, input.issueNumber, input.role, input.roleBinding.lane_key, bindingVersion)
+  const chatGPTProjectURL = input.chatGPTProjectURL?.trim() ?? ''
+  const requestID = bootstrapRequestID(input.projectID, input.issueNumber, input.role, input.roleBinding.lane_key, bindingVersion, chatGPTProjectURL)
   const payload: Record<string, unknown> = {
     type: 'create-worker-chat',
     request_id: requestID,
@@ -104,6 +114,7 @@ export function createWorkerChat(input: {
     expected_lane_key: input.roleBinding.lane_key,
     bootstrap_prompt: bootstrapPrompt(input.role, input.workUnit),
   }
+  if (chatGPTProjectURL) payload.chatgpt_project_url = chatGPTProjectURL
   if (input.roleBinding.binding) payload.expected_binding_version = input.roleBinding.binding.binding_version
 
   return new Promise((resolve) => {
