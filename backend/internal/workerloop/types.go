@@ -77,16 +77,16 @@ type MarkerPayload struct {
 }
 
 type ActionPayload struct {
-	ActionID            string `json:"action_id"`
-	Type                string `json:"type"`
-	Repository          string `json:"repository"`
-	Issue               int    `json:"issue,omitempty"`
-	Role                string `json:"role,omitempty"`
-	PR                  int    `json:"pr,omitempty"`
-	ExpectedHead        string `json:"expected_head,omitempty"`
+	ActionID             string `json:"action_id"`
+	Type                 string `json:"type"`
+	Repository           string `json:"repository"`
+	Issue                int    `json:"issue,omitempty"`
+	Role                 string `json:"role,omitempty"`
+	PR                   int    `json:"pr,omitempty"`
+	ExpectedHead         string `json:"expected_head,omitempty"`
 	ExpectedPreviousHead string `json:"expected_previous_head,omitempty"`
-	ReasonCode          string `json:"reason_code,omitempty"`
-	DecisionCategory    string `json:"decision_category,omitempty"`
+	ReasonCode           string `json:"reason_code,omitempty"`
+	DecisionCategory     string `json:"decision_category,omitempty"`
 }
 
 type WavePayload struct {
