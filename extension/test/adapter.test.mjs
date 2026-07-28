@@ -9,6 +9,7 @@ const targetOne = { kind: "chatgpt_conversation", origin: "https://chatgpt.com",
 function fixture() {
   const tabs = new Map([[chatOne.id, { ...chatOne }], [dashboard.id, { ...dashboard }]]);
   let activeId = chatOne.id;
+  let nextTabId = 40;
   const session = {};
   const messages = [];
   const chrome = {
@@ -20,7 +21,19 @@ function fixture() {
     tabs: {
       async query() { const tab = tabs.get(activeId); return tab ? [{ ...tab }] : []; },
       async get(id) { const tab = tabs.get(id); if (!tab) throw new Error("missing tab"); return { ...tab }; },
-      async sendMessage(id, message) { messages.push({ id, message }); return { ok: true }; }
+      async create(options) {
+        const tab = { id: nextTabId++, url: options.url };
+        tabs.set(tab.id, tab);
+        if (options.active) activeId = tab.id;
+        return { ...tab };
+      },
+      async sendMessage(id, message) {
+        messages.push({ id, message });
+        if (message.type === "bootstrap-new-chat") {
+          tabs.get(id).url = "https://chatgpt.com/c/fresh";
+        }
+        return { ok: true };
+      }
     }
   };
   return {
@@ -83,4 +96,23 @@ test("activating a different supported ChatGPT conversation replaces the tracked
   assert.deepEqual(await f.adapter.currentTarget(), { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/two" });
   f.activate(dashboard.id);
   assert.deepEqual(await f.adapter.currentTarget(), { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/two" });
+});
+
+test("fresh managed chat is created, bootstrapped and retained as an exact-tab adapter", async () => {
+  const f = fixture();
+  await f.adapter.currentTarget();
+  const created = await f.adapter.createConversation("@02-implementor-trigger.md\n\nWait for the command.");
+  assert.deepEqual(created.target, { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/fresh" });
+  assert.equal(f.adapter.isManagedTab(created.tabId), true);
+  assert.deepEqual(f.messages.at(-1), { id: created.tabId, message: { type: "bootstrap-new-chat", prompt: "@02-implementor-trigger.md\n\nWait for the command." } });
+
+  const exact = f.adapter.exactTab(created.tabId, created.target);
+  assert.deepEqual(await exact.currentTarget(), created.target);
+  await exact.insertPrompt("real command", created.target);
+  assert.deepEqual(await exact.sendPrompt(created.target, "real command"), { sent: true });
+
+  f.activate(created.tabId);
+  assert.equal(await f.adapter.observeActivatedTab(created.tabId), null);
+  f.activate(dashboard.id);
+  assert.deepEqual(await f.adapter.currentTarget(), targetOne);
 });
