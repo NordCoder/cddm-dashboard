@@ -20,3 +20,4 @@ foreach ($warning in $value.protocol_warnings) {
 if (-not $value.ready -or $value.status -ne "pilot_ready") {
     exit 1
 }
+Write-Host "PILOT READY"

@@ -27,4 +27,5 @@ for warning in value.get("protocol_warnings", []):
     print(f"[WARNING] {warning.get('code')}: {warning.get('message')}")
 if value.get("ready") is not True or value.get("status") != "pilot_ready":
     raise SystemExit(1)
+print("PILOT READY")
 PY
