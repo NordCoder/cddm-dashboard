@@ -80,6 +80,20 @@ test("new-chat bootstrap writes and sends only on the empty ChatGPT root compose
   assert.equal(f.composer.value, "");
 });
 
+test("new-chat bootstrap writes and sends on the exact configured ChatGPT project surface", async () => {
+  const projectURL = "https://chatgpt.com/g/g-p-repository/project";
+  const f = await fixture((composer) => setTimeout(() => { composer.value = ""; }, 2), { value: "", url: projectURL });
+  const result = await f.message({ type: "bootstrap-new-chat", prompt: "project bootstrap", project_url: projectURL });
+  assert.equal(result.ok, true);
+});
+
+test("new-chat bootstrap refuses a different ChatGPT project surface", async () => {
+  const f = await fixture(() => {}, { value: "", url: "https://chatgpt.com/g/g-p-other/project" });
+  const result = await f.message({ type: "bootstrap-new-chat", prompt: "bootstrap", project_url: "https://chatgpt.com/g/g-p-repository/project" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "bootstrap_project_surface_invalid");
+});
+
 test("new-chat bootstrap refuses a non-root conversation surface", async () => {
   const f = await fixture(() => {}, { value: "", url: "https://chatgpt.com/c/existing" });
   const result = await f.message({ type: "bootstrap-new-chat", prompt: "bootstrap" });
