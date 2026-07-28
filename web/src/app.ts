@@ -1,4 +1,5 @@
 import { useRoute, routeLabel } from './app-routing.js'
+import { ProjectChatAutomation } from './project-chat-automation.js'
 import { PlanningPage, WorkUnitPage } from './pages-work-unit.js'
 import { ProjectPage, WorkspacePage } from './pages-workspace.js'
 import { SettingsPage } from './pages-settings.js'
@@ -30,9 +31,23 @@ function routePage(route: RouteState, navigate: Navigate): unknown {
   }
 }
 
+function scopedProjectID(route: RouteState): number | undefined {
+  return route.kind === 'project' || route.kind === 'work-unit' || route.kind === 'plans' ? route.projectID : undefined
+}
+
 export function App(): unknown {
   const [route, navigate] = useRoute()
-  return AppShell({ routeLabel: routeLabel(route), navigate, children: routePage(route, navigate) })
+  const projectID = scopedProjectID(route)
+  return AppShell({
+    routeLabel: routeLabel(route),
+    navigate,
+    children: h(
+      React.Fragment,
+      null,
+      projectID ? h(ProjectChatAutomation, { projectID, key: `project-chat-automation:${projectID}` }) : null,
+      routePage(route, navigate),
+    ),
+  })
 }
 
 function installFatalFallback(root: HTMLElement): void {
