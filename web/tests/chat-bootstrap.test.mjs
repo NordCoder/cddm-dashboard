@@ -59,24 +59,15 @@ test('chat creation capability is discovered independently from an active target
   assert.equal(worker.worker_id, 'creator')
 })
 
-test('bootstrap request identity is stable within one binding generation and rotates after QA retirement', () => {
-  const values = new Map()
-  const original = globalThis.localStorage
-  globalThis.localStorage = {
-    getItem(key) { return values.get(key) ?? null },
-    setItem(key, value) { values.set(key, String(value)) },
-    removeItem(key) { values.delete(key) },
-  }
-  try {
-    const first = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
-    const duplicate = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
-    const nextCycle = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 2)
-    assert.equal(duplicate, first)
-    assert.notEqual(nextCycle, first)
-  } finally {
-    if (original === undefined) delete globalThis.localStorage
-    else globalThis.localStorage = original
-  }
+test('bootstrap request identity is deterministic across tabs and rotates with lane or binding generation', () => {
+  const first = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
+  const duplicate = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
+  const nextCycle = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 2)
+  const otherLane = bootstrapRequestID(1, 141, 'qa', 'repo#141:qa', 1)
+  assert.equal(duplicate, first)
+  assert.match(first, /^chat-p1-i140-qa-v1-[0-9a-f]{8}$/)
+  assert.notEqual(nextCycle, first)
+  assert.notEqual(otherLane, first)
 })
 
 test('Dashboard sends a bounded external bootstrap request and accepts extension binding evidence', async () => {
@@ -100,6 +91,7 @@ test('Dashboard sends a bounded external bootstrap request and accepts extension
   assert.equal(result.ok, true)
   assert.equal(sent.extensionID, 'biakfbpkfdpniphmoafgldedkbnjfibp')
   assert.equal(sent.message.expected_lane_key, 'nordcoder/misak-website#140:implementor')
+  assert.match(sent.message.request_id, /^chat-p1-i140-implementor-v0-[0-9a-f]{8}$/)
   assert.match(sent.message.bootstrap_prompt, /@02-implementor-trigger\.md/)
   assert.equal(sent.message.command_id, undefined)
 })
