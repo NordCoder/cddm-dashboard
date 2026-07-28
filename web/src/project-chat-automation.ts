@@ -4,21 +4,16 @@ import {
   chatCreationMode,
   chatCreationWorker,
   createWorkerChat,
+  projectChatCandidates,
   routedCreationRole,
 } from './chat-bootstrap.js'
-import { ProjectState, WorkUnitState } from './domain.js'
+import { WorkUnitState } from './domain.js'
 import { api } from './app-runtime.js'
 import { WorkerLoopApiClient } from './workerloop-api.js'
 
 const browserApi = new BrowserApiClient()
 const workerLoopApi = new WorkerLoopApiClient()
 const PROJECT_AUTOMATION_INTERVAL_MS = 5_000
-
-export function projectChatCandidates(state: ProjectState): WorkUnitState[] {
-  return state.work_units
-    .filter((item) => item.route.action === 'dispatch' && (item.route.target_role === 'implementor' || item.route.target_role === 'qa'))
-    .sort((left, right) => left.identity.issue_number - right.identity.issue_number)
-}
 
 function attemptKey(workUnit: WorkUnitState, role: WorkerRole, bindingVersion: number): string {
   return `${workUnit.identity.project_id}:${workUnit.identity.issue_number}:${role}:${workUnit.route.lane_key ?? ''}:v${bindingVersion}:${workUnit.route.reason_code}`
