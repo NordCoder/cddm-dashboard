@@ -1,5 +1,10 @@
 import { PreSendError, AmbiguousSendError } from "./executor.js";
-import { normalizeTargetUrl, sameTarget } from "./protocol.js";
+import {
+  conversationURLBelongsToProject,
+  normalizeChatGPTProjectUrl,
+  normalizeTargetUrl,
+  sameTarget,
+} from "./protocol.js";
 
 const TRACKED_TAB_KEY = "tracked_chatgpt_tab_id";
 const NEW_CHAT_URL = "https://chatgpt.com/";
@@ -174,10 +179,14 @@ export class ChromeTargetAdapter {
     }
   }
 
-  async createConversation(prompt) {
+  async createConversation(prompt, chatGPTProjectUrl = "") {
     if (typeof prompt !== "string" || !prompt.trim()) throw new PreSendError("bootstrap_prompt_invalid");
     if (!this.chrome.tabs?.create) throw new PreSendError("chat_creation_unavailable");
-    const tab = await this.chrome.tabs.create({ url: NEW_CHAT_URL, active: true });
+    let projectUrl = "";
+    try { projectUrl = normalizeChatGPTProjectUrl(chatGPTProjectUrl); } catch (error) {
+      throw new PreSendError(error instanceof Error ? error.message : "chatgpt_project_url_invalid");
+    }
+    const tab = await this.chrome.tabs.create({ url: projectUrl || NEW_CHAT_URL, active: true });
     if (!tab?.id) throw new PreSendError("chat_creation_tab_unavailable");
     this.reserveManagedTab(tab.id);
 
@@ -185,7 +194,7 @@ export class ChromeTargetAdapter {
     let bootstrapResult = null;
     while (Date.now() < deadline) {
       try {
-        bootstrapResult = await this.chrome.tabs.sendMessage(tab.id, { type: "bootstrap-new-chat", prompt });
+        bootstrapResult = await this.chrome.tabs.sendMessage(tab.id, { type: "bootstrap-new-chat", prompt, project_url: projectUrl });
         if (bootstrapResult?.ok) break;
         if (bootstrapResult?.reason && bootstrapResult.reason !== "compose_unavailable") {
           throw new PreSendError(bootstrapResult.reason);
@@ -201,7 +210,12 @@ export class ChromeTargetAdapter {
       let current;
       try { current = await this.chrome.tabs.get(tab.id); } catch { throw new PreSendError("chat_creation_tab_closed"); }
       const target = current?.url ? normalizeTargetUrl(current.url) : null;
-      if (target) return { target, tabId: tab.id };
+      if (target) {
+        if (projectUrl && !conversationURLBelongsToProject(current.url, projectUrl)) {
+          throw new PreSendError("created_chat_outside_configured_project");
+        }
+        return { target, tabId: tab.id, chatGPTProjectUrl: projectUrl };
+      }
       await delay(CHAT_CREATE_POLL_MS);
     }
     throw new AmbiguousSendError("chat_conversation_url_unobserved");
