@@ -28,16 +28,11 @@ func (s *StateService) RefreshProject(ctx context.Context, projectID int64) erro
 	if err != nil {
 		return err
 	}
-	external := make(map[int64]workflow.ExternalResult, len(rows))
-	for _, result := range rows {
-		external[result.GitHubCommentID] = projectResult(supervisor.ProjectSnapshot{}, result)
-	}
-	// Candidate verification requires the synchronized snapshot. Rebuild those
-	// projections with the current repository facts before publishing the cache.
 	snapshot, err := s.snapshots.ProjectSnapshot(ctx, projectID)
 	if err != nil {
 		return err
 	}
+	external := make(map[int64]workflow.ExternalResult, len(rows))
 	for _, result := range rows {
 		external[result.GitHubCommentID] = projectResult(snapshot, result)
 	}
