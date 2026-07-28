@@ -35,7 +35,7 @@ func DeriveWorkspace(snapshot supervisor.WorkspaceSnapshot) WorkspaceState {
 }
 
 func DeriveProject(snapshot supervisor.ProjectSnapshot) ProjectState {
-	return DeriveProjectWithExternal(snapshot, nil)
+	return DeriveProjectWithExternal(snapshot, projectExternal(snapshot.Project.ID))
 }
 
 func DeriveProjectWithExternal(snapshot supervisor.ProjectSnapshot, external map[int64]ExternalResult) ProjectState {
