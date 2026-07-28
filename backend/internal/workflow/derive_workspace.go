@@ -179,13 +179,13 @@ func routeWithExternalCommand(project ProjectIdentity, state WorkUnitState, rout
 	case "created", "delivery_pending":
 		return Route{
 			Action: "none", ReasonCode: "workflow_delivery_pending",
-			Reason: "a Dashboard workflow command already exists and is awaiting confirmed browser delivery",
+			Reason:       "a Dashboard workflow command already exists and is awaiting confirmed browser delivery",
 			ExpectedHead: command.ExpectedHead, Guards: append(guardsForHead(command.ExpectedHead), "active_workflow_command", "no_duplicate_dispatch"), Warnings: state.Warnings,
 		}
 	case "awaiting_result":
 		return Route{
 			Action: "none", ReasonCode: "awaiting_worker_result",
-			Reason: "the prompt was delivered; execution remains open until a correlated GitHub worker-result marker is accepted",
+			Reason:       "the prompt was delivered; execution remains open until a correlated GitHub worker-result marker is accepted",
 			ExpectedHead: command.ExpectedHead, Guards: append(guardsForHead(command.ExpectedHead), "active_workflow_command", "github_result_required", "no_duplicate_dispatch"), Warnings: state.Warnings,
 		}
 	case "ambiguous":
