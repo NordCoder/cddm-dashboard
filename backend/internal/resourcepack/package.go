@@ -15,7 +15,10 @@ import (
 	"strings"
 )
 
-const DefaultProfile = "cddm-dashboard-resources/v1.0"
+const (
+	DefaultProfile = "cddm-dashboard-resources/v1.0"
+	V2Profile      = "cddm-dashboard-resources/v2.0"
+)
 
 //go:embed assets/cddm-dashboard-resources/*/*
 var embedded embed.FS
@@ -39,6 +42,16 @@ type Package struct {
 	Files    map[string]string `json:"-"`
 	Digests  map[string]string `json:"digests"`
 	Digest   string            `json:"digest"`
+}
+
+type attachmentProfiles struct {
+	ID       string                       `json:"$id"`
+	Profiles map[string]attachmentProfile `json:"profiles"`
+}
+
+type attachmentProfile struct {
+	Bootstrap []string `json:"bootstrap"`
+	Command   []string `json:"command"`
 }
 
 func Load(profile string) (Package, error) {
@@ -102,7 +115,7 @@ func loadFS(files fs.FS, root, profile string) (Package, error) {
 		result.Files[name] = string(contents)
 		result.Digests[name] = digest(contents)
 	}
-	if err := validateSchema(result); err != nil {
+	if err := validatePackage(result); err != nil {
 		return Package{}, err
 	}
 	result.Digest = packageDigest(result.Digests)
@@ -114,17 +127,46 @@ func validateManifest(profile string, manifest Manifest) error {
 	if expectedProfile != profile {
 		return fmt.Errorf("resource profile mismatch: requested=%s manifest=%s", profile, expectedProfile)
 	}
-	if manifest.BaseMethodology.Package != "cddm-minimal" || manifest.BaseMethodology.Version != "2.0" {
-		return fmt.Errorf("unsupported base methodology %s/v%s", manifest.BaseMethodology.Package, manifest.BaseMethodology.Version)
+
+	required := []string{"lead", "implementor", "qa", "result_marker", "result_schema"}
+	switch profile {
+	case DefaultProfile:
+		if manifest.BaseMethodology != (Identity{Package: "cddm-minimal", Version: "2.0"}) {
+			return fmt.Errorf("unsupported base methodology %s/v%s", manifest.BaseMethodology.Package, manifest.BaseMethodology.Version)
+		}
+		if manifest.ResultProtocol != (Identity{Package: "cddm-worker-result", Version: "1"}) {
+			return fmt.Errorf("unsupported result protocol %s/v%s", manifest.ResultProtocol.Package, manifest.ResultProtocol.Version)
+		}
+	case V2Profile:
+		if manifest.BaseMethodology != (Identity{Package: "cddm-minimal", Version: "2.1"}) {
+			return fmt.Errorf("unsupported base methodology %s/v%s", manifest.BaseMethodology.Package, manifest.BaseMethodology.Version)
+		}
+		if manifest.ResultProtocol != (Identity{Package: "cddm-worker-result", Version: "2"}) {
+			return fmt.Errorf("unsupported result protocol %s/v%s", manifest.ResultProtocol.Package, manifest.ResultProtocol.Version)
+		}
+		required = append(required, "attachment_profiles", "action_vocabulary")
+	default:
+		return fmt.Errorf("unsupported resource profile %s", profile)
 	}
-	if manifest.ResultProtocol.Package != "cddm-worker-result" || manifest.ResultProtocol.Version != "1" {
-		return fmt.Errorf("unsupported result protocol %s/v%s", manifest.ResultProtocol.Package, manifest.ResultProtocol.Version)
-	}
-	for _, key := range []string{"lead", "implementor", "qa", "result_marker", "result_schema"} {
+
+	for _, key := range required {
 		name := strings.TrimSpace(manifest.Resources[key])
 		if name == "" || path.Base(name) != name {
 			return fmt.Errorf("resource manifest has invalid %s entry", key)
 		}
+	}
+	if len(manifest.Resources) != len(required) {
+		return fmt.Errorf("resource manifest has unsupported resource entries")
+	}
+	return nil
+}
+
+func validatePackage(pack Package) error {
+	if err := validateSchema(pack); err != nil {
+		return err
+	}
+	if pack.Profile == V2Profile {
+		return validateAttachmentProfiles(pack)
 	}
 	return nil
 }
@@ -138,10 +180,56 @@ func validateSchema(pack Package) error {
 	if err := json.Unmarshal([]byte(contents), &schema); err != nil {
 		return fmt.Errorf("decode worker result schema: %w", err)
 	}
-	if schema["$id"] != "cddm-worker-result/v1" || schema["type"] != "object" {
+	expectedID := "cddm-worker-result/v" + pack.Manifest.ResultProtocol.Version
+	if schema["$id"] != expectedID || schema["type"] != "object" {
 		return errors.New("worker result schema has unsupported identity or root type")
 	}
 	return nil
+}
+
+func validateAttachmentProfiles(pack Package) error {
+	contents, err := pack.Resource("attachment_profiles")
+	if err != nil {
+		return err
+	}
+	var profiles attachmentProfiles
+	decoder := json.NewDecoder(strings.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&profiles); err != nil {
+		return fmt.Errorf("decode attachment profiles: %w", err)
+	}
+	if profiles.ID != "cddm-dashboard-attachments/v2" || len(profiles.Profiles) != 3 {
+		return errors.New("attachment profiles have unsupported identity or roles")
+	}
+	expected := map[string]attachmentProfile{
+		"lead":        {Bootstrap: []string{"01-workflow.md", "cddm-minimal-issue-sizing-standard.md"}, Command: []string{"gpt-gh-connector-guidelines.md"}},
+		"implementor": {Bootstrap: []string{"02-implementor-trigger.md", "gpt-gh-connector-guidelines.md"}, Command: []string{"gpt-gh-connector-guidelines.md"}},
+		"qa":          {Bootstrap: []string{"03-qa-trigger.md", "gpt-gh-connector-guidelines.md"}, Command: []string{"gpt-gh-connector-guidelines.md"}},
+	}
+	for role, wanted := range expected {
+		actual, ok := profiles.Profiles[role]
+		if !ok || !equalStrings(actual.Bootstrap, wanted.Bootstrap) || !equalStrings(actual.Command, wanted.Command) {
+			return fmt.Errorf("attachment profile %s does not match the fixed v2 contract", role)
+		}
+		for _, name := range append(append([]string{}, actual.Bootstrap...), actual.Command...) {
+			if name == "" || path.Base(name) != name {
+				return fmt.Errorf("attachment profile %s has invalid filename", role)
+			}
+		}
+	}
+	return nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func parseManifest(contents string) (Manifest, error) {

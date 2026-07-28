@@ -1,0 +1,32 @@
+{
+  "$id": "cddm-dashboard-attachments/v2",
+  "profiles": {
+    "lead": {
+      "bootstrap": [
+        "01-workflow.md",
+        "cddm-minimal-issue-sizing-standard.md"
+      ],
+      "command": [
+        "gpt-gh-connector-guidelines.md"
+      ]
+    },
+    "implementor": {
+      "bootstrap": [
+        "02-implementor-trigger.md",
+        "gpt-gh-connector-guidelines.md"
+      ],
+      "command": [
+        "gpt-gh-connector-guidelines.md"
+      ]
+    },
+    "qa": {
+      "bootstrap": [
+        "03-qa-trigger.md",
+        "gpt-gh-connector-guidelines.md"
+      ],
+      "command": [
+        "gpt-gh-connector-guidelines.md"
+      ]
+    }
+  }
+}

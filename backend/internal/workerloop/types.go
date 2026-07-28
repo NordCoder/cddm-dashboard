@@ -56,19 +56,43 @@ type CreateCommandInput struct {
 }
 
 type MarkerPayload struct {
-	Version          int    `json:"version"`
-	Role             string `json:"role"`
-	Result           string `json:"result"`
-	CommandID        string `json:"command_id"`
-	PR               int    `json:"pr,omitempty"`
-	Head             string `json:"head,omitempty"`
-	ReviewedHead     string `json:"reviewed_head,omitempty"`
-	ApprovedHead     string `json:"approved_head,omitempty"`
-	BlockingFindings *int   `json:"blocking_findings,omitempty"`
-	BlockerType      string `json:"blocker_type,omitempty"`
-	ReasonCode       string `json:"reason_code,omitempty"`
-	CycleEscalation  string `json:"cycle_escalation,omitempty"`
-	NextRole         string `json:"next_role,omitempty"`
+	Version          int             `json:"version"`
+	Role             string          `json:"role"`
+	Result           string          `json:"result"`
+	CommandID        string          `json:"command_id"`
+	Repository       string          `json:"repository,omitempty"`
+	Issue            int             `json:"issue,omitempty"`
+	PR               int             `json:"pr,omitempty"`
+	Head             string          `json:"head,omitempty"`
+	ReviewedHead     string          `json:"reviewed_head,omitempty"`
+	ApprovedHead     string          `json:"approved_head,omitempty"`
+	MergeCommit      string          `json:"merge_commit,omitempty"`
+	BlockingFindings *int            `json:"blocking_findings,omitempty"`
+	BlockerType      string          `json:"blocker_type,omitempty"`
+	ReasonCode       string          `json:"reason_code,omitempty"`
+	CycleEscalation  string          `json:"cycle_escalation,omitempty"`
+	NextRole         string          `json:"next_role,omitempty"`
+	Actions          []ActionPayload `json:"actions,omitempty"`
+	Wave             *WavePayload    `json:"wave,omitempty"`
+}
+
+type ActionPayload struct {
+	ActionID             string `json:"action_id"`
+	Type                 string `json:"type"`
+	Repository           string `json:"repository"`
+	Issue                int    `json:"issue,omitempty"`
+	Role                 string `json:"role,omitempty"`
+	PR                   int    `json:"pr,omitempty"`
+	ExpectedHead         string `json:"expected_head,omitempty"`
+	ExpectedPreviousHead string `json:"expected_previous_head,omitempty"`
+	ReasonCode           string `json:"reason_code,omitempty"`
+	DecisionCategory     string `json:"decision_category,omitempty"`
+}
+
+type WavePayload struct {
+	WaveID       string `json:"wave_id"`
+	ControlIssue int    `json:"control_issue"`
+	Issues       []int  `json:"issues"`
 }
 
 type ParsedMarker struct {

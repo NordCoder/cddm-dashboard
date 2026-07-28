@@ -19,9 +19,40 @@ M7 extends browser transport into a GitHub-authoritative worker result loop thro
 | #51 | Durable Workflow Commands and Worker Result evidence | Merged via PR #56 |
 | #52 | Prompt rendering, browser correlation, GitHub verification, and deterministic routing | Merged via PR #57 |
 | #53 | Role bindings, execution surfaces, fresh-QA lifecycle, and Pilot Readiness | Merged via PR #58 |
-| #54 | Combined recovery fixtures, installation, configuration, operator guide, and final readiness evidence | Completed by the current integration Change |
+| #54 | Combined recovery fixtures, installation, configuration, operator guide, and final readiness evidence | Merged via PR #59 |
 
-## Pilot-ready outcome
+## Active — M9 Autonomous Contract
+
+M9 defines the authority and protocol required before Dashboard may operate a continuous project delivery loop:
+
+| Change | Outcome | State |
+| --- | --- | --- |
+| #66 | `cddm-minimal/v2.1` continuous-autonomy profile, Project Control Issue, lanes, Waves and closed action vocabulary | Draft PR #68 |
+| #67 | `cddm-dashboard-resources/v2.0`, fixed attachment profiles and strict `cddm-worker-result/v2` compatibility | Stacked draft PR #69 |
+
+M9 deliberately does not execute typed Lead actions. It freezes and validates the contract first. Active v1 commands retain their original resource and result-protocol identity.
+
+## Planned autonomous execution
+
+The next milestones build on M9 in dependency order:
+
+1. **M10 — Durable Orchestration**
+   - Project autonomy profile;
+   - Workflow Intent and Wave persistence;
+   - Lead serialization, per-Issue lanes, priorities and WIP;
+   - typed Lead action ingestion and deterministic scheduling.
+2. **M11 — Browser Session Provisioning**
+   - durable session-provision queue;
+   - exact Library attachment resolution;
+   - persistent Lead and fresh Implementor/QA policies;
+   - operation without an open Dashboard page while Chrome and the extension remain available.
+3. **M12 — Continuous Autopilot**
+   - automatic command materialization;
+   - Lead merge cycle and read-back;
+   - operations UI, pause/stop and circuit breakers;
+   - restart, duplicate, stale-Head and multi-Issue soak verification.
+
+## Current worker-loop outcome
 
 ```text
 GitHub facts
@@ -29,22 +60,19 @@ GitHub facts
 → Dashboard creates Workflow Command
 → versioned role prompt reaches the exact bound ChatGPT chat
 → worker publishes a GitHub Issue comment
-→ Dashboard validates cddm-worker-result/v1
+→ Dashboard validates the command-bound result protocol
 → Dashboard verifies consequential GitHub facts
 → Dashboard derives the next route
 ```
 
-The local/private build is pilot-ready when the diagnostic endpoint reports `pilot_ready`. The integration does not execute `NordCoder/misak-website#140`.
+The local/private v1 build remains pilot-ready when the diagnostic endpoint reports `pilot_ready`. M9 adds contract compatibility without enabling autonomous action materialization.
 
-## Explicitly out of scope
+## Durable boundaries
 
-- reading or scraping ChatGPT responses;
-- treating browser `delivered` as worker completion;
-- automatic creation of a fresh ChatGPT conversation;
-- automatic merge by default;
-- public multi-user deployment without an authentication layer;
-- hidden model authority over product decisions.
-
-## Future
-
-Future Changes may add authenticated remote deployment, notifications, automatic fresh-conversation provisioning, or explicitly approved merge automation. Each requires a new product/risk decision and Change Contract.
+- ChatGPT response content is not read or scraped.
+- Browser `delivered` is transport evidence, not worker completion.
+- Typed actions are routing requests, not arbitrary executable prompts.
+- Dashboard does not invent product or architecture authority.
+- Ambiguous browser sends, result conflicts and stale Candidate identities fail closed.
+- Direct Dashboard merge remains disabled; `auto_merge=false`.
+- Public multi-user deployment requires authentication and a separate product/risk decision.

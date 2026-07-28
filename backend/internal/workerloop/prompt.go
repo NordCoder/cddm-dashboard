@@ -100,9 +100,6 @@ func (e *CommandEngine) RecordDeliveryOutcome(ctx context.Context, commandID, ou
 		return nil
 	}
 	if terminalCommandStatus(command.Status) {
-		// A terminal GitHub marker may be synchronized before a delayed browser
-		// completion callback or restart reconciliation. Transport state must never
-		// regress completed execution state.
 		return nil
 	}
 	_, err = e.store.SetCommandStatus(ctx, commandID, status)
@@ -148,7 +145,8 @@ func renderCommandPrompt(command Command, generation planning.GenerationResult, 
 	builder.WriteString("\n```\n\n## Bounded Planned Action\n\n")
 	builder.WriteString(strings.TrimSpace(plan.Prompt))
 	builder.WriteString("\n\n## Terminal Publication Contract\n\n")
-	fmt.Fprintf(&builder, "Publish exactly one GitHub Issue comment containing a human-readable role handoff and one live marker conforming to `cddm-worker-result/v1`. The marker MUST use `command_id` = `%s`. Do not launch the next worker manually. Dashboard will verify the external facts and derive the next route.\n", command.ID)
+	fmt.Fprintf(&builder, "Publish exactly one GitHub Issue comment containing a human-readable role handoff and one live marker conforming to `%s/v%s`. The marker MUST use `command_id` = `%s`. Do not launch the next worker manually. Dashboard will verify the external facts and derive the next route.\n",
+		resources.Manifest.ResultProtocol.Package, resources.Manifest.ResultProtocol.Version, command.ID)
 	return builder.String(), nil
 }
 

@@ -1,16 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-release_profile="resources/cddm-dashboard-resources/v1.0"
-runtime_profile="backend/internal/resourcepack/assets/cddm-dashboard-resources/v1.0"
+validate_profile() {
+  local version="$1"
+  shift
+  local release_profile="resources/cddm-dashboard-resources/$version"
+  local runtime_profile="backend/internal/resourcepack/assets/cddm-dashboard-resources/$version"
 
-validate_resources() {
-  for file in manifest.yaml lead-trigger.md implementor-trigger.md qa-trigger.md worker-result-marker.md worker-result.schema.json; do
+  for file in "$@"; do
     test -s "$release_profile/$file"
     test -s "$runtime_profile/$file"
     cmp --silent "$release_profile/$file" "$runtime_profile/$file"
   done
   python3 -m json.tool "$release_profile/worker-result.schema.json" >/dev/null
+}
+
+validate_resources() {
+  validate_profile v1.0 \
+    manifest.yaml lead-trigger.md implementor-trigger.md qa-trigger.md \
+    worker-result-marker.md worker-result.schema.json
+
+  validate_profile v2.0 \
+    manifest.yaml lead-trigger.md implementor-trigger.md qa-trigger.md \
+    worker-result-marker.md worker-result.schema.json \
+    attachment-profiles.json action-vocabulary.md
+
+  python3 -m json.tool resources/cddm-dashboard-resources/v2.0/attachment-profiles.json >/dev/null
+  grep -q '^version: "2.0"$' resources/cddm-dashboard-resources/v2.0/manifest.yaml
+  grep -q '^  version: "2.1"$' resources/cddm-dashboard-resources/v2.0/manifest.yaml
+  grep -q '"$id": "cddm-worker-result/v2"' resources/cddm-dashboard-resources/v2.0/worker-result.schema.json
 }
 
 validate_samples() {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/NordCoder/cddm-dashboard/backend/internal/resourcepack"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 )
 
@@ -104,6 +105,11 @@ func (s *Service) correlate(ctx context.Context, projectID int64, issueNumber in
 		result.ValidationReason = "command_role_mismatch"
 		return result
 	}
+	if !protocolMatchesCommand(command.ResourceProfile, parsed.Payload.Version) {
+		result.ValidationStatus = ValidationUnsupported
+		result.ValidationReason = "command_protocol_mismatch"
+		return result
+	}
 	if markerStaleForCommand(command, parsed.Payload) {
 		result.ValidationStatus = ValidationStale
 		result.ValidationReason = "expected_head_mismatch"
@@ -112,6 +118,17 @@ func (s *Service) correlate(ctx context.Context, projectID int64, issueNumber in
 	acceptedAt := s.now().UTC()
 	result.AcceptedAt = &acceptedAt
 	return result
+}
+
+func protocolMatchesCommand(profile string, markerVersion int) bool {
+	switch profile {
+	case resourcepack.DefaultProfile:
+		return markerVersion == 1
+	case resourcepack.V2Profile:
+		return markerVersion == 2
+	default:
+		return false
+	}
 }
 
 func (s *Service) reconcileCommand(ctx context.Context, command Command) error {
@@ -167,7 +184,7 @@ func markerStaleForCommand(command Command, payload MarkerPayload) bool {
 	if payload.Role == "qa" {
 		return payload.ReviewedHead != command.ExpectedHead
 	}
-	if payload.Role == "lead" && payload.Result == "ready_to_merge" {
+	if payload.Role == "lead" && (payload.Result == "ready_to_merge" || payload.Result == "merged") {
 		return payload.ApprovedHead != command.ExpectedHead
 	}
 	return false
@@ -185,7 +202,7 @@ func statusForResult(result Result) (string, error) {
 		}
 		return CommandCompleted, nil
 	case "qa":
-		if payload.Result == "blocked_inconclusive" {
+		if payload.Result == "blocked_inconclusive" || payload.Result == "blocked" || payload.Result == "inconclusive" {
 			return CommandInconclusive, nil
 		}
 		return CommandCompleted, nil

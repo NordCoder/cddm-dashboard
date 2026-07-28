@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cddm-worker-result/v2",
+  "title": "CDDM Dashboard Worker Result v2",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/implementorCandidate" },
+    { "$ref": "#/$defs/implementorContinue" },
+    { "$ref": "#/$defs/implementorBlocked" },
+    { "$ref": "#/$defs/implementorNoOp" },
+    { "$ref": "#/$defs/qaApproved" },
+    { "$ref": "#/$defs/qaChanges" },
+    { "$ref": "#/$defs/qaStopped" },
+    { "$ref": "#/$defs/leadActions" },
+    { "$ref": "#/$defs/leadMerged" },
+    { "$ref": "#/$defs/leadStopped" }
+  ],
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "command": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,200}$" },
+    "reason": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,119}$" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "maxLength": 200 },
+    "actionId": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,120}$" },
+    "blocker": { "enum": ["candidate", "process", "authority", "infrastructure"] },
+    "cycle": { "enum": ["none", "lead_cycle_review", "owner_exception"] },
+    "decision": { "enum": ["product_behavior", "scope", "architecture", "visual_acceptance", "security_privacy_legal", "release", "residual_risk", "product_envelope"] },
+    "implementorCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "pr", "head"],
+      "properties": {
+        "version": { "const": 2 }, "role": { "const": "implementor" }, "result": { "const": "candidate_ready" },
+        "command_id": { "$ref": "#/$defs/command" }, "pr": { "type": "integer", "minimum": 1 }, "head": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "implementorContinue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "implementor" }, "result": { "const": "continue" }, "command_id": { "$ref": "#/$defs/command" } }
+    },
+    "implementorBlocked": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "blocker_type", "reason_code"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "implementor" }, "result": { "const": "blocked" }, "command_id": { "$ref": "#/$defs/command" }, "blocker_type": { "$ref": "#/$defs/blocker" }, "reason_code": { "$ref": "#/$defs/reason" } }
+    },
+    "implementorNoOp": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "reason_code"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "implementor" }, "result": { "const": "no_op" }, "command_id": { "$ref": "#/$defs/command" }, "reason_code": { "$ref": "#/$defs/reason" } }
+    },
+    "qaApproved": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "reviewed_head", "blocking_findings"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "qa" }, "result": { "const": "approved" }, "command_id": { "$ref": "#/$defs/command" }, "reviewed_head": { "$ref": "#/$defs/sha" }, "blocking_findings": { "const": 0 } }
+    },
+    "qaChanges": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "reviewed_head", "blocking_findings", "cycle_escalation"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "qa" }, "result": { "const": "changes_required" }, "command_id": { "$ref": "#/$defs/command" }, "reviewed_head": { "$ref": "#/$defs/sha" }, "blocking_findings": { "type": "integer", "minimum": 1 }, "cycle_escalation": { "$ref": "#/$defs/cycle" } }
+    },
+    "qaStopped": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "reviewed_head", "blocking_findings", "blocker_type", "reason_code"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "qa" }, "result": { "enum": ["blocked", "inconclusive"] }, "command_id": { "$ref": "#/$defs/command" }, "reviewed_head": { "$ref": "#/$defs/sha" }, "blocking_findings": { "const": 0 }, "blocker_type": { "$ref": "#/$defs/blocker" }, "reason_code": { "$ref": "#/$defs/reason" } }
+    },
+    "leadActions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "actions"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "lead" }, "result": { "const": "actions_ready" }, "command_id": { "$ref": "#/$defs/command" }, "actions": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/action" } }, "wave": { "$ref": "#/$defs/wave" } }
+    },
+    "leadMerged": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "repository", "issue", "pr", "approved_head", "merge_commit"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "lead" }, "result": { "const": "merged" }, "command_id": { "$ref": "#/$defs/command" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "pr": { "type": "integer", "minimum": 1 }, "approved_head": { "$ref": "#/$defs/sha" }, "merge_commit": { "$ref": "#/$defs/sha" } }
+    },
+    "leadStopped": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "role", "result", "command_id", "reason_code"],
+      "properties": { "version": { "const": 2 }, "role": { "const": "lead" }, "result": { "enum": ["hold", "owner_required"] }, "command_id": { "$ref": "#/$defs/command" }, "reason_code": { "$ref": "#/$defs/reason" } }
+    },
+    "action": {
+      "oneOf": [
+        { "$ref": "#/$defs/dispatchAction" }, { "$ref": "#/$defs/correctAction" }, { "$ref": "#/$defs/planAction" },
+        { "$ref": "#/$defs/mergeAction" }, { "$ref": "#/$defs/holdAction" }, { "$ref": "#/$defs/ownerAction" }
+      ]
+    },
+    "dispatchAction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action_id", "type", "repository", "issue", "role"],
+      "properties": { "action_id": { "$ref": "#/$defs/actionId" }, "type": { "const": "dispatch" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "role": { "enum": ["lead", "implementor", "qa"] }, "expected_head": { "$ref": "#/$defs/sha" } }
+    },
+    "correctAction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action_id", "type", "repository", "issue", "role"],
+      "properties": { "action_id": { "$ref": "#/$defs/actionId" }, "type": { "const": "correct" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "role": { "const": "implementor" }, "expected_previous_head": { "$ref": "#/$defs/sha" } }
+    },
+    "planAction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action_id", "type", "repository", "issue", "role"],
+      "properties": { "action_id": { "$ref": "#/$defs/actionId" }, "type": { "const": "plan_next_wave" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "role": { "const": "lead" } }
+    },
+    "mergeAction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action_id", "type", "repository", "issue", "role", "pr", "expected_head"],
+      "properties": { "action_id": { "$ref": "#/$defs/actionId" }, "type": { "const": "merge_candidate" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "role": { "const": "lead" }, "pr": { "type": "integer", "minimum": 1 }, "expected_head": { "$ref": "#/$defs/sha" } }
+    },
+    "holdAction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action_id", "type", "repository", "reason_code"],
+      "properties": { "action_id": { "$ref": "#/$defs/actionId" }, "type": { "const": "hold" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "reason_code": { "$ref": "#/$defs/reason" } }
+    },
+    "ownerAction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action_id", "type", "repository", "reason_code", "decision_category"],
+      "properties": { "action_id": { "$ref": "#/$defs/actionId" }, "type": { "const": "owner_required" }, "repository": { "$ref": "#/$defs/repository" }, "issue": { "type": "integer", "minimum": 1 }, "reason_code": { "$ref": "#/$defs/reason" }, "decision_category": { "$ref": "#/$defs/decision" } }
+    },
+    "wave": {
+      "type": "object", "additionalProperties": false,
+      "required": ["wave_id", "control_issue", "issues"],
+      "properties": { "wave_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,120}$" }, "control_issue": { "type": "integer", "minimum": 1 }, "issues": { "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } } }
+    }
+  }
+}
