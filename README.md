@@ -151,7 +151,14 @@ The default execution profile is:
 }
 ```
 
-On the Dashboard Project page, paste the exact ChatGPT Project page URL that should own worker chats for that repository. The setting is stored in the local Dashboard database. Leave it empty for global ChatGPT creation.
+To map a repository to a ChatGPT Project:
+
+1. open the intended Project in ChatGPT;
+2. copy the current Project page URL from the address bar, not a conversation URL;
+3. open the matching Dashboard Project;
+4. paste it into **ChatGPT Project URL** and save.
+
+The setting is stored in the local Dashboard database. Leave it empty for global ChatGPT creation.
 
 ## Pilot Readiness
 
