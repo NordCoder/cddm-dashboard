@@ -33,16 +33,16 @@ type PlannerHealthProvider interface {
 }
 
 type ExecutionProfile struct {
-	ProjectID        int64     `json:"project_id"`
-	ResourceProfile  string    `json:"resource_version"`
-	Methodology      string    `json:"methodology_version"`
-	ResultProtocol   string    `json:"result_protocol"`
-	DeliveryMode     string    `json:"delivery_mode"`
-	QASessionMode    string    `json:"qa_session_mode"`
-	ChatCreationMode string    `json:"chat_creation_mode"`
-	ChatGPTProjectURL string   `json:"chatgpt_project_url"`
-	AutoMerge        bool      `json:"auto_merge"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ProjectID         int64     `json:"project_id"`
+	ResourceProfile   string    `json:"resource_version"`
+	Methodology       string    `json:"methodology_version"`
+	ResultProtocol    string    `json:"result_protocol"`
+	DeliveryMode      string    `json:"delivery_mode"`
+	QASessionMode     string    `json:"qa_session_mode"`
+	ChatCreationMode  string    `json:"chat_creation_mode"`
+	ChatGPTProjectURL string    `json:"chatgpt_project_url"`
+	AutoMerge         bool      `json:"auto_merge"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type DeliveryEvidence struct {
@@ -175,7 +175,7 @@ func normalizeChatGPTProjectURL(value string) (string, error) {
 	if err != nil || parsed.Scheme != "https" || parsed.Host != "chatgpt.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", fmt.Errorf("chatgpt_project_url must be an https://chatgpt.com project URL without query or fragment")
 	}
-	projectPath := strings.TrimSuffix(parsed.EscapedPath(), "/")
+	projectPath := strings.TrimSuffix(parsed.Path, "/")
 	if projectPath == "" || projectPath == "/" || path.Clean(projectPath) != projectPath || len(projectPath) > 500 {
 		return "", fmt.Errorf("chatgpt_project_url must point to a ChatGPT project page")
 	}
