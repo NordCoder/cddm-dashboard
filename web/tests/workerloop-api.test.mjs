@@ -14,14 +14,16 @@ const profile = {
   delivery_mode: 'reviewed',
   qa_session_mode: 'manual_fresh_binding',
   chat_creation_mode: 'automatic',
+  chatgpt_project_url: 'https://chatgpt.com/g/g-p-repository/project',
   auto_merge: false,
   updated_at: '2026-07-28T00:00:00Z',
 }
 
-test('execution profile parser preserves durable chat creation mode', async () => {
+test('execution profile parser preserves durable chat creation mode and ChatGPT project URL', async () => {
   const client = new WorkerLoopApiClient(async () => response(profile))
   const value = await client.profile(1)
   assert.equal(value.chat_creation_mode, 'automatic')
+  assert.equal(value.chatgpt_project_url, 'https://chatgpt.com/g/g-p-repository/project')
 })
 
 test('worker-loop client keeps delivery and execution status separate', async () => {
