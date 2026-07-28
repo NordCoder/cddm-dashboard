@@ -10,7 +10,7 @@ export function useRoute(): [RouteState, Navigate] {
     return () => globalThis.removeEventListener('popstate', onPopState)
   }, [])
 
-  const navigate = React.useCallback<Navigate>((path) => {
+  const navigate = React.useMemo<Navigate>(() => (path) => {
     if (path === globalThis.location.pathname) return
     globalThis.history.pushState({}, '', path)
     setRoute(parseRoute(path))
