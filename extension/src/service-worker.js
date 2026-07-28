@@ -326,7 +326,7 @@ export class ExtensionRuntime {
 
   async provisionConversation(request) {
     if (!this.backend) throw new Error("backend_unavailable");
-    const created = await this.adapter.createConversation(request.prompt);
+    const created = await this.adapter.createConversation(request.prompt, request.chatGPTProjectUrl);
     const workerID = randomId();
     const record = {
       worker_id: workerID,
@@ -336,6 +336,7 @@ export class ExtensionRuntime {
       issue_number: request.issueNumber,
       role: request.role,
       lane_key: request.laneKey,
+      chatgpt_project_url: request.chatGPTProjectUrl,
       created_at: Date.now(),
     };
     this.managedWorkers.set(workerID, record);
