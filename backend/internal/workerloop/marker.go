@@ -98,7 +98,7 @@ func validatePayload(payload MarkerPayload, fields map[string]json.RawMessage) (
 	if !commandID.MatchString(payload.CommandID) {
 		return ValidationMalformed, "invalid_command_id"
 	}
-	if payload.Role != "lead" && payload.Role != "implementor" && payload.Role != "qa" {
+	if !validRole(payload.Role) {
 		return ValidationUnsupported, "unsupported_role"
 	}
 	if payload.Version == 1 {
@@ -107,23 +107,115 @@ func validatePayload(payload MarkerPayload, fields map[string]json.RawMessage) (
 	return validateV2(payload, fields)
 }
 
+// validateV1 preserves the original cddm-worker-result/v1 semantic validator.
+// Existing known optional fields remain accepted exactly as before. Only fields
+// introduced exclusively for v2 are rejected so a v1 result cannot smuggle a
+// typed action batch or merge claim into a legacy command.
 func validateV1(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
 	if hasAnyField(fields, "repository", "issue", "merge_commit", "actions", "wave") {
 		return ValidationMalformed, "v2_fields_not_allowed"
 	}
 	switch payload.Role {
 	case "implementor":
-		return validateImplementorV1(payload, fields)
+		return validateImplementorV1(payload)
 	case "qa":
-		return validateQAV1(payload, fields)
+		return validateQAV1(payload)
 	case "lead":
-		return validateLeadV1(payload, fields)
+		return validateLeadV1(payload)
 	default:
 		return ValidationUnsupported, "unsupported_role"
 	}
 }
 
-func validateImplementorV1(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
+func validateImplementorV1(payload MarkerPayload) (string, string) {
+	switch payload.Result {
+	case "candidate_ready":
+		if payload.PR <= 0 || !fullSHA.MatchString(payload.Head) {
+			return ValidationMalformed, "candidate_identity_required"
+		}
+	case "continue":
+	case "blocked":
+		if !blockerTypes[payload.BlockerType] || !reasonCode.MatchString(payload.ReasonCode) {
+			return ValidationMalformed, "blocker_identity_required"
+		}
+	case "no_op":
+		if !reasonCode.MatchString(payload.ReasonCode) {
+			return ValidationMalformed, "reason_code_required"
+		}
+	default:
+		return ValidationUnsupported, "unsupported_result"
+	}
+	return ValidationAccepted, ""
+}
+
+func validateQAV1(payload MarkerPayload) (string, string) {
+	if !fullSHA.MatchString(payload.ReviewedHead) || payload.BlockingFindings == nil {
+		return ValidationMalformed, "qa_identity_required"
+	}
+	switch payload.Result {
+	case "approved":
+		if *payload.BlockingFindings != 0 {
+			return ValidationMalformed, "approved_requires_zero_findings"
+		}
+	case "changes_required":
+		if *payload.BlockingFindings <= 0 {
+			return ValidationMalformed, "changes_required_needs_findings"
+		}
+		if !validCycleEscalation(payload.CycleEscalation) {
+			return ValidationMalformed, "cycle_escalation_required"
+		}
+	case "blocked_inconclusive":
+		if *payload.BlockingFindings != 0 || !blockerTypes[payload.BlockerType] || !reasonCode.MatchString(payload.ReasonCode) {
+			return ValidationMalformed, "inconclusive_blocker_required"
+		}
+	default:
+		return ValidationUnsupported, "unsupported_result"
+	}
+	return ValidationAccepted, ""
+}
+
+func validateLeadV1(payload MarkerPayload) (string, string) {
+	switch payload.Result {
+	case "dispatch":
+		if !validRole(payload.NextRole) {
+			return ValidationMalformed, "next_role_required"
+		}
+	case "continue":
+	case "correct":
+		if payload.NextRole != "implementor" {
+			return ValidationMalformed, "implementor_next_role_required"
+		}
+	case "ready_to_merge":
+		if payload.PR <= 0 || !fullSHA.MatchString(payload.ApprovedHead) {
+			return ValidationMalformed, "merge_identity_required"
+		}
+	case "owner_required", "hold":
+		if !reasonCode.MatchString(payload.ReasonCode) {
+			return ValidationMalformed, "reason_code_required"
+		}
+	default:
+		return ValidationUnsupported, "unsupported_result"
+	}
+	return ValidationAccepted, ""
+}
+
+func validateV2(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
+	if hasAnyField(fields, "next_role") {
+		return ValidationMalformed, "v1_fields_not_allowed"
+	}
+	switch payload.Role {
+	case "implementor":
+		return validateImplementorV2(payload, fields)
+	case "qa":
+		return validateQAV2(payload, fields)
+	case "lead":
+		return validateLeadV2(payload, fields)
+	default:
+		return ValidationUnsupported, "unsupported_role"
+	}
+}
+
+func validateImplementorV2(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
 	switch payload.Result {
 	case "candidate_ready":
 		if !onlyFields(fields, "version", "role", "result", "command_id", "pr", "head") || payload.PR <= 0 || !fullSHA.MatchString(payload.Head) {
@@ -145,73 +237,6 @@ func validateImplementorV1(payload MarkerPayload, fields map[string]json.RawMess
 		return ValidationUnsupported, "unsupported_result"
 	}
 	return ValidationAccepted, ""
-}
-
-func validateQAV1(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
-	if !fullSHA.MatchString(payload.ReviewedHead) || payload.BlockingFindings == nil {
-		return ValidationMalformed, "qa_identity_required"
-	}
-	switch payload.Result {
-	case "approved":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "reviewed_head", "blocking_findings") || *payload.BlockingFindings != 0 {
-			return ValidationMalformed, "approved_requires_zero_findings"
-		}
-	case "changes_required":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "reviewed_head", "blocking_findings", "cycle_escalation") || *payload.BlockingFindings <= 0 || !validCycleEscalation(payload.CycleEscalation) {
-			return ValidationMalformed, "changes_required_identity_invalid"
-		}
-	case "blocked_inconclusive":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "reviewed_head", "blocking_findings", "blocker_type", "reason_code") || *payload.BlockingFindings != 0 || !blockerTypes[payload.BlockerType] || !reasonCode.MatchString(payload.ReasonCode) {
-			return ValidationMalformed, "inconclusive_blocker_required"
-		}
-	default:
-		return ValidationUnsupported, "unsupported_result"
-	}
-	return ValidationAccepted, ""
-}
-
-func validateLeadV1(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
-	switch payload.Result {
-	case "dispatch":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "next_role") || !validRole(payload.NextRole) {
-			return ValidationMalformed, "next_role_required"
-		}
-	case "continue":
-		if !onlyFields(fields, "version", "role", "result", "command_id") {
-			return ValidationMalformed, "unexpected_result_fields"
-		}
-	case "correct":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "next_role") || payload.NextRole != "implementor" {
-			return ValidationMalformed, "implementor_next_role_required"
-		}
-	case "ready_to_merge":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "pr", "approved_head") || payload.PR <= 0 || !fullSHA.MatchString(payload.ApprovedHead) {
-			return ValidationMalformed, "merge_identity_required"
-		}
-	case "owner_required", "hold":
-		if !onlyFields(fields, "version", "role", "result", "command_id", "reason_code") || !reasonCode.MatchString(payload.ReasonCode) {
-			return ValidationMalformed, "reason_code_required"
-		}
-	default:
-		return ValidationUnsupported, "unsupported_result"
-	}
-	return ValidationAccepted, ""
-}
-
-func validateV2(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
-	if hasAnyField(fields, "next_role") {
-		return ValidationMalformed, "v1_fields_not_allowed"
-	}
-	switch payload.Role {
-	case "implementor":
-		return validateImplementorV1(payload, fields)
-	case "qa":
-		return validateQAV2(payload, fields)
-	case "lead":
-		return validateLeadV2(payload, fields)
-	default:
-		return ValidationUnsupported, "unsupported_role"
-	}
 }
 
 func validateQAV2(payload MarkerPayload, fields map[string]json.RawMessage) (string, string) {
@@ -298,11 +323,13 @@ func validateActions(payload MarkerPayload, fields map[string]json.RawMessage) (
 func validateAction(action ActionPayload, fields map[string]json.RawMessage) (string, string) {
 	switch action.Type {
 	case "dispatch":
-		allowed := []string{"action_id", "type", "repository", "issue", "role"}
-		if action.Role == "qa" {
-			allowed = append(allowed, "expected_head")
+		if !onlyFields(fields, "action_id", "type", "repository", "issue", "role", "expected_head") || action.Issue <= 0 || !validRole(action.Role) {
+			return ValidationMalformed, "dispatch_action_invalid"
 		}
-		if !onlyFields(fields, allowed...) || action.Issue <= 0 || !validRole(action.Role) || (action.Role == "qa" && !fullSHA.MatchString(action.ExpectedHead)) {
+		if action.ExpectedHead != "" && !fullSHA.MatchString(action.ExpectedHead) {
+			return ValidationMalformed, "dispatch_action_invalid"
+		}
+		if action.Role == "qa" && action.ExpectedHead == "" {
 			return ValidationMalformed, "dispatch_action_invalid"
 		}
 	case "correct":
