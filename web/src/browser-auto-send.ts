@@ -1,80 +1,25 @@
 import { ApiClient, ApiError } from './api.js'
-import { BrowserApiClient, BrowserBinding, DeliveryCommand } from './browser-api.js'
+import { BrowserApiClient } from './browser-api.js'
+import {
+  automaticDeliveryIdentity,
+  automaticDeliveryRoute,
+  autoSendRetryDue,
+  AutoSendRecord,
+  matchingDeliveryExists,
+  readAutoSendEnabled,
+  writeAutoSendEnabled,
+} from './browser-auto-send-model.js'
 import {
   buildConfirmationInput,
   createIdempotencyKey,
   deliveryEligibility,
-  deliveryRouteIdentity,
 } from './browser-delivery-model.js'
 import { GenerationResult } from './domain.js'
 
-const ENABLED_KEY = 'cddm.browser-delivery.auto-send.enabled'
 const RECORD_PREFIX = 'cddm.browser-delivery.auto-send.record'
 const POLL_INTERVAL_MS = 5_000
-const RETRY_INTERVAL_MS = 15_000
-
-type AutoSendStatus = 'pending' | 'submitted' | 'blocked'
-
-export type AutoSendRecord = {
-  identity: string
-  idempotencyKey: string
-  status: AutoSendStatus
-  lastAttemptAt: number
-  message?: string
-}
 
 const memoryRecords = new Map<string, AutoSendRecord>()
-
-export function automaticDeliveryIdentity(
-  projectID: number,
-  issueNumber: number,
-  result: GenerationResult,
-  binding: BrowserBinding,
-): string {
-  if (!result.plan || !result.plan_id || !result.policy_decision.plan_hash || !binding.presence_token) {
-    throw new Error('automatic_delivery_identity_incomplete')
-  }
-  return JSON.stringify([
-    projectID,
-    issueNumber,
-    result.plan_id,
-    result.policy_decision.plan_hash,
-    result.context.context_hash,
-    result.plan.expected_head,
-    result.plan.lane_key,
-    binding.binding_id,
-    binding.binding_version,
-    binding.presence_token,
-  ])
-}
-
-export function matchingDeliveryExists(
-  deliveries: DeliveryCommand[],
-  result: GenerationResult,
-  binding: BrowserBinding,
-): boolean {
-  if (!result.plan || !result.plan_id || !result.policy_decision.plan_hash) return false
-  return deliveries.some((command) => (
-    command.plan_id === result.plan_id
-    && command.plan_hash === result.policy_decision.plan_hash
-    && command.expected_head === result.plan!.expected_head
-    && command.lane_key === result.plan!.lane_key
-    && command.binding_id === binding.binding_id
-    && command.binding_version === binding.binding_version
-  ))
-}
-
-export function autoSendRetryDue(record: AutoSendRecord, now: number): boolean {
-  return record.status === 'pending' && now - record.lastAttemptAt >= RETRY_INTERVAL_MS
-}
-
-function readEnabled(): boolean {
-  try { return globalThis.localStorage?.getItem(ENABLED_KEY) === 'true' } catch { return false }
-}
-
-function writeEnabled(enabled: boolean): void {
-  try { globalThis.localStorage?.setItem(ENABLED_KEY, String(enabled)) } catch { /* local preference only */ }
-}
 
 function recordKey(projectID: number, issueNumber: number): string {
   return `${RECORD_PREFIX}:${projectID}:${issueNumber}`
@@ -144,13 +89,17 @@ class BrowserAutoSendController {
     const identity = inspector.querySelector('.delivery-inspector__identity')
     if (!(headerActions instanceof HTMLElement) || !(identity instanceof HTMLElement)) return
 
+    const route = automaticDeliveryRoute(globalThis.location.pathname)
     const label = document.createElement('label')
     label.className = 'delivery-auto-send'
-    label.title = 'Automatically send each new backend-approved immutable prompt when this browser binding is ready.'
+    label.title = route
+      ? 'Automatically send each new backend-approved immutable prompt for this work unit when its browser binding is ready.'
+      : 'Auto-send is unavailable while viewing a historical Prompt Plan.'
     const checkbox = document.createElement('input')
     checkbox.type = 'checkbox'
-    checkbox.checked = readEnabled()
-    checkbox.setAttribute('aria-label', 'Automatically send approved prompts without review')
+    checkbox.disabled = route === null
+    checkbox.checked = route !== null && readAutoSendEnabled(globalThis.location.pathname)
+    checkbox.setAttribute('aria-label', 'Automatically send approved prompts for this work unit without review')
     const copy = document.createElement('span')
     copy.textContent = 'Auto-send'
     label.append(checkbox, copy)
@@ -162,13 +111,17 @@ class BrowserAutoSendController {
     identity.append(status)
 
     checkbox.addEventListener('change', () => {
-      writeEnabled(checkbox.checked)
-      this.setStatus(checkbox.checked ? 'Enabled; waiting for a new approved plan.' : 'Off')
+      if (!writeAutoSendEnabled(globalThis.location.pathname, checkbox.checked)) {
+        checkbox.checked = false
+        this.setStatus('Unavailable on this route')
+        return
+      }
+      this.setStatus(checkbox.checked ? 'Enabled for this work unit; waiting for a new approved plan.' : 'Off')
       if (checkbox.checked) void this.tick()
     })
     this.checkbox = checkbox
     this.status = status
-    this.setStatus(checkbox.checked ? 'Enabled' : 'Off')
+    this.setStatus(route ? (checkbox.checked ? 'Enabled for this work unit' : 'Off') : 'Unavailable on historical plan view')
   }
 
   private setStatus(value: string): void {
@@ -178,13 +131,11 @@ class BrowserAutoSendController {
 
   private async tick(): Promise<void> {
     this.ensureControls()
-    if (this.stopped || this.running || !readEnabled()) {
-      if (!readEnabled()) this.setStatus('Off')
-      return
-    }
-    const route = deliveryRouteIdentity(globalThis.location.pathname)
-    if (!route) {
-      this.setStatus('Waiting for a work unit')
+    const path = globalThis.location.pathname
+    const route = automaticDeliveryRoute(path)
+    if (this.stopped || this.running || !route || !readAutoSendEnabled(path)) {
+      if (!route) this.setStatus('Unavailable on historical plan view')
+      else if (!readAutoSendEnabled(path)) this.setStatus('Off')
       return
     }
 
