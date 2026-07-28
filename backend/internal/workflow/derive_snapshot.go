@@ -30,7 +30,9 @@ func deriveLifecycle(labels []supervisor.Label, warnings []Warning) (string, []W
 }
 
 func normalizeLifecycleLabel(label string) string {
-	value := normalizeToken(label)
+	value := strings.ToLower(strings.TrimSpace(label))
+	value = strings.TrimSpace(strings.TrimPrefix(value, "status:"))
+	value = normalizeToken(value)
 	for _, prefix := range []string{"status_", "lifecycle_", "stage_"} {
 		value = strings.TrimPrefix(value, prefix)
 	}
