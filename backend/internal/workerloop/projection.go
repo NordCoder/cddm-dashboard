@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	DefaultMethodology       = "cddm-minimal/v2.0"
-	DefaultResultProtocol    = "cddm-worker-result/v1"
-	DeliveryModeReviewed     = "reviewed"
-	DeliveryModeAuto         = "auto"
-	QAModeManualFresh        = "manual_fresh_binding"
-	ChatCreationModeManual   = "manual"
-	ChatCreationModeAutomatic = "automatic"
+	DefaultMethodology    = "cddm-minimal/v2.0"
+	DefaultResultProtocol = "cddm-worker-result/v1"
+	DeliveryModeReviewed  = "reviewed"
+	DeliveryModeAuto      = "auto"
+	QAModeManualFresh     = "manual_fresh_binding"
 )
+
+const ChatCreationModeManual = "manual"
+const ChatCreationModeAutomatic = "automatic"
 
 type PlannerHealthProvider interface {
 	Health(context.Context) planning.Health
