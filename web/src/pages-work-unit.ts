@@ -1,4 +1,5 @@
 import { ApiClient, BackendResponseError, PlanningMode } from './api.js'
+import { BrowserApiClient, BrowserWorker } from './browser-api.js'
 import { GenerationResult, WorkUnitState } from './domain.js'
 import { paths } from './router.js'
 import {
@@ -11,6 +12,10 @@ import {
   WorkUnitContent,
 } from './ui.js'
 import { api, errorMessage, resourceContent, useResource } from './app-runtime.js'
+import { PilotReadiness, WorkerLoopApiClient, WorkUnitExecution } from './workerloop-api.js'
+
+const workerLoopApi = new WorkerLoopApiClient()
+const browserApi = new BrowserApiClient()
 
 function usePlanGeneration(projectID: number, issueNumber: number, navigate: Navigate, afterGenerate?: () => void): {
   mode: PlanningMode
@@ -46,19 +51,83 @@ function usePlanGeneration(projectID: number, issueNumber: number, navigate: Nav
   return { mode, setMode, generating, error: generationError || undefined, generate }
 }
 
+type WorkUnitBundle = {
+  workUnit: WorkUnitState
+  execution: WorkUnitExecution
+  readiness: PilotReadiness
+  workers: BrowserWorker[]
+}
+
+async function loadWorkUnit(projectID: number, issueNumber: number, signal: AbortSignal): Promise<WorkUnitBundle> {
+  const [workUnit, execution, readiness, workers] = await Promise.all([
+    api.workUnitState(projectID, issueNumber, signal),
+    workerLoopApi.execution(projectID, issueNumber, signal),
+    workerLoopApi.readiness(projectID, issueNumber, signal),
+    browserApi.workers(signal),
+  ])
+  if (workUnit.identity.project_id !== execution.project_id || workUnit.identity.issue_number !== execution.issue_number) {
+    throw new BackendResponseError('Malformed backend response: worker-loop execution identity does not match the requested work unit')
+  }
+  return { workUnit, execution, readiness, workers }
+}
+
 export function WorkUnitPage(props: { projectID: number; issueNumber: number; navigate: Navigate }): unknown {
-  const resource = useResource<WorkUnitState>(
+  const resource = useResource<WorkUnitBundle>(
     `work-unit:${props.projectID}:${props.issueNumber}`,
-    (signal) => api.workUnitState(props.projectID, props.issueNumber, signal),
+    (signal) => loadWorkUnit(props.projectID, props.issueNumber, signal),
   )
   const generation = usePlanGeneration(props.projectID, props.issueNumber, props.navigate)
+  const [mutationBusy, setMutationBusy] = React.useState(false)
+  const [mutationFeedback, setMutationFeedback] = React.useState('')
 
-  return resourceContent(resource, (workUnit) => WorkUnitContent({
-    workUnit,
+  const mutate = (action: () => Promise<unknown>, success: string) => {
+    if (mutationBusy) return
+    setMutationBusy(true)
+    setMutationFeedback('')
+    void action()
+      .then(() => {
+        setMutationFeedback(success)
+        resource.refresh()
+      })
+      .catch((error: unknown) => setMutationFeedback(errorMessage(error)))
+      .finally(() => setMutationBusy(false))
+  }
+
+  return resourceContent(resource, (bundle) => WorkUnitContent({
+    workUnit: bundle.workUnit,
+    execution: bundle.execution,
+    readiness: bundle.readiness,
+    workers: bundle.workers,
     navigate: props.navigate,
     onRefresh: resource.refresh,
+    mutationBusy,
+    mutationFeedback: mutationFeedback || undefined,
+    onBindRole: (role, worker) => {
+      if (!worker.target) return
+      const current = bundle.execution.role_bindings.find((item) => item.role === role)?.binding
+      mutate(
+        () => workerLoopApi.bindRole(props.projectID, props.issueNumber, role, {
+          expected_binding_version: current?.binding_version,
+          worker_id: worker.worker_id,
+          target: worker.target!,
+        }),
+        `${role} binding updated.`,
+      )
+    },
+    onDisableRole: (role) => {
+      const current = bundle.execution.role_bindings.find((item) => item.role === role)?.binding
+      if (!current) return
+      mutate(
+        () => workerLoopApi.disableRole(props.projectID, props.issueNumber, role, current.binding_version),
+        `${role} binding disabled.`,
+      )
+    },
+    onDeliveryMode: (mode) => mutate(
+      () => workerLoopApi.updateProfile(props.projectID, { ...bundle.execution.profile, delivery_mode: mode }),
+      `Delivery mode set to ${mode}.`,
+    ),
     launcher: PlanLauncher({
-      ownerRequired: workUnit.attention.kind === 'owner_required',
+      ownerRequired: bundle.workUnit.attention.kind === 'owner_required',
       mode: generation.mode,
       onMode: generation.setMode,
       onGenerate: generation.generate,

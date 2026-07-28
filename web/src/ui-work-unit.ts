@@ -1,5 +1,8 @@
+import { BrowserWorker } from './browser-api.js'
 import { ResultEvidence, Warning, WorkUnitState } from './domain.js'
 import { paths } from './router.js'
+import { PilotReadiness, WorkUnitExecution } from './workerloop-api.js'
+import { WorkerLoopPanel } from './ui-worker-loop.js'
 import {
   EmptyState,
   ExternalLink,
@@ -74,14 +77,35 @@ function evidenceCard(label: string, content: unknown, detail?: unknown): unknow
 
 export function WorkUnitContent(props: {
   workUnit: WorkUnitState
+  execution?: WorkUnitExecution
+  readiness?: PilotReadiness
+  workers?: BrowserWorker[]
   navigate: Navigate
   onRefresh: () => void
+  mutationBusy?: boolean
+  mutationFeedback?: string
+  onBindRole?: (role: string, worker: BrowserWorker) => void
+  onDisableRole?: (role: string) => void
+  onDeliveryMode?: (mode: 'reviewed' | 'auto') => void
   launcher: unknown
 }): unknown {
   const item = props.workUnit
   const candidate = item.candidate.current
   const ownerRequired = item.attention.kind === 'owner_required'
   const evidence = item.parsed_comments.filter((comment) => comment.meaningful).slice(-6).reverse()
+  const workerLoop = props.execution && props.readiness
+    ? WorkerLoopPanel({
+        workUnit: item,
+        execution: props.execution,
+        readiness: props.readiness,
+        workers: props.workers ?? [],
+        busy: props.mutationBusy ?? false,
+        feedback: props.mutationFeedback,
+        onBindRole: props.onBindRole ?? (() => undefined),
+        onDisableRole: props.onDisableRole ?? (() => undefined),
+        onDeliveryMode: props.onDeliveryMode ?? (() => undefined),
+      })
+    : null
   return h(
     React.Fragment,
     null,
@@ -112,6 +136,7 @@ export function WorkUnitContent(props: {
       evidenceCard('Exact-Head CI', StatusBadge({ value: ciLabel(item) }), h(React.Fragment, null, h('p', { className: 'muted' }, item.ci.head_sha ? `Head ${shortSha(item.ci.head_sha)} · ${item.ci.source}` : item.ci.source || 'No CI evidence'), item.ci.details_url ? ExternalLink({ href: item.ci.details_url, children: 'Open CI evidence' }) : null)),
     ),
     item.active_blocker ? h('section', { className: 'callout callout--danger' }, h('strong', null, 'Active blocker'), h('p', null, `${item.active_blocker.role} reported ${item.active_blocker.status} at ${formatDate(item.active_blocker.created_at)}.`), item.active_blocker.head ? h('code', { className: 'breakable' }, item.active_blocker.head) : null) : null,
+    workerLoop,
     SectionHeading({ title: 'Latest worker results', copy: 'Current and stale terminal evidence by role.' }),
     h('div', { className: 'results-grid' }, ResultCard({ role: 'Lead', result: item.latest_results.lead }), ResultCard({ role: 'Implementor handoff', result: item.latest_results.implementor }), ResultCard({ role: 'QA verdict', result: item.latest_results.qa })),
     h(
