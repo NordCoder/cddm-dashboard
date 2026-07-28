@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cddm-worker-result/v1",
+  "title": "CDDM Dashboard Worker Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "role", "result", "command_id"],
+  "properties": {
+    "version": { "const": 1 },
+    "role": { "enum": ["lead", "implementor", "qa"] },
+    "result": { "type": "string", "minLength": 1 },
+    "command_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "pr": { "type": "integer", "minimum": 1 },
+    "head": { "$ref": "#/$defs/fullSha" },
+    "reviewed_head": { "$ref": "#/$defs/fullSha" },
+    "approved_head": { "$ref": "#/$defs/fullSha" },
+    "blocking_findings": { "type": "integer", "minimum": 0 },
+    "blocker_type": { "enum": ["candidate", "process", "authority", "infrastructure"] },
+    "reason_code": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[a-z0-9][a-z0-9_.-]*$" },
+    "cycle_escalation": { "enum": ["none", "lead_cycle_review", "owner_exception"] },
+    "next_role": { "enum": ["lead", "implementor", "qa"] }
+  },
+  "$defs": {
+    "fullSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "role": { "const": "implementor" } } },
+      "then": {
+        "properties": { "result": { "enum": ["candidate_ready", "continue", "blocked", "no_op"] } },
+        "allOf": [
+          { "if": { "properties": { "result": { "const": "candidate_ready" } } }, "then": { "required": ["pr", "head"] } },
+          { "if": { "properties": { "result": { "const": "blocked" } } }, "then": { "required": ["blocker_type", "reason_code"] } },
+          { "if": { "properties": { "result": { "const": "no_op" } } }, "then": { "required": ["reason_code"] } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "qa" } } },
+      "then": {
+        "properties": { "result": { "enum": ["approved", "changes_required", "blocked_inconclusive"] } },
+        "required": ["reviewed_head", "blocking_findings"],
+        "allOf": [
+          { "if": { "properties": { "result": { "const": "approved" } } }, "then": { "properties": { "blocking_findings": { "const": 0 } } } },
+          { "if": { "properties": { "result": { "const": "changes_required" } } }, "then": { "required": ["cycle_escalation"], "properties": { "blocking_findings": { "minimum": 1 } } } },
+          { "if": { "properties": { "result": { "const": "blocked_inconclusive" } } }, "then": { "required": ["blocker_type", "reason_code"], "properties": { "blocking_findings": { "const": 0 } } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "lead" } } },
+      "then": {
+        "properties": { "result": { "enum": ["dispatch", "continue", "correct", "ready_to_merge", "owner_required", "hold"] } },
+        "allOf": [
+          { "if": { "properties": { "result": { "const": "dispatch" } } }, "then": { "required": ["next_role"] } },
+          { "if": { "properties": { "result": { "const": "correct" } } }, "then": { "required": ["next_role"], "properties": { "next_role": { "const": "implementor" } } } },
+          { "if": { "properties": { "result": { "const": "ready_to_merge" } } }, "then": { "required": ["pr", "approved_head"] } },
+          { "if": { "properties": { "result": { "enum": ["owner_required", "hold"] } } }, "then": { "required": ["reason_code"] } }
+        ]
+      }
+    }
+  ]
+}

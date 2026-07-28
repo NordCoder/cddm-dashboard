@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/NordCoder/cddm-dashboard/backend/internal/database"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/resourcepack"
 )
@@ -76,6 +78,43 @@ func TestRecoveryReconciliationRefreshesAffectedProjects(t *testing.T) {
 	assertCommandStatus(t, store, command.ID, CommandAwaitingResult)
 	if len(refresher.projects) != 1 || refresher.projects[0] != project.ID {
 		t.Fatalf("refreshed projects = %v, want [%d]", refresher.projects, project.ID)
+	}
+}
+
+func TestDeliveredCommandAcceptsTerminalMarkerObservedAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pilot-recovery.db")
+	db, project, store, _ := testService(t, path)
+	command := createTestWorkflowCommand(t, store, project.ID, "cmd-downtime-result")
+	insertTestDeliveryCommand(t, db, project.ID, command.IssueNumber, "delivery-downtime-result", delivery.StatusDelivered)
+	coordinator := NewDeliveryCoordinator(db, staticBrowserDelivery{}, nil, NewCommandEngine(store, resourcepack.Package{}))
+	if err := coordinator.link(context.Background(), command.ID, "delivery-downtime-result"); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertCommandStatus(t, store, command.ID, CommandAwaitingResult)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := database.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restartedStore := NewStore(reopened)
+	assertCommandStatus(t, restartedStore, command.ID, CommandAwaitingResult)
+	service := NewService(restartedStore)
+	snapshot := projectSnapshot(project, issueWithComments(command.IssueNumber, comment(3001, continueMarker(command.ID))))
+	for range 2 {
+		if err := service.ObserveProjectSnapshot(context.Background(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertCommandStatus(t, restartedStore, command.ID, CommandCompleted)
+	if results := commandResults(t, restartedStore, project.ID, command.ID); len(results) != 1 || results[0].ValidationStatus != ValidationAccepted {
+		t.Fatalf("results = %+v", results)
 	}
 }
 

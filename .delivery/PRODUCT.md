@@ -4,53 +4,65 @@
 
 CDDM Dashboard is a local/private control plane for supervising AI-assisted software delivery across multiple GitHub repositories.
 
-The product reduces manual coordination by projecting canonical repository state into one operational workspace, deriving deterministic workflow state, preparing policy-controlled prompts, and delivering approved prompts to the intended AI work surface without granting the model hidden product authority.
+It projects canonical GitHub state into one operational workspace, derives deterministic workflow routes, creates policy-controlled Workflow Commands, delivers versioned role prompts to exact ChatGPT conversations, and accepts terminal worker claims only through validated GitHub Issue comments.
 
-## Primary User
+## Primary user
 
-A solo developer or small engineering team operating multiple repositories and AI-assisted delivery flows.
+A solo developer or small engineering team operating multiple repositories and AI-assisted Lead, Implementor, and QA flows.
 
-## Core Flow
+## Core flow
 
 ```text
-GitHub repository state
-→ normalized project snapshots
-→ deterministic workflow state and routing
-→ bounded Prompt Context
-→ OpenCode composition / deterministic fallback
-→ Policy Engine
-→ dashboard review and explicit user action
-→ browser delivery to the intended ChatGPT conversation
+GitHub facts
+→ normalized Project / Work Unit snapshot
+→ deterministic route and Prompt Context
+→ policy-approved Workflow Command
+→ exact Browser Delivery Command
+→ bound ChatGPT role conversation
+→ worker GitHub Issue comment
+→ cddm-worker-result/v1 validation and correlation
+→ external GitHub fact verification
+→ next deterministic route
 ```
 
-## Current State
+## Implemented
 
-Stages 1–5 are complete:
+- Go/React/SQLite local-first application;
+- read-only multi-repository GitHub synchronization;
+- deterministic lifecycle, Candidate, blocker, CI, QA freshness, attention, and routing;
+- Prompt Context, Prompt Plan, Policy Engine, OpenCode composition, and deterministic fallback;
+- responsive Supervisor workspace and mobile layout;
+- browser worker identity, exact lane-to-chat binding, Chrome MV3 delivery, reviewed delivery, opt-in auto-send, Manual Copy fallback, durable claims, and uncertain-delivery safety;
+- repository-owned `cddm-dashboard-resources/v1.0` role resources and `cddm-worker-result/v1` schema;
+- durable Workflow Commands and Worker Results, marker validation/correlation, conflict handling, GitHub readback verification, and deterministic next routing;
+- typed Work Unit execution surfaces, Lead/Implementor/QA bindings, `manual_fresh_binding` QA mode, and Project Pilot Readiness diagnostics;
+- restart, duplicate synchronization, delivered-without-result, downtime-result, exact-Head, and combined integration fixtures.
 
-- runnable Go/React/SQLite foundation;
-- read-only multi-repository GitHub supervision;
-- deterministic worker-result parsing, lifecycle, attention, and routing;
-- OpenCode Prompt Planner with deterministic Policy Engine and fallback;
-- responsive web dashboard with plan review, local editing, and manual Copy delivery.
+## Pilot-ready boundary
 
-The current product boundary ends at manual clipboard delivery.
+The product is ready for a controlled local/private pilot after the operator:
 
-## v1.0 Target
+1. installs and starts the current build;
+2. configures GitHub authentication and browser delivery;
+3. adds a Project;
+4. binds Lead and Implementor conversations;
+5. uses a fresh QA binding when requested;
+6. obtains a successful Pilot Readiness result.
 
-v1.0 adds:
+Pilot-ready does not mean a pilot was executed. `NordCoder/misak-website#140` remains untouched by this integration.
 
-- explicit browser/chat binding;
-- confirmed Chrome-based prompt delivery without reading ChatGPT responses;
-- stale, duplicate, restart, and offline-browser safety;
-- mobile/private-network operation and pilot hardening.
+## Product boundaries
 
-## Product Boundaries
+- GitHub facts are the external authority for PR identity, exact Head, CI, QA freshness, mergeability, and merge result.
+- Browser Delivery, Workflow Command, Worker Result, and GitHub facts are distinct records.
+- A worker-result marker is a claim, never authority by itself.
+- Backend code owns routing, Candidate validity, blocker semantics, correlation, verification, and policy decisions.
+- ChatGPT response content is never read, scraped, classified, or persisted.
+- Auto-send may deliver an already authorized command; it does not create product authority.
+- `auto_merge=false`; merge remains explicit Lead/Owner authority.
+- Credentials remain process/runtime configuration and are not stored in model context, frontend state, or Project records.
+- Initial deployment is loopback/local-private, not public multi-tenant SaaS.
 
-- GitHub remains the canonical external delivery-state source supervised by the product.
-- Backend logic owns workflow lifecycle, routing, Candidate validity, blocker semantics, and policy decisions.
-- OpenCode may compose wording but does not acquire routing or merge authority.
-- ChatGPT Web responses are not read, scraped, classified, or persisted.
-- Browser delivery is explicitly confirmed by the user by default.
-- Automatic merge and unattended autonomous dispatch are outside the v1.0 default operating model.
-- Credentials remain process/runtime configuration and are not stored in frontend state or model context.
-- Initial deployment is local/private-network oriented, not public multi-tenant SaaS.
+## Future automation
+
+Possible later work includes authenticated remote deployment, automatic creation of fresh ChatGPT conversations, richer notification channels, and explicitly approved merge automation. None is required for the current pilot.
