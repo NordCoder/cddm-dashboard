@@ -41,6 +41,12 @@ export type DeliveryInspectorActions = {
 
 const OPEN_KEY = 'cddm.browser-delivery.inspector-open'
 
+export function initialInspectorOpen(stored: string | null, compact: boolean): boolean {
+  if (stored === 'true') return true
+  if (stored === 'false') return false
+  return !compact
+}
+
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag)
   if (className) element.className = className
@@ -291,7 +297,12 @@ export class DeliveryInspectorView {
   }
 
   private readOpenState(): boolean {
-    try { return globalThis.sessionStorage?.getItem(OPEN_KEY) !== 'false' } catch { return true }
+    const compact = globalThis.matchMedia?.('(max-width: 800px)').matches ?? false
+    try {
+      return initialInspectorOpen(globalThis.sessionStorage?.getItem(OPEN_KEY) ?? null, compact)
+    } catch {
+      return initialInspectorOpen(null, compact)
+    }
   }
 
   private setOpen(open: boolean): void {
