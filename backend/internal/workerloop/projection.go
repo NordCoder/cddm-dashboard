@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -23,19 +25,24 @@ const (
 	QAModeManualFresh     = "manual_fresh_binding"
 )
 
+const ChatCreationModeManual = "manual"
+const ChatCreationModeAutomatic = "automatic"
+
 type PlannerHealthProvider interface {
 	Health(context.Context) planning.Health
 }
 
 type ExecutionProfile struct {
-	ProjectID       int64     `json:"project_id"`
-	ResourceProfile string    `json:"resource_version"`
-	Methodology     string    `json:"methodology_version"`
-	ResultProtocol  string    `json:"result_protocol"`
-	DeliveryMode    string    `json:"delivery_mode"`
-	QASessionMode   string    `json:"qa_session_mode"`
-	AutoMerge       bool      `json:"auto_merge"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ProjectID         int64     `json:"project_id"`
+	ResourceProfile   string    `json:"resource_version"`
+	Methodology       string    `json:"methodology_version"`
+	ResultProtocol    string    `json:"result_protocol"`
+	DeliveryMode      string    `json:"delivery_mode"`
+	QASessionMode     string    `json:"qa_session_mode"`
+	ChatCreationMode  string    `json:"chat_creation_mode"`
+	ChatGPTProjectURL string    `json:"chatgpt_project_url"`
+	AutoMerge         bool      `json:"auto_merge"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type DeliveryEvidence struct {
@@ -114,7 +121,7 @@ func (s *ProjectionService) Profile(ctx context.Context, projectID int64) (Execu
 		return ExecutionProfile{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO project_execution_profiles (project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,updated_at) VALUES (?,?,?,?,?,?,0,?) ON CONFLICT(project_id) DO NOTHING`, projectID, resourcepack.DefaultProfile, DefaultMethodology, DefaultResultProtocol, DeliveryModeReviewed, QAModeManualFresh, now)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO project_execution_profiles (project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,chat_creation_mode,chatgpt_project_url,auto_merge,updated_at) VALUES (?,?,?,?,?,?,?,?,0,?) ON CONFLICT(project_id) DO NOTHING`, projectID, resourcepack.DefaultProfile, DefaultMethodology, DefaultResultProtocol, DeliveryModeReviewed, QAModeManualFresh, ChatCreationModeManual, "", now)
 	if err != nil {
 		return ExecutionProfile{}, err
 	}
@@ -127,11 +134,20 @@ func (s *ProjectionService) UpdateProfile(ctx context.Context, profile Execution
 	profile.ResultProtocol = strings.TrimSpace(profile.ResultProtocol)
 	profile.DeliveryMode = strings.TrimSpace(profile.DeliveryMode)
 	profile.QASessionMode = strings.TrimSpace(profile.QASessionMode)
+	profile.ChatCreationMode = strings.TrimSpace(profile.ChatCreationMode)
+	projectURL, err := normalizeChatGPTProjectURL(profile.ChatGPTProjectURL)
+	if err != nil {
+		return ExecutionProfile{}, err
+	}
+	profile.ChatGPTProjectURL = projectURL
 	if profile.ProjectID <= 0 || profile.ResourceProfile != resourcepack.DefaultProfile || profile.Methodology != DefaultMethodology || profile.ResultProtocol != DefaultResultProtocol {
 		return ExecutionProfile{}, fmt.Errorf("unsupported execution profile identity")
 	}
 	if profile.DeliveryMode != DeliveryModeReviewed && profile.DeliveryMode != DeliveryModeAuto {
 		return ExecutionProfile{}, fmt.Errorf("delivery mode must be reviewed or auto")
+	}
+	if profile.ChatCreationMode != ChatCreationModeManual && profile.ChatCreationMode != ChatCreationModeAutomatic {
+		return ExecutionProfile{}, fmt.Errorf("chat_creation_mode must be manual or automatic")
 	}
 	if profile.QASessionMode != QAModeManualFresh || profile.AutoMerge {
 		return ExecutionProfile{}, fmt.Errorf("qa_session_mode must be manual_fresh_binding and auto_merge must remain false")
@@ -140,11 +156,38 @@ func (s *ProjectionService) UpdateProfile(ctx context.Context, profile Execution
 		return ExecutionProfile{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `UPDATE project_execution_profiles SET resource_profile=?,methodology=?,result_protocol=?,delivery_mode=?,qa_session_mode=?,auto_merge=0,updated_at=? WHERE project_id=?`, profile.ResourceProfile, profile.Methodology, profile.ResultProtocol, profile.DeliveryMode, profile.QASessionMode, now, profile.ProjectID)
+	_, err = s.db.ExecContext(ctx, `UPDATE project_execution_profiles SET resource_profile=?,methodology=?,result_protocol=?,delivery_mode=?,qa_session_mode=?,chat_creation_mode=?,chatgpt_project_url=?,auto_merge=0,updated_at=? WHERE project_id=?`, profile.ResourceProfile, profile.Methodology, profile.ResultProtocol, profile.DeliveryMode, profile.QASessionMode, profile.ChatCreationMode, profile.ChatGPTProjectURL, now, profile.ProjectID)
 	if err != nil {
 		return ExecutionProfile{}, err
 	}
 	return s.readProfile(ctx, profile.ProjectID)
+}
+
+func normalizeChatGPTProjectURL(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return "", nil
+	}
+	if len(raw) > 700 {
+		return "", fmt.Errorf("chatgpt_project_url is too long")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host != "chatgpt.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("chatgpt_project_url must be an https://chatgpt.com project URL without query or fragment")
+	}
+	projectPath := strings.TrimSuffix(parsed.Path, "/")
+	if projectPath == "" || projectPath == "/" || path.Clean(projectPath) != projectPath || len(projectPath) > 500 {
+		return "", fmt.Errorf("chatgpt_project_url must point to a ChatGPT project page")
+	}
+	segments := strings.Split(strings.Trim(projectPath, "/"), "/")
+	for index := 0; index+1 < len(segments); index++ {
+		if segments[index] == "c" {
+			return "", fmt.Errorf("chatgpt_project_url must not be a conversation URL")
+		}
+	}
+	parsed.Path = projectPath
+	parsed.RawPath = ""
+	return parsed.String(), nil
 }
 
 func (s *ProjectionService) WorkUnit(ctx context.Context, projectID int64, issueNumber int) (WorkUnitExecution, error) {
@@ -259,7 +302,7 @@ func (s *ProjectionService) readProfile(ctx context.Context, projectID int64) (E
 	var value ExecutionProfile
 	var autoMerge int
 	var updated string
-	err := s.db.QueryRowContext(ctx, `SELECT project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,updated_at FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode, &value.QASessionMode, &autoMerge, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,chat_creation_mode,chatgpt_project_url,auto_merge,updated_at FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode, &value.QASessionMode, &value.ChatCreationMode, &value.ChatGPTProjectURL, &autoMerge, &updated)
 	if err != nil {
 		return ExecutionProfile{}, err
 	}

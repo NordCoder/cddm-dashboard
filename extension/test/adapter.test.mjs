@@ -6,11 +6,13 @@ const chatOne = { id: 11, url: "https://chatgpt.com/c/one" };
 const dashboard = { id: 22, url: "http://localhost:8080/projects/1/work-units/20/plans" };
 const targetOne = { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/one" };
 
-function fixture() {
+function fixture(options = {}) {
   const tabs = new Map([[chatOne.id, { ...chatOne }], [dashboard.id, { ...dashboard }]]);
   let activeId = chatOne.id;
+  let nextTabId = 40;
   const session = {};
   const messages = [];
+  const createdURLs = [];
   const chrome = {
     storage: { session: {
       async get(key) { return { [key]: session[key] }; },
@@ -20,11 +22,26 @@ function fixture() {
     tabs: {
       async query() { const tab = tabs.get(activeId); return tab ? [{ ...tab }] : []; },
       async get(id) { const tab = tabs.get(id); if (!tab) throw new Error("missing tab"); return { ...tab }; },
-      async sendMessage(id, message) { messages.push({ id, message }); return { ok: true }; }
+      async create(createOptions) {
+        createdURLs.push(createOptions.url);
+        const tab = { id: nextTabId++, url: createOptions.url };
+        tabs.set(tab.id, tab);
+        if (createOptions.active) activeId = tab.id;
+        return { ...tab };
+      },
+      async sendMessage(id, message) {
+        messages.push({ id, message });
+        if (message.type === "bootstrap-new-chat") {
+          if (typeof options.bootstrapURL === "function") tabs.get(id).url = options.bootstrapURL(message);
+          else if (message.project_url) tabs.get(id).url = `${message.project_url.replace(/\/project$/, "")}/c/fresh`;
+          else tabs.get(id).url = "https://chatgpt.com/c/fresh";
+        }
+        return { ok: true };
+      }
     }
   };
   return {
-    adapter: new ChromeTargetAdapter(chrome), tabs, messages,
+    adapter: new ChromeTargetAdapter(chrome), tabs, messages, createdURLs,
     activate(id) { activeId = id; },
     close(id) { tabs.delete(id); },
     navigate(id, url) { tabs.get(id).url = url; }
@@ -83,4 +100,42 @@ test("activating a different supported ChatGPT conversation replaces the tracked
   assert.deepEqual(await f.adapter.currentTarget(), { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/two" });
   f.activate(dashboard.id);
   assert.deepEqual(await f.adapter.currentTarget(), { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/two" });
+});
+
+test("fresh managed global chat is created, bootstrapped and retained as an exact-tab adapter", async () => {
+  const f = fixture();
+  await f.adapter.currentTarget();
+  const created = await f.adapter.createConversation("@02-implementor-trigger.md\n\nWait for the command.");
+  assert.equal(f.createdURLs[0], "https://chatgpt.com/");
+  assert.deepEqual(created.target, { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/fresh" });
+  assert.equal(f.adapter.isManagedTab(created.tabId), true);
+  assert.deepEqual(f.messages.at(-1), { id: created.tabId, message: { type: "bootstrap-new-chat", prompt: "@02-implementor-trigger.md\n\nWait for the command.", project_url: "" } });
+
+  const exact = f.adapter.exactTab(created.tabId, created.target);
+  assert.deepEqual(await exact.currentTarget(), created.target);
+  await exact.insertPrompt("real command", created.target);
+  assert.deepEqual(await exact.sendPrompt(created.target, "real command"), { sent: true });
+
+  f.activate(created.tabId);
+  assert.equal(await f.adapter.observeActivatedTab(created.tabId), null);
+  f.activate(dashboard.id);
+  assert.deepEqual(await f.adapter.currentTarget(), targetOne);
+});
+
+test("fresh managed chat is opened and verified inside the configured ChatGPT project", async () => {
+  const f = fixture();
+  const projectURL = "https://chatgpt.com/g/g-p-repository/project";
+  const created = await f.adapter.createConversation("project bootstrap", projectURL);
+  assert.equal(f.createdURLs[0], projectURL);
+  assert.equal(f.tabs.get(created.tabId).url, "https://chatgpt.com/g/g-p-repository/c/fresh");
+  assert.deepEqual(created.target, { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/fresh" });
+  assert.deepEqual(f.messages.at(-1), { id: created.tabId, message: { type: "bootstrap-new-chat", prompt: "project bootstrap", project_url: projectURL } });
+});
+
+test("project-scoped creation fails closed when ChatGPT produces a chat outside the configured project", async () => {
+  const f = fixture({ bootstrapURL: () => "https://chatgpt.com/g/g-p-other/c/fresh" });
+  await assert.rejects(
+    () => f.adapter.createConversation("project bootstrap", "https://chatgpt.com/g/g-p-repository/project"),
+    /created_chat_outside_configured_project/,
+  );
 });

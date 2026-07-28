@@ -13,9 +13,9 @@ class FakeInput {
 }
 class FakeTextArea extends FakeInput {}
 
-async function fixture(onClick) {
+async function fixture(onClick, options = {}) {
   let listener;
-  const composer = new FakeTextArea("exact prompt");
+  const composer = new FakeTextArea(options.value ?? "exact prompt");
   const button = {
     disabled: false,
     getAttribute() { return null; },
@@ -32,9 +32,10 @@ async function fixture(onClick) {
   };
   let source = await fs.readFile(new URL("../src/content.js", import.meta.url), "utf8");
   source = source.replace("const SEND_ACK_TIMEOUT_MS = 1500;", "const SEND_ACK_TIMEOUT_MS = 25;")
-    .replace("const SEND_ACK_INTERVAL_MS = 50;", "const SEND_ACK_INTERVAL_MS = 1;");
+    .replace("const SEND_ACK_INTERVAL_MS = 50;", "const SEND_ACK_INTERVAL_MS = 1;")
+    .replace("const COMPOSER_WAIT_TIMEOUT_MS = 20_000;", "const COMPOSER_WAIT_TIMEOUT_MS = 25;");
   const context = {
-    URL, location: { href: "https://chatgpt.com/c/one" }, document,
+    URL, location: { href: options.url ?? "https://chatgpt.com/c/one" }, document,
     chrome: { runtime: { onMessage: { addListener(value) { listener = value; } } } },
     HTMLTextAreaElement: FakeTextArea, HTMLInputElement: FakeInput,
     InputEvent: class {}, getComputedStyle() { return { display: "block", visibility: "visible" }; },
@@ -69,6 +70,35 @@ test("an unrelated composer edit after click is not accepted as submit evidence"
   const result = await f.message({ type: "send-prompt", prompt: "exact prompt", expected_target: { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/one" } });
   assert.equal(result.ok, false);
   assert.equal(result.safe_no_send, false);
+});
+
+test("new-chat bootstrap writes and sends only on the empty ChatGPT root composer", async () => {
+  const f = await fixture((composer) => setTimeout(() => { composer.value = ""; }, 2), { value: "", url: "https://chatgpt.com/" });
+  const prompt = "@03-qa-trigger.md\n@gpt-gh-connector-guidelines.md\n\nWait for the command.";
+  const result = await f.message({ type: "bootstrap-new-chat", prompt });
+  assert.equal(result.ok, true);
+  assert.equal(f.composer.value, "");
+});
+
+test("new-chat bootstrap writes and sends on the exact configured ChatGPT project surface", async () => {
+  const projectURL = "https://chatgpt.com/g/g-p-repository/project";
+  const f = await fixture((composer) => setTimeout(() => { composer.value = ""; }, 2), { value: "", url: projectURL });
+  const result = await f.message({ type: "bootstrap-new-chat", prompt: "project bootstrap", project_url: projectURL });
+  assert.equal(result.ok, true);
+});
+
+test("new-chat bootstrap refuses a different ChatGPT project surface", async () => {
+  const f = await fixture(() => {}, { value: "", url: "https://chatgpt.com/g/g-p-other/project" });
+  const result = await f.message({ type: "bootstrap-new-chat", prompt: "bootstrap", project_url: "https://chatgpt.com/g/g-p-repository/project" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "bootstrap_project_surface_invalid");
+});
+
+test("new-chat bootstrap refuses a non-root conversation surface", async () => {
+  const f = await fixture(() => {}, { value: "", url: "https://chatgpt.com/c/existing" });
+  const result = await f.message({ type: "bootstrap-new-chat", prompt: "bootstrap" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "bootstrap_surface_invalid");
 });
 
 test("DOM adapter contains no broad generic contenteditable or submit fallback", async () => {

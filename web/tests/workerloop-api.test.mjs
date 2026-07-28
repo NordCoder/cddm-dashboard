@@ -13,9 +13,24 @@ const profile = {
   result_protocol: 'cddm-worker-result/v1',
   delivery_mode: 'reviewed',
   qa_session_mode: 'manual_fresh_binding',
+  chat_creation_mode: 'automatic',
+  chatgpt_project_url: 'https://chatgpt.com/g/g-p-repository/project',
   auto_merge: false,
   updated_at: '2026-07-28T00:00:00Z',
 }
+
+test('execution profile parser preserves durable chat creation mode and ChatGPT project URL', async () => {
+  const client = new WorkerLoopApiClient(async () => response(profile))
+  const value = await client.profile(1)
+  assert.equal(value.chat_creation_mode, 'automatic')
+  assert.equal(value.chatgpt_project_url, 'https://chatgpt.com/g/g-p-repository/project')
+})
+
+test('execution profile parser rejects a missing ChatGPT project scope field', async () => {
+  const { chatgpt_project_url: _, ...incomplete } = profile
+  const client = new WorkerLoopApiClient(async () => response(incomplete))
+  await assert.rejects(() => client.profile(1), /Malformed backend response/)
+})
 
 test('worker-loop client keeps delivery and execution status separate', async () => {
   const client = new WorkerLoopApiClient(async () => response({

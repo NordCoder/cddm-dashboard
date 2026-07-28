@@ -1,4 +1,5 @@
 import { useRoute, routeLabel } from './app-routing.js'
+import { ChatAutomationSupervisor } from './project-chat-automation.js'
 import { PlanningPage, WorkUnitPage } from './pages-work-unit.js'
 import { ProjectPage, WorkspacePage } from './pages-workspace.js'
 import { SettingsPage } from './pages-settings.js'
@@ -32,7 +33,16 @@ function routePage(route: RouteState, navigate: Navigate): unknown {
 
 export function App(): unknown {
   const [route, navigate] = useRoute()
-  return AppShell({ routeLabel: routeLabel(route), navigate, children: routePage(route, navigate) })
+  return AppShell({
+    routeLabel: routeLabel(route),
+    navigate,
+    children: h(
+      React.Fragment,
+      null,
+      h(ChatAutomationSupervisor),
+      routePage(route, navigate),
+    ),
+  })
 }
 
 function installFatalFallback(root: HTMLElement): void {

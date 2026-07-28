@@ -42,13 +42,51 @@ export function backendPermissionOrigin(origin) {
   return `${normalizeBackendOrigin(origin)}/*`;
 }
 
-export function normalizeTargetUrl(value) {
+function cleanChatGPTURL(value) {
   let parsed;
   try { parsed = new URL(String(value ?? "")); } catch { return null; }
-  if (parsed.origin !== CHATGPT_ORIGIN || parsed.search || parsed.hash) return null;
-  const match = parsed.pathname.match(/^\/c\/([^/]+)$/);
-  if (!match || !match[1] || parsed.pathname !== `/c/${match[1]}`) return null;
-  return { kind: TARGET_KIND, origin: CHATGPT_ORIGIN, path: parsed.pathname };
+  if (parsed.origin !== CHATGPT_ORIGIN || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+  return parsed;
+}
+
+export function normalizeChatGPTProjectUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const parsed = cleanChatGPTURL(raw);
+  if (!parsed) throw new Error("chatgpt_project_url_invalid");
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  if (!pathname || pathname === "/" || pathname.length > 500 || pathname.split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new Error("chatgpt_project_url_invalid");
+  }
+  if (/(?:^|\/)c\/[^/]+$/.test(pathname)) throw new Error("chatgpt_project_url_is_conversation");
+  return `${CHATGPT_ORIGIN}${pathname}`;
+}
+
+export function chatGPTProjectScope(value) {
+  const normalized = normalizeChatGPTProjectUrl(value);
+  if (!normalized) return "";
+  const segments = new URL(normalized).pathname.split("/").filter(Boolean);
+  if (segments.at(-1) === "project") segments.pop();
+  if (segments.length === 0) throw new Error("chatgpt_project_url_invalid");
+  return `/${segments.join("/")}`;
+}
+
+export function conversationURLBelongsToProject(value, projectUrl) {
+  if (!projectUrl) return true;
+  let scope;
+  try { scope = chatGPTProjectScope(projectUrl); } catch { return false; }
+  const parsed = cleanChatGPTURL(value);
+  if (!parsed) return false;
+  const match = parsed.pathname.match(/^(.*)\/c\/([^/]+)$/);
+  return Boolean(match && match[1] === scope && match[2]);
+}
+
+export function normalizeTargetUrl(value) {
+  const parsed = cleanChatGPTURL(value);
+  if (!parsed) return null;
+  const match = parsed.pathname.match(/(?:^|\/)c\/([^/]+)$/);
+  if (!match || !match[1]) return null;
+  return { kind: TARGET_KIND, origin: CHATGPT_ORIGIN, path: `/c/${match[1]}` };
 }
 
 export function normalizeTargetRef(value) {

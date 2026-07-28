@@ -18,8 +18,8 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 9 {
-		t.Fatalf("user_version = %d, want 9", version)
+	if version != 11 {
+		t.Fatalf("user_version = %d, want 11", version)
 	}
 
 	for _, table := range []string{
@@ -36,6 +36,10 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	var bodyColumn string
 	if err := db.QueryRow(`SELECT name FROM pragma_table_info('github_issues') WHERE name = 'body'`).Scan(&bodyColumn); err != nil {
 		t.Fatalf("read github_issues.body column: %v", err)
+	}
+	var projectURLColumn string
+	if err := db.QueryRow(`SELECT name FROM pragma_table_info('project_execution_profiles') WHERE name = 'chatgpt_project_url'`).Scan(&projectURLColumn); err != nil {
+		t.Fatalf("read project_execution_profiles.chatgpt_project_url column: %v", err)
 	}
 }
 
@@ -58,7 +62,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	if err := second.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 9 {
-		t.Fatalf("migration count = %d, want 9", count)
+	if count != 11 {
+		t.Fatalf("migration count = %d, want 11", count)
 	}
 }

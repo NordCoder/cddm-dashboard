@@ -1,4 +1,6 @@
 import { BackendResponseError } from './api.js'
+import { BrowserApiClient, BrowserWorker } from './browser-api.js'
+import { chatCreationWorker } from './chat-bootstrap.js'
 import { paths } from './router.js'
 import {
   Navigate,
@@ -8,8 +10,11 @@ import {
   WorkspaceContent,
 } from './ui.js'
 import { api, errorMessage, isAbort, resourceContent, useResource } from './app-runtime.js'
+import { ExecutionProfile, WorkerLoopApiClient } from './workerloop-api.js'
 
 const h = React.createElement
+const browserApi = new BrowserApiClient()
+const workerLoopApi = new WorkerLoopApiClient()
 
 function CreateProjectPanel(props: { navigate: Navigate }): unknown {
   const [owner, setOwner] = React.useState('')
@@ -67,19 +72,33 @@ export function WorkspacePage(props: { navigate: Navigate }): unknown {
   }), 'Loading workspace…')
 }
 
-async function loadProject(projectID: number, signal: AbortSignal): Promise<ProjectBundle> {
-  const [project, state] = await Promise.all([api.projectMetadata(projectID, signal), api.projectState(projectID, signal)])
-  if (state.project.id !== project.id) {
-    throw new BackendResponseError('Malformed backend response: Project metadata and workflow state identities do not match')
+type ProjectPageBundle = ProjectBundle & { workers: BrowserWorker[]; profile: ExecutionProfile }
+
+async function loadProject(projectID: number, signal: AbortSignal): Promise<ProjectPageBundle> {
+  const [project, state, workers, profile] = await Promise.all([
+    api.projectMetadata(projectID, signal),
+    api.projectState(projectID, signal),
+    browserApi.workers(signal),
+    workerLoopApi.profile(projectID, signal),
+  ])
+  if (state.project.id !== project.id || profile.project_id !== project.id) {
+    throw new BackendResponseError('Malformed backend response: Project metadata, workflow state and execution profile identities do not match')
   }
-  return { project, state }
+  return { project, state, workers, profile }
 }
 
 export function ProjectPage(props: { projectID: number; navigate: Navigate }): unknown {
-  const resource = useResource<ProjectBundle>(`project:${props.projectID}`, (signal) => loadProject(props.projectID, signal))
+  const resource = useResource<ProjectPageBundle>(`project:${props.projectID}`, (signal) => loadProject(props.projectID, signal))
   const [syncing, setSyncing] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
+  const [profileBusy, setProfileBusy] = React.useState(false)
+  const [projectURLDraft, setProjectURLDraft] = React.useState('')
   const [feedback, setFeedback] = React.useState('')
+  const loadedProjectURL = resource.state.kind === 'ready' ? resource.state.data.profile.chatgpt_project_url : ''
+
+  React.useEffect(() => {
+    setProjectURLDraft(loadedProjectURL)
+  }, [props.projectID, loadedProjectURL])
 
   const sync = () => {
     if (syncing) return
@@ -111,14 +130,85 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
       })
   }
 
-  return resourceContent(resource, (bundle) => ProjectContent({
-    bundle,
-    navigate: props.navigate,
-    onRefresh: resource.refresh,
-    onSync: sync,
-    syncing,
-    syncFeedback: feedback || undefined,
-    onDelete: remove,
-    deleting,
-  }), 'Loading Project…')
+  return resourceContent(resource, (bundle) => {
+    const available = Boolean(chatCreationWorker(bundle.workers))
+    const updateProfile = (profile: ExecutionProfile, success: string) => {
+      if (profileBusy) return
+      setProfileBusy(true)
+      setFeedback('')
+      void workerLoopApi.updateProfile(props.projectID, profile)
+        .then((updated) => {
+          setProjectURLDraft(updated.chatgpt_project_url)
+          setFeedback(success)
+          resource.refresh()
+        })
+        .catch((error: unknown) => setFeedback(errorMessage(error)))
+        .finally(() => setProfileBusy(false))
+    }
+    const updateMode = (mode: 'manual' | 'automatic') => {
+      if (mode === 'automatic' && !available) return
+      updateProfile(
+        { ...bundle.profile, chat_creation_mode: mode },
+        mode === 'automatic' ? 'Automatic Implementor and QA chat creation enabled for this Project.' : 'Worker chat creation set to manual for this Project.',
+      )
+    }
+    const saveProjectURL = () => {
+      const normalized = projectURLDraft.trim()
+      updateProfile(
+        { ...bundle.profile, chatgpt_project_url: normalized },
+        normalized ? 'ChatGPT Project URL saved for this repository.' : 'Chat creation will use global ChatGPT for this repository.',
+      )
+    }
+    const automationPanel = h(
+      'section',
+      { className: 'panel-section' },
+      h('div', { className: 'card-topline' }, h('div', null, h('span', { className: 'eyebrow' }, 'Worker sessions'), h('h2', null, 'Automatic chat creation'))),
+      h('p', { className: 'muted' }, 'When enabled, the Dashboard-wide supervisor watches every open Work Unit in this Project and creates the next missing Implementor or fresh QA chat from the backend route.'),
+      h('label', { htmlFor: `chatgpt-project-url-${props.projectID}` },
+        h('span', null, 'ChatGPT Project URL'),
+        h('input', {
+          id: `chatgpt-project-url-${props.projectID}`,
+          type: 'url',
+          value: projectURLDraft,
+          disabled: profileBusy,
+          autoComplete: 'off',
+          placeholder: 'https://chatgpt.com/g/.../project',
+          onChange: (event: { currentTarget: HTMLInputElement }) => setProjectURLDraft(event.currentTarget.value),
+        }),
+      ),
+      h('p', { className: 'muted' }, 'Paste the exact ChatGPT Project page for this repository. Leave empty to create chats in global ChatGPT.'),
+      h('button', { type: 'button', className: 'button button--secondary', disabled: profileBusy, onClick: saveProjectURL }, profileBusy ? 'Saving…' : 'Save ChatGPT Project'),
+      h('div', { className: 'segmented', role: 'group', 'aria-label': 'Project worker chat creation mode' },
+        h('button', {
+          type: 'button',
+          className: bundle.profile.chat_creation_mode === 'manual' ? 'segmented__active' : '',
+          disabled: profileBusy,
+          onClick: () => updateMode('manual'),
+        }, 'Manual'),
+        h('button', {
+          type: 'button',
+          className: bundle.profile.chat_creation_mode === 'automatic' ? 'segmented__active' : '',
+          disabled: profileBusy || !available,
+          onClick: () => updateMode('automatic'),
+        }, 'Auto-create Implementor + QA'),
+      ),
+      available
+        ? h('p', { className: 'muted' }, bundle.profile.chatgpt_project_url
+            ? 'New Lead, Implementor and QA chats are opened inside the configured ChatGPT Project. The durable setting remains active while any Dashboard screen is open.'
+            : 'No ChatGPT Project is configured; new chats use global ChatGPT. Lead chat creation stays explicit.')
+        : h('p', { className: 'inline-alert inline-alert--warning' }, 'Reload the updated CDDM extension to enable fresh-chat creation.'),
+    )
+
+    return ProjectContent({
+      bundle,
+      navigate: props.navigate,
+      onRefresh: resource.refresh,
+      onSync: sync,
+      syncing,
+      syncFeedback: feedback || undefined,
+      automationPanel,
+      onDelete: remove,
+      deleting,
+    })
+  }, 'Loading Project…')
 }

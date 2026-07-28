@@ -1,4 +1,5 @@
 import { BrowserWorker } from './browser-api.js'
+import { ChatCreationMode } from './chat-bootstrap.js'
 import { ResultEvidence, Warning, WorkUnitState } from './domain.js'
 import { paths } from './router.js'
 import { PilotReadiness, WorkUnitExecution } from './workerloop-api.js'
@@ -84,8 +85,12 @@ export function WorkUnitContent(props: {
   onRefresh: () => void
   mutationBusy?: boolean
   mutationFeedback?: string
+  chatCreationMode?: ChatCreationMode
+  chatCreationAvailable?: boolean
   onBindRole?: (role: string, worker: BrowserWorker) => void
   onDisableRole?: (role: string) => void
+  onCreateRole?: (role: 'lead' | 'implementor' | 'qa') => void
+  onChatCreationMode?: (mode: ChatCreationMode) => void
   onDeliveryMode?: (mode: 'reviewed' | 'auto') => void
   launcher: unknown
 }): unknown {
@@ -101,8 +106,12 @@ export function WorkUnitContent(props: {
         workers: props.workers ?? [],
         busy: props.mutationBusy ?? false,
         feedback: props.mutationFeedback,
+        chatCreationMode: props.chatCreationMode ?? 'manual',
+        chatCreationAvailable: props.chatCreationAvailable ?? false,
         onBindRole: props.onBindRole ?? (() => undefined),
         onDisableRole: props.onDisableRole ?? (() => undefined),
+        onCreateRole: props.onCreateRole ?? (() => undefined),
+        onChatCreationMode: props.onChatCreationMode ?? (() => undefined),
         onDeliveryMode: props.onDeliveryMode ?? (() => undefined),
       })
     : null

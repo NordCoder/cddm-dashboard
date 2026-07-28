@@ -22,6 +22,22 @@ GitHub facts
 
 The repository distributes `resources/cddm-dashboard-resources/v1.0/` with Lead, Implementor, and QA prompts, marker instructions, and JSON Schema. The Go runtime embeds a byte-identical copy under `backend/internal/resourcepack/assets/`; CI prevents drift. The runtime deterministically loads and startup-validates the embedded manifest, version, files and digest. Operational prompts are not loaded from Google Drive.
 
+## Project execution profile
+
+The durable local profile separates delivery authority, chat creation policy and browser destination:
+
+```json
+{
+  "delivery_mode": "reviewed",
+  "qa_session_mode": "manual_fresh_binding",
+  "chat_creation_mode": "manual",
+  "chatgpt_project_url": "",
+  "auto_merge": false
+}
+```
+
+`chatgpt_project_url` is optional. When set, every Dashboard-created Lead, Implementor or QA conversation for that repository must be bootstrapped and observed inside that exact ChatGPT Project scope before its canonical `/c/<id>` target can be bound. It remains transport configuration and creates no GitHub or Workflow Command authority.
+
 ## Command lifecycle
 
 Minimum states:
@@ -59,8 +75,8 @@ Required routing behavior includes:
 
 ## Recovery
 
-Commands, links, results, validation evidence, and execution profiles survive restart. Delivery reconciliation preserves `awaiting_result`; it does not replay the DOM send. A terminal marker synchronized after downtime is accepted exactly once, and duplicate synchronization remains idempotent.
+Commands, links, results, validation evidence, execution profiles, chat creation mode and ChatGPT Project URL survive restart. Delivery reconciliation preserves `awaiting_result`; it does not replay the DOM send. A terminal marker synchronized after downtime is accepted exactly once, and duplicate synchronization remains idempotent.
 
 ## Surfaces
 
-The current Work Unit shows route, active Workflow Command, delivery status, execution status, Worker Result, validation state, Candidate, CI, QA-reviewed Head, warnings, next action, role bindings, and Pilot Readiness. Historical Prompt Plan screens do not execute current workflow actions.
+The current Work Unit shows route, active Workflow Command, delivery status, execution status, Worker Result, validation state, Candidate, CI, QA-reviewed Head, warnings, next action, role bindings, ChatGPT Project scope and Pilot Readiness. Historical Prompt Plan screens do not execute current workflow actions.

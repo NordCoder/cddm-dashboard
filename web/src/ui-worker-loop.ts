@@ -1,4 +1,5 @@
 import { BrowserWorker } from './browser-api.js'
+import { ChatCreationMode } from './chat-bootstrap.js'
 import { WorkUnitState } from './domain.js'
 import { PilotReadiness, WorkUnitExecution } from './workerloop-api.js'
 import { SectionHeading, StatusBadge } from './ui-shared.js'
@@ -16,8 +17,12 @@ export function WorkerLoopPanel(props: {
   workers: BrowserWorker[]
   busy: boolean
   feedback?: string
+  chatCreationMode: ChatCreationMode
+  chatCreationAvailable: boolean
   onBindRole: (role: string, worker: BrowserWorker) => void
   onDisableRole: (role: string) => void
+  onCreateRole: (role: 'lead' | 'implementor' | 'qa') => void
+  onChatCreationMode: (mode: ChatCreationMode) => void
   onDeliveryMode: (mode: 'reviewed' | 'auto') => void
 }): unknown {
   const command = props.execution.active_workflow_command
@@ -25,9 +30,11 @@ export function WorkerLoopPanel(props: {
   const liveWorkers = props.workers.filter((worker) => worker.state === 'live' && worker.target)
   const qa = props.execution.role_bindings.find((item) => item.role === 'qa')
   const freshQARequired = props.workUnit.route.target_role === 'qa' && (!qa?.binding || qa.binding.readiness !== 'ready')
+  const routedRole = props.workUnit.route.action === 'dispatch' ? props.workUnit.route.target_role : undefined
 
   const roleCards = props.execution.role_bindings.map((item) => {
     const selectID = `role-binding-${item.role}`
+    const canCreate = props.chatCreationAvailable && routedRole === item.role
     return h(
       'article',
       { className: 'detail-card', key: item.role },
@@ -48,6 +55,10 @@ export function WorkerLoopPanel(props: {
             if (worker) props.onBindRole(item.role, worker)
           },
         }, item.binding ? 'Rebind' : 'Bind'),
+        canCreate ? h('button', {
+          type: 'button', className: 'button button--secondary', disabled: props.busy,
+          onClick: () => props.onCreateRole(item.role as 'lead' | 'implementor' | 'qa'),
+        }, item.binding ? 'Create fresh chat' : 'Create new chat') : null,
         item.binding?.enabled ? h('button', { type: 'button', className: 'button button--secondary', disabled: props.busy, onClick: () => props.onDisableRole(item.role) }, 'Disable') : null,
       ),
     )
@@ -57,8 +68,8 @@ export function WorkerLoopPanel(props: {
     React.Fragment,
     null,
     SectionHeading({ title: 'Worker-loop execution', copy: 'Browser delivery and worker completion are intentionally separate states.' }),
-    freshQARequired ? h('section', { className: 'callout callout--warning' }, h('strong', null, 'Fresh QA chat required'), h('p', null, 'Bind a new QA conversation. The previous QA binding is retired after an accepted terminal QA result.')) : null,
-    props.feedback ? h('p', { className: props.feedback.includes('error') ? 'inline-alert inline-alert--danger' : 'inline-alert' }, props.feedback) : null,
+    freshQARequired ? h('section', { className: 'callout callout--warning' }, h('strong', null, 'Fresh QA chat required'), h('p', null, props.chatCreationMode === 'automatic' ? 'Dashboard will create and bind a new QA conversation while any Dashboard screen remains open.' : 'Create or bind a new QA conversation. The previous QA binding is retired after an accepted terminal QA result.')) : null,
+    props.feedback ? h('p', { className: props.feedback.toLowerCase().includes('error') || props.feedback.toLowerCase().includes('failed') ? 'inline-alert inline-alert--danger' : 'inline-alert' }, props.feedback) : null,
     h('div', { className: 'evidence-grid' },
       evidenceCard('Active workflow command', command ? h('code', { className: 'breakable' }, command.command_id) : h('strong', null, 'No active command'), command ? h('p', { className: 'muted' }, `${command.role} · ${command.resource_version}`) : null),
       evidenceCard('Delivery status', StatusBadge({ value: props.execution.delivery_status }), props.execution.delivery ? h('p', { className: 'muted' }, `${props.execution.delivery.worker_id} · binding v${props.execution.delivery.binding_version}`) : null),
@@ -74,12 +85,21 @@ export function WorkerLoopPanel(props: {
         h('div', null, h('dt', null, 'Methodology'), h('dd', null, props.execution.profile.methodology_version)),
         h('div', null, h('dt', null, 'Result protocol'), h('dd', null, props.execution.profile.result_protocol)),
         h('div', null, h('dt', null, 'QA mode'), h('dd', null, props.execution.profile.qa_session_mode)),
+        h('div', null, h('dt', null, 'Chat creation'), h('dd', null, props.execution.profile.chat_creation_mode)),
+        h('div', null, h('dt', null, 'ChatGPT project'), h('dd', null, props.execution.profile.chatgpt_project_url || 'Global ChatGPT')),
         h('div', null, h('dt', null, 'Auto merge'), h('dd', null, props.execution.profile.auto_merge ? 'enabled' : 'disabled')),
       ),
+      h('span', { className: 'label' }, 'Delivery mode'),
       h('div', { className: 'segmented', role: 'group', 'aria-label': 'Delivery mode' },
         h('button', { type: 'button', className: props.execution.profile.delivery_mode === 'reviewed' ? 'segmented__active' : '', disabled: props.busy, onClick: () => props.onDeliveryMode('reviewed') }, 'Reviewed'),
         h('button', { type: 'button', className: props.execution.profile.delivery_mode === 'auto' ? 'segmented__active' : '', disabled: props.busy, onClick: () => props.onDeliveryMode('auto') }, 'Auto-send'),
       ),
+      h('span', { className: 'label' }, 'Worker chat creation'),
+      h('div', { className: 'segmented', role: 'group', 'aria-label': 'Worker chat creation mode' },
+        h('button', { type: 'button', className: props.chatCreationMode === 'manual' ? 'segmented__active' : '', disabled: props.busy, onClick: () => props.onChatCreationMode('manual') }, 'Manual'),
+        h('button', { type: 'button', className: props.chatCreationMode === 'automatic' ? 'segmented__active' : '', disabled: props.busy || !props.chatCreationAvailable, onClick: () => props.onChatCreationMode('automatic') }, 'Auto-create Implementor + QA'),
+      ),
+      !props.chatCreationAvailable ? h('p', { className: 'muted' }, 'Reload the updated CDDM extension to enable fresh-chat creation.') : h('p', { className: 'muted' }, 'Automatic mode is persisted in this Project execution profile. Lead chat creation remains explicit.'),
     ),
     SectionHeading({ title: 'Role-to-chat bindings', copy: 'Lead, Implementor and QA use distinct logical lanes.' }),
     h('div', { className: 'evidence-grid' }, ...roleCards),

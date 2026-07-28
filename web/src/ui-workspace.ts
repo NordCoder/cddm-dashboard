@@ -192,6 +192,7 @@ export function ProjectContent(props: {
   onSync: () => void
   syncing: boolean
   syncFeedback?: string
+  automationPanel?: unknown
   onDelete: () => void
   deleting: boolean
 }): unknown {
@@ -216,6 +217,7 @@ export function ProjectContent(props: {
       h('article', { className: 'overview-card' }, h('span', { className: 'label' }, 'Workflow mode'), h('strong', null, project.workflow_mode), h('p', { className: 'muted' }, project.polling_enabled ? `Polling every ${project.poll_interval_seconds}s` : 'Polling disabled')),
       h('article', { className: 'overview-card' }, h('span', { className: 'label' }, 'Open work units'), h('strong', { className: 'metric-number' }, String(workUnits.length)), h('p', { className: 'muted' }, `${props.bundle.state.attention.length} attention items`)),
     ),
+    props.automationPanel ?? null,
     props.syncFeedback ? h('p', { className: 'inline-alert', role: 'status' }, props.syncFeedback) : null,
     SectionHeading({ title: 'Work units', count: workUnits.length, copy: 'Sorted by operational attention.' }),
     workUnits.length === 0
