@@ -15,6 +15,7 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/config"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/database"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/githubauth"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/githubclient"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/httpapi"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
@@ -43,8 +44,14 @@ func run() error {
 	}
 	defer db.Close()
 
+	githubToken, githubAuthSource, err := githubauth.Resolve(startupContext, cfg.GitHubAuthMode, cfg.GitHubToken, githubauth.GHCLI{})
+	if err != nil {
+		return fmt.Errorf("configure GitHub authentication: %w", err)
+	}
+	slog.Info("GitHub authentication configured", "source", githubAuthSource)
+
 	client, err := githubclient.New(githubclient.Config{
-		Token: cfg.GitHubToken, BaseURL: cfg.GitHubAPIBaseURL,
+		Token: githubToken, BaseURL: cfg.GitHubAPIBaseURL,
 		RequestTimeout: cfg.GitHubRequestTimeout, MaxPages: cfg.GitHubMaxPages, MaxItems: cfg.GitHubMaxItems,
 	})
 	if err != nil {
