@@ -147,7 +147,10 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 		if !dispatchSeen && !commandBound {
 			evidence.Warnings = append(evidence.Warnings, warning(evidence.CommentID, "missing_dispatch_correlation", "no earlier Lead Dispatch comment or Dashboard command can be correlated with this terminal result"))
 		}
-		correlateEvidence(&evidence, state.Candidate, state.CurrentHead)
+		candidateBound := !commandBound || parsed.Event.Role != "implementor" || (parsed.Event.Status != "continue" && parsed.Event.Status != "no_op")
+		if candidateBound {
+			correlateEvidence(&evidence, state.Candidate, state.CurrentHead)
+		}
 		parsed.Warnings = append(parsed.Warnings, evidence.Warnings...)
 		results = append(results, evidence)
 		state.Warnings = append(state.Warnings, evidence.Warnings...)
