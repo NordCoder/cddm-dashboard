@@ -6,7 +6,6 @@ import {
   chatCreationMode,
   chatCreationWorker,
   createWorkerChat,
-  routedCreationRole,
   setChatCreationMode,
 } from './chat-bootstrap.js'
 import { GenerationResult, WorkUnitState } from './domain.js'
@@ -90,11 +89,9 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
   const [mutationFeedback, setMutationFeedback] = React.useState('')
   const [creationMode, setCreationModeState] = React.useState<ChatCreationMode>(() => chatCreationMode(props.projectID))
   const creationInFlight = React.useRef(false)
-  const automaticAttempts = React.useRef(new Set<string>())
 
   React.useEffect(() => {
     setCreationModeState(chatCreationMode(props.projectID))
-    automaticAttempts.current.clear()
   }, [props.projectID])
 
   const mutate = (action: () => Promise<unknown>, success: string) => {
@@ -110,7 +107,7 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
       .finally(() => setMutationBusy(false))
   }
 
-  const provisionChat = (bundle: WorkUnitBundle, role: WorkerRole, automatic: boolean) => {
+  const provisionChat = (bundle: WorkUnitBundle, role: WorkerRole) => {
     if (mutationBusy || creationInFlight.current) return
     const roleBinding = bundle.execution.role_bindings.find((item) => item.role === role)
     if (!roleBinding) {
@@ -123,7 +120,7 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
     }
     creationInFlight.current = true
     setMutationBusy(true)
-    setMutationFeedback(automatic ? `Creating and binding a fresh ${role} chat…` : `Creating a fresh ${role} chat…`)
+    setMutationFeedback(`Creating a fresh ${role} chat…`)
     void createWorkerChat({
       projectID: props.projectID,
       issueNumber: props.issueNumber,
@@ -142,20 +139,6 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
     })
   }
 
-  React.useEffect(() => {
-    if (creationMode !== 'automatic' || resource.state.kind !== 'ready' || mutationBusy || creationInFlight.current) return
-    const bundle = resource.state.data
-    if (!chatCreationWorker(bundle.workers)) return
-    const role = routedCreationRole(bundle.workUnit, bundle.execution.role_bindings)
-    if (!role) return
-    const roleBinding = bundle.execution.role_bindings.find((item) => item.role === role)
-    if (!roleBinding) return
-    const attemptKey = `${props.projectID}:${props.issueNumber}:${role}:${roleBinding.lane_key}:${roleBinding.binding?.binding_version ?? 0}:${bundle.workUnit.route.reason_code}`
-    if (automaticAttempts.current.has(attemptKey)) return
-    automaticAttempts.current.add(attemptKey)
-    provisionChat(bundle, role, true)
-  }, [creationMode, resource.state, mutationBusy, props.projectID, props.issueNumber])
-
   return resourceContent(resource, (bundle) => WorkUnitContent({
     workUnit: bundle.workUnit,
     execution: bundle.execution,
@@ -167,7 +150,7 @@ export function WorkUnitPage(props: { projectID: number; issueNumber: number; na
     mutationFeedback: mutationFeedback || undefined,
     chatCreationMode: creationMode,
     chatCreationAvailable: Boolean(chatCreationWorker(bundle.workers)),
-    onCreateRole: (role) => provisionChat(bundle, role, false),
+    onCreateRole: (role) => provisionChat(bundle, role),
     onChatCreationMode: (mode) => {
       setChatCreationMode(props.projectID, mode)
       setCreationModeState(mode)
