@@ -10,6 +10,7 @@ export type ExecutionProfile = {
   delivery_mode: 'reviewed' | 'auto'
   qa_session_mode: string
   chat_creation_mode: 'manual' | 'automatic'
+  chatgpt_project_url: string
   auto_merge: boolean
   updated_at: string
 }
@@ -129,6 +130,7 @@ function profile(value: unknown, path = '$'): ExecutionProfile {
     project_id: number(item.project_id, `${path}.project_id`), resource_version: text(item.resource_version, `${path}.resource_version`),
     methodology_version: text(item.methodology_version, `${path}.methodology_version`), result_protocol: text(item.result_protocol, `${path}.result_protocol`),
     delivery_mode: deliveryMode, qa_session_mode: text(item.qa_session_mode, `${path}.qa_session_mode`), chat_creation_mode: chatCreationMode,
+    chatgpt_project_url: text(item.chatgpt_project_url, `${path}.chatgpt_project_url`),
     auto_merge: bool(item.auto_merge, `${path}.auto_merge`), updated_at: text(item.updated_at, `${path}.updated_at`),
   }
 }
