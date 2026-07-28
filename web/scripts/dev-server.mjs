@@ -6,7 +6,7 @@ import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const port = Number.parseInt(process.env.WEB_DEV_PORT ?? '5173', 10)
-const apiTarget = new URL(process.env.API_PROXY_TARGET ?? 'http://localhost:8080')
+const apiTarget = new URL(process.env.API_PROXY_TARGET ?? 'http://localhost:1337')
 const distRoot = fileURLToPath(new URL('../dist/', import.meta.url))
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
