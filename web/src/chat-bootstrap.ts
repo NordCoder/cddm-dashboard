@@ -7,7 +7,6 @@ export type WorkerRole = 'lead' | 'implementor' | 'qa'
 
 export const CDDM_EXTENSION_ID = 'biakfbpkfdpniphmoafgldedkbnjfibp'
 const REQUEST_TIMEOUT_MS = 45_000
-const MODE_KEY_PREFIX = 'cddm:chat-creation-mode:'
 
 export type ChatBootstrapResponse = {
   ok: boolean
@@ -27,18 +26,6 @@ type ExternalRuntime = {
 }
 
 type ChromeLike = { runtime?: ExternalRuntime }
-
-function storage(): Storage | undefined {
-  try { return globalThis.localStorage } catch { return undefined }
-}
-
-export function chatCreationMode(projectID: number): ChatCreationMode {
-  return storage()?.getItem(`${MODE_KEY_PREFIX}${projectID}`) === 'automatic' ? 'automatic' : 'manual'
-}
-
-export function setChatCreationMode(projectID: number, mode: ChatCreationMode): void {
-  storage()?.setItem(`${MODE_KEY_PREFIX}${projectID}`, mode)
-}
 
 export function chatCreationWorker(workers: BrowserWorker[]): BrowserWorker | undefined {
   return workers.find((worker) => worker.state === 'live' && worker.capabilities.includes('chatgpt_conversation_create'))
