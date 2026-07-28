@@ -21,7 +21,7 @@ function restoreGlobal(name, descriptor) {
   Object.defineProperty(globalThis, name, descriptor)
 }
 
-test('mounted App preserves hook order across Workspace, Project, Work Unit, Plans and Settings routes', async () => {
+test('mounted App preserves hook order across Workspace, Project, Work Unit, Plans and System Health routes', async () => {
   let pathname = '/'
   const popstateListeners = new Set()
   const names = ['React', 'location', 'history', 'scrollTo', 'addEventListener', 'removeEventListener', 'fetch']
@@ -81,15 +81,13 @@ test('mounted App preserves hook order across Workspace, Project, Work Unit, Pla
     await transition('/projects/1', 'Project 1')
     await transition('/projects/1/work-units/14', 'Issue #14')
     await transition('/projects/1/work-units/14/plans', 'Plans')
-    await transition('/settings', 'Settings / Health')
+    await transition('/settings', 'System health')
   } finally {
     if (renderer) {
       await act(async () => {
         renderer.unmount()
       })
     }
-    for (const [name, descriptor] of originalDescriptors) {
-      restoreGlobal(name, descriptor)
-    }
+    for (const [name, descriptor] of originalDescriptors) restoreGlobal(name, descriptor)
   }
 })
