@@ -56,13 +56,23 @@ function actionButton(label: string, variant = 'secondary'): HTMLButtonElement {
 
 function field(label: string, value: string, code = false): HTMLElement {
   const row = node('div', 'delivery-field')
-  row.append(node('dt', 'delivery-field__label', label), node(code ? 'code' : 'dd', 'delivery-field__value', value))
+  const description = node('dd', 'delivery-field__value')
+  description.append(code ? node('code', '', value) : document.createTextNode(value))
+  row.append(node('dt', 'delivery-field__label', label), description)
+  return row
+}
+
+function statusField(label: string, value: string): HTMLElement {
+  const row = node('div', 'delivery-field')
+  const description = node('dd', 'delivery-field__value')
+  description.append(statusChip(value))
+  row.append(node('dt', 'delivery-field__label', label), description)
   return row
 }
 
 function sectionHeader(step: string, title: string, copy: string): HTMLElement {
   const header = node('header', 'delivery-section__header')
-  header.append(node('span', 'delivery-section__step', step), node('div', '', undefined))
+  header.append(node('span', 'delivery-section__step', step), node('div'))
   const copyBox = header.lastElementChild as HTMLElement
   copyBox.append(node('h3', '', title), node('p', 'delivery-section__copy', copy))
   return header
@@ -157,7 +167,10 @@ export class DeliveryInspectorView {
     section.append(sectionHeader('01', 'Connection', 'Bind one live extension worker to the current backend lane.'))
 
     const fields = node('dl', 'delivery-fields')
-    fields.append(field('Lane', snapshot.workUnit.route.lane_key ?? 'No dispatch lane', true))
+    fields.append(
+      statusField('Readiness', snapshot.binding?.readiness ?? 'unbound'),
+      field('Lane', snapshot.workUnit.route.lane_key ?? 'No dispatch lane', true),
+    )
     if (snapshot.binding) {
       fields.append(
         field('Binding', `${shortIdentity(snapshot.binding.binding_id)} · v${snapshot.binding.binding_version}`, true),
@@ -168,9 +181,6 @@ export class DeliveryInspectorView {
     } else {
       fields.append(field('Binding', 'Not configured'))
     }
-    const stateRow = node('div', 'delivery-field')
-    stateRow.append(node('dt', 'delivery-field__label', 'Readiness'), statusChip(snapshot.binding?.readiness ?? 'unbound'))
-    fields.prepend(stateRow)
     section.append(fields)
 
     const choices = snapshot.workers.filter((worker) => worker.state === 'live' && worker.target)
