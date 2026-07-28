@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   bootstrapPrompt,
+  bootstrapRequestID,
   chatCreationWorker,
   createWorkerChat,
   routedCreationRole,
@@ -43,6 +44,26 @@ test('chat creation capability is discovered independently from an active target
     { worker_id: 'creator', capabilities: ['chatgpt_conversation_create'], state: 'live' },
   ])
   assert.equal(worker.worker_id, 'creator')
+})
+
+test('bootstrap request identity is stable within one binding generation and rotates after QA retirement', () => {
+  const values = new Map()
+  const original = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem(key) { return values.get(key) ?? null },
+    setItem(key, value) { values.set(key, String(value)) },
+    removeItem(key) { values.delete(key) },
+  }
+  try {
+    const first = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
+    const duplicate = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 1)
+    const nextCycle = bootstrapRequestID(1, 140, 'qa', 'repo#140:qa', 2)
+    assert.equal(duplicate, first)
+    assert.notEqual(nextCycle, first)
+  } finally {
+    if (original === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = original
+  }
 })
 
 test('Dashboard sends a bounded external bootstrap request and accepts extension binding evidence', async () => {
