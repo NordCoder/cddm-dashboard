@@ -15,6 +15,20 @@ const contentTypes = new Map([
   ['.map', 'application/json; charset=utf-8'],
 ])
 
+const securityHeaders = {
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-resource-policy': 'same-origin',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+}
+
+function responseHeaders(extra = {}) {
+  return { ...extra, ...securityHeaders }
+}
+
 function proxyApi(request, response) {
   const target = new URL(request.url ?? '/', apiTarget)
   const transport = target.protocol === 'https:' ? httpsRequest : httpRequest
@@ -31,13 +45,13 @@ function proxyApi(request, response) {
       },
     },
     (upstream) => {
-      response.writeHead(upstream.statusCode ?? 502, upstream.headers)
+      response.writeHead(upstream.statusCode ?? 502, responseHeaders(upstream.headers))
       upstream.pipe(response)
     },
   )
 
   proxy.on('error', (error) => {
-    response.writeHead(502, { 'content-type': 'application/json; charset=utf-8' })
+    response.writeHead(502, responseHeaders({ 'content-type': 'application/json; charset=utf-8' }))
     response.end(JSON.stringify({ error: `Backend proxy failed: ${error.message}` }))
   })
   request.pipe(proxy)
@@ -50,23 +64,21 @@ async function serveStatic(request, response) {
   let filePath = resolve(distRoot, candidate)
 
   if (filePath !== distRoot && !filePath.startsWith(`${distRoot}${sep}`)) {
-    response.writeHead(400)
+    response.writeHead(400, responseHeaders())
     response.end('Bad request')
     return
   }
 
   try {
-    if (!(await stat(filePath)).isFile()) {
-      throw new Error('not a file')
-    }
+    if (!(await stat(filePath)).isFile()) throw new Error('not a file')
   } catch {
     filePath = resolve(distRoot, 'index.html')
   }
 
-  response.writeHead(200, {
+  response.writeHead(200, responseHeaders({
     'content-type': contentTypes.get(extname(filePath)) ?? 'application/octet-stream',
     'cache-control': 'no-store',
-  })
+  }))
   createReadStream(filePath).pipe(response)
 }
 
@@ -77,7 +89,7 @@ const server = createServer((request, response) => {
   }
 
   void serveStatic(request, response).catch((error) => {
-    response.writeHead(500)
+    response.writeHead(500, responseHeaders())
     response.end(error instanceof Error ? error.message : 'Internal server error')
   })
 })
