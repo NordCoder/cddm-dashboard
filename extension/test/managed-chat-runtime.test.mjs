@@ -5,9 +5,10 @@ import { ExtensionRuntime } from "../src/service-worker.js";
 
 const target = { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/fresh-qa" };
 
-test("created chat receives its own persistent worker identity and exact target binding", async () => {
+test("created project-scoped chat receives its own persistent worker identity and exact target binding", async () => {
   const storage = memoryStorage({ backend_origin: "http://localhost:1338" });
   const calls = { register: [], heartbeat: [], bind: [] };
+  const projectURL = "https://chatgpt.com/g/g-p-repository/project";
   const exactAdapter = {
     async currentTarget() { return target; },
     async insertPrompt() {},
@@ -23,8 +24,9 @@ test("created chat receives its own persistent worker identity and exact target 
       assert.deepEqual(expected, target);
       return exactAdapter;
     },
-    async createConversation(prompt) {
+    async createConversation(prompt, chatGPTProjectURL) {
       assert.match(prompt, /@03-qa-trigger\.md/);
+      assert.equal(chatGPTProjectURL, projectURL);
       this.managed.add(77);
       return { target, tabId: 77 };
     },
@@ -55,6 +57,7 @@ test("created chat receives its own persistent worker identity and exact target 
     issue_number: 140,
     role: "qa",
     expected_lane_key: "nordcoder/misak-website#140:qa",
+    chatgpt_project_url: projectURL,
     bootstrap_prompt: "@03-qa-trigger.md\n@gpt-gh-connector-guidelines.md\n\nWait for the command.",
   }, { url: "http://localhost:1338/projects/9/work-units/140" });
 
@@ -69,6 +72,7 @@ test("created chat receives its own persistent worker identity and exact target 
   const stored = storage.values.managed_chat_workers;
   assert.equal(stored[result.worker_id].tab_id, 77);
   assert.deepEqual(stored[result.worker_id].target, target);
+  assert.equal(stored[result.worker_id].chatgpt_project_url, projectURL);
 
   await runtime.heartbeatCycle();
   assert.ok(calls.heartbeat.some((payload) => payload.worker_id === result.worker_id));
