@@ -1,4 +1,4 @@
-import { safeDiagnostic } from "./protocol.js";
+import { normalizeChatGPTProjectUrl, safeDiagnostic } from "./protocol.js";
 
 const JOBS_KEY = "chat_bootstrap_jobs";
 const ALLOWED_ROLES = new Set(["lead", "implementor", "qa"]);
@@ -34,6 +34,9 @@ function parseRequest(message) {
   if (!ALLOWED_ROLES.has(role)) throw new Error("bootstrap_role_invalid");
   if (!laneKey || laneKey.length > 400) throw new Error("bootstrap_lane_invalid");
   if (!prompt.trim() || prompt.length > 20_000) throw new Error("bootstrap_prompt_invalid");
+  let chatGPTProjectUrl = "";
+  try { chatGPTProjectUrl = normalizeChatGPTProjectUrl(message.chatgpt_project_url); }
+  catch (error) { throw new Error(error instanceof Error ? error.message : "chatgpt_project_url_invalid"); }
   return {
     requestId,
     projectId: parsePositiveInteger(message.project_id, "project_id"),
@@ -41,6 +44,7 @@ function parseRequest(message) {
     role,
     laneKey,
     prompt,
+    chatGPTProjectUrl,
     expectedVersion: parseExpectedVersion(message.expected_binding_version),
   };
 }
@@ -92,6 +96,7 @@ export class ChatBootstrapCoordinator {
       issue_number: request.issueNumber,
       role: request.role,
       lane_key: request.laneKey,
+      chatgpt_project_url: request.chatGPTProjectUrl,
       started_at: this.now(),
     };
     await this.save(jobs);
