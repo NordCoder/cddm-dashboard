@@ -76,13 +76,13 @@ export class ChatBootstrapCoordinator {
   }
 
   async executeOnce(request, runtime) {
-    if (!runtime?.adapter?.createConversation || !runtime?.backend?.bindCurrent || !runtime?.workerId || !runtime?.heartbeat) {
+    if (!runtime?.provisionConversation || !runtime?.backend?.bindCurrent) {
       return { ok: false, reason: "chat_creation_unavailable" };
     }
     const jobs = await this.jobs();
     const previous = jobs[request.requestId];
     if (previous?.state === "completed") {
-      return { ok: true, target: previous.target, binding: previous.binding, reused: true };
+      return { ok: true, target: previous.target, binding: previous.binding, worker_id: previous.worker_id, reused: true };
     }
     if (previous) return { ok: false, reason: "bootstrap_request_already_consumed" };
 
@@ -97,12 +97,11 @@ export class ChatBootstrapCoordinator {
     await this.save(jobs);
 
     try {
-      const target = await runtime.adapter.createConversation(request.prompt);
-      await runtime.heartbeat();
+      const provisioned = await runtime.provisionConversation(request);
       const input = {
         expected_lane_key: request.laneKey,
-        worker_id: runtime.workerId,
-        target,
+        worker_id: provisioned.workerId,
+        target: provisioned.target,
       };
       if (request.expectedVersion !== undefined) input.expected_binding_version = request.expectedVersion;
       const binding = await runtime.backend.bindCurrent(request.projectId, request.issueNumber, input);
@@ -110,11 +109,12 @@ export class ChatBootstrapCoordinator {
         ...jobs[request.requestId],
         state: "completed",
         completed_at: this.now(),
-        target,
+        worker_id: provisioned.workerId,
+        target: provisioned.target,
         binding,
       };
       await this.save(jobs);
-      return { ok: true, target, binding };
+      return { ok: true, target: provisioned.target, worker_id: provisioned.workerId, binding };
     } catch (error) {
       const reason = safeDiagnostic(error instanceof Error ? error.message : "chat_creation_failed");
       jobs[request.requestId] = {
