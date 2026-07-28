@@ -13,9 +13,16 @@ const profile = {
   result_protocol: 'cddm-worker-result/v1',
   delivery_mode: 'reviewed',
   qa_session_mode: 'manual_fresh_binding',
+  chat_creation_mode: 'automatic',
   auto_merge: false,
   updated_at: '2026-07-28T00:00:00Z',
 }
+
+test('execution profile parser preserves durable chat creation mode', async () => {
+  const client = new WorkerLoopApiClient(async () => response(profile))
+  const value = await client.profile(1)
+  assert.equal(value.chat_creation_mode, 'automatic')
+})
 
 test('worker-loop client keeps delivery and execution status separate', async () => {
   const client = new WorkerLoopApiClient(async () => response({
