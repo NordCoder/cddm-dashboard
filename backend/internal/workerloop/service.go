@@ -31,7 +31,7 @@ func (s *Service) ObserveProjectSnapshot(ctx context.Context, snapshot superviso
 			}
 			seen = append(seen, comment.GitHubID)
 			result := s.correlate(ctx, snapshot.Project.ID, issue.Number, comment, parsed)
-			if err := s.store.UpsertResult(ctx, result); err != nil {
+			if err := s.persistResult(ctx, result); err != nil {
 				return err
 			}
 		}
@@ -51,6 +51,18 @@ func (s *Service) ObserveProjectSnapshot(ctx context.Context, snapshot superviso
 		}
 	}
 	return nil
+}
+
+func (s *Service) persistResult(ctx context.Context, result Result) error {
+	existing, err := s.store.ResultByComment(ctx, result.ProjectID, result.GitHubCommentID)
+	if err == nil && existing.ValidationStatus == ValidationAccepted && (result.ValidationStatus != ValidationAccepted || existing.PayloadHash != result.PayloadHash) {
+		result.ValidationStatus = ValidationAmbiguous
+		result.ValidationReason = "accepted_result_mutated"
+		result.AcceptedAt = nil
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return s.store.UpsertResult(ctx, result)
 }
 
 func (s *Service) correlate(ctx context.Context, projectID int64, issueNumber int, comment supervisor.Comment, parsed ParsedMarker) Result {
