@@ -68,12 +68,28 @@ export async function provisionNextProjectChat(input: {
   return { status: 'idle' }
 }
 
-export function ProjectChatAutomation(props: { projectID: number }): unknown {
+export async function provisionNextEnabledProjectChat(input: {
+  attempted: Set<string>
+  signal?: AbortSignal
+}): Promise<{ status: 'disabled' | 'unavailable' | 'idle' | 'created' | 'failed'; projectID?: number; issueNumber?: number; role?: WorkerRole; reason?: string }> {
+  const projects = await api.projects(input.signal)
+  const enabled = projects.filter((project) => chatCreationMode(project.id) === 'automatic')
+  if (enabled.length === 0) return { status: 'disabled' }
+
+  for (const project of enabled) {
+    const result = await provisionNextProjectChat({ projectID: project.id, attempted: input.attempted, signal: input.signal })
+    if (result.status === 'created' || result.status === 'failed' || result.status === 'unavailable') {
+      return { ...result, projectID: project.id }
+    }
+  }
+  return { status: 'idle' }
+}
+
+export function ChatAutomationSupervisor(): unknown {
   const attempted = React.useRef(new Set<string>())
   const inFlight = React.useRef(false)
 
   React.useEffect(() => {
-    attempted.current.clear()
     let active = true
     let timer: number | undefined
     let controller: AbortController | undefined
@@ -89,7 +105,7 @@ export function ProjectChatAutomation(props: { projectID: number }): unknown {
       }
       inFlight.current = true
       controller = new AbortController()
-      void provisionNextProjectChat({ projectID: props.projectID, attempted: attempted.current, signal: controller.signal })
+      void provisionNextEnabledProjectChat({ attempted: attempted.current, signal: controller.signal })
         .catch(() => undefined)
         .finally(() => {
           inFlight.current = false
@@ -103,7 +119,7 @@ export function ProjectChatAutomation(props: { projectID: number }): unknown {
       controller?.abort()
       if (timer !== undefined) globalThis.clearTimeout(timer)
     }
-  }, [props.projectID])
+  }, [])
 
   return null
 }
