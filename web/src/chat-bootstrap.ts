@@ -8,7 +8,6 @@ export type WorkerRole = 'lead' | 'implementor' | 'qa'
 export const CDDM_EXTENSION_ID = 'biakfbpkfdpniphmoafgldedkbnjfibp'
 const REQUEST_TIMEOUT_MS = 45_000
 const MODE_KEY_PREFIX = 'cddm:chat-creation-mode:'
-const REQUEST_KEY_PREFIX = 'cddm:chat-bootstrap-request:'
 
 export type ChatBootstrapResponse = {
   ok: boolean
@@ -72,27 +71,17 @@ export function routedCreationRole(workUnit: WorkUnitState, bindings: RoleBindin
   return current?.enabled && current.readiness === 'ready' ? undefined : role
 }
 
-function opaqueRequestID(): string {
-  const random = globalThis.crypto?.randomUUID?.()
-  if (random) return random
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
-function requestStorageKey(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): string {
-  return `${REQUEST_KEY_PREFIX}${projectID}:${issueNumber}:${role}:${laneKey}:v${bindingVersion}`
+function stableToken(value: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
 export function bootstrapRequestID(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): string {
-  const key = requestStorageKey(projectID, issueNumber, role, laneKey, bindingVersion)
-  const current = storage()?.getItem(key)
-  if (current) return current
-  const created = `chat-${opaqueRequestID()}`
-  storage()?.setItem(key, created)
-  return created
-}
-
-export function resetBootstrapRequest(projectID: number, issueNumber: number, role: WorkerRole, laneKey: string, bindingVersion: number): void {
-  storage()?.removeItem(requestStorageKey(projectID, issueNumber, role, laneKey, bindingVersion))
+  return `chat-p${projectID}-i${issueNumber}-${role}-v${bindingVersion}-${stableToken(laneKey)}`
 }
 
 function parseResponse(value: unknown): ChatBootstrapResponse {
