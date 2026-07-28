@@ -42,6 +42,27 @@ test('browser delivery has no inline visual theme or generic DOM fallbacks', asy
   assert.match(styles, /body\.delivery-inspector-open/)
 })
 
+test('mobile workspace is a first-class built asset with safe touch and viewport contracts', async () => {
+  const index = await read('src/index.html')
+  const mobile = await read('src/mobile.css')
+  const assets = await read('scripts/copy-assets.mjs')
+
+  assert.match(index, /viewport-fit=cover/)
+  assert.match(index, /assets\/mobile\.css/)
+  assert.match(assets, /src\/mobile\.css/)
+  assert.match(assets, /assets\/mobile\.css/)
+
+  assert.match(mobile, /@media \(max-width: 800px\)/)
+  assert.match(mobile, /safe-area-inset-top/)
+  assert.match(mobile, /safe-area-inset-bottom/)
+  assert.match(mobile, /100dvh/)
+  assert.match(mobile, /\.primary-nav[\s\S]*grid-template-columns: repeat\(2/)
+  assert.match(mobile, /\.delivery-inspector[\s\S]*width: 100vw/)
+  assert.match(mobile, /min-height: 44px/)
+  assert.match(mobile, /font-size: 16px/)
+  assert.match(mobile, /overflow-x: clip/)
+})
+
 test('production and development servers apply the strict frontend header set', async () => {
   const nginx = await read('nginx.conf')
   const devServer = await read('scripts/dev-server.mjs')
