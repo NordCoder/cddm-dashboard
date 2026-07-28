@@ -103,12 +103,13 @@ export function StatusBadge(props: { value: string; label?: string }): unknown {
   )
 }
 
-export function InternalLink(props: { href: string; navigate: Navigate; className?: string; children: unknown }): unknown {
+export function InternalLink(props: { href: string; navigate: Navigate; className?: string; children: unknown; current?: boolean }): unknown {
   return h(
     'a',
     {
       href: props.href,
       className: props.className,
+      'aria-current': props.current ? 'page' : undefined,
       onClick: (event: {
         preventDefault(): void
         button?: number
@@ -186,11 +187,13 @@ export function EmptyState(props: { title: string; message: string; action?: unk
 }
 
 const navigation = [
-  { href: paths.workspace(), label: 'Workspace', hint: 'Repositories and attention' },
-  { href: paths.settings(), label: 'System health', hint: 'Runtime and trust boundary' },
-]
+  { href: paths.workspace(), label: 'Workspace', hint: 'Repositories and attention', section: 'workspace' },
+  { href: paths.settings(), label: 'System health', hint: 'Runtime and trust boundary', section: 'settings' },
+] as const
 
 export function AppShell(props: { routeLabel: string; navigate: Navigate; children: unknown }): unknown {
+  const pathname = globalThis.location?.pathname ?? '/'
+  const activeSection = pathname.startsWith(paths.settings()) ? 'settings' : 'workspace'
   return h(
     'div',
     { className: 'app-shell' },
@@ -210,6 +213,7 @@ export function AppShell(props: { routeLabel: string; navigate: Navigate; childr
           href: item.href,
           navigate: props.navigate,
           className: 'nav-link',
+          current: item.section === activeSection,
           children: h('span', null, h('strong', null, item.label), h('small', null, item.hint)),
         })),
       ),
