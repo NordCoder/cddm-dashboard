@@ -1,9 +1,10 @@
 package workflow
 
 import (
-	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 	"sort"
 	"strings"
+
+	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 )
 
 func DeriveWorkspace(snapshot supervisor.WorkspaceSnapshot) WorkspaceState {
@@ -34,6 +35,15 @@ func DeriveWorkspace(snapshot supervisor.WorkspaceSnapshot) WorkspaceState {
 }
 
 func DeriveProject(snapshot supervisor.ProjectSnapshot) ProjectState {
+	results, commands := projectExternal(snapshot.Project.ID)
+	return deriveProjectWithExternalState(snapshot, results, commands)
+}
+
+func DeriveProjectWithExternal(snapshot supervisor.ProjectSnapshot, external map[int64]ExternalResult) ProjectState {
+	return deriveProjectWithExternalState(snapshot, external, nil)
+}
+
+func deriveProjectWithExternalState(snapshot supervisor.ProjectSnapshot, external map[int64]ExternalResult, commands map[int]ExternalCommand) ProjectState {
 	identity := ProjectIdentity{
 		ID:           snapshot.Project.ID,
 		Owner:        snapshot.Project.Owner,
@@ -54,7 +64,12 @@ func DeriveProject(snapshot supervisor.ProjectSnapshot) ProjectState {
 		Attention: make([]AttentionItem, 0),
 	}
 	for _, issue := range issues {
-		workUnit := deriveWorkUnit(identity, snapshot.Project.WorkflowMode, issue)
+		var command *ExternalCommand
+		if value, ok := commands[issue.Number]; ok {
+			copy := value
+			command = &copy
+		}
+		workUnit := deriveWorkUnit(identity, snapshot.Project.WorkflowMode, issue, external, command)
 		state.WorkUnits = append(state.WorkUnits, workUnit)
 		if workUnit.Attention.Kind != AttentionNormal && workUnit.Attention.Kind != AttentionTerminal {
 			state.Attention = append(state.Attention, AttentionItem{
@@ -76,7 +91,7 @@ func FindWorkUnit(project ProjectState, issueNumber int) (WorkUnitState, bool) {
 	return WorkUnitState{}, false
 }
 
-func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervisor.Issue) WorkUnitState {
+func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervisor.Issue, external map[int64]ExternalResult, command *ExternalCommand) WorkUnitState {
 	state := WorkUnitState{
 		Identity: WorkUnitIdentity{
 			ProjectID: project.ID, Owner: project.Owner, Repository: project.Repository,
@@ -100,6 +115,9 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 	state.Warnings = append(state.Warnings, duplicateWarnings...)
 	for _, comment := range comments {
 		parsed := ParseComment(project.ID, issue.Number, comment)
+		if overlay, ok := external[comment.GitHubID]; ok {
+			applyExternalResult(&parsed, overlay)
+		}
 		state.ParsedComments = append(state.ParsedComments, parsed)
 		state.Warnings = append(state.Warnings, parsed.Warnings...)
 	}
@@ -125,10 +143,14 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 			continue
 		}
 		evidence := evidenceFromParsed(*parsed)
-		if !dispatchSeen {
-			evidence.Warnings = append(evidence.Warnings, warning(evidence.CommentID, "missing_dispatch_correlation", "no earlier Lead Dispatch comment can be correlated with this terminal result"))
+		_, commandBound := parsed.Event.Extensions["command_id"]
+		if !dispatchSeen && !commandBound {
+			evidence.Warnings = append(evidence.Warnings, warning(evidence.CommentID, "missing_dispatch_correlation", "no earlier Lead Dispatch comment or Dashboard command can be correlated with this terminal result"))
 		}
-		correlateEvidence(&evidence, state.Candidate, state.CurrentHead)
+		candidateBound := !commandBound || parsed.Event.Role != "implementor" || (parsed.Event.Status != "continue" && parsed.Event.Status != "no_op")
+		if candidateBound {
+			correlateEvidence(&evidence, state.Candidate, state.CurrentHead)
+		}
 		parsed.Warnings = append(parsed.Warnings, evidence.Warnings...)
 		results = append(results, evidence)
 		state.Warnings = append(state.Warnings, evidence.Warnings...)
@@ -147,6 +169,45 @@ func deriveWorkUnit(project ProjectIdentity, workflowMode string, issue supervis
 
 	state.Warnings = stableWarnings(state.Warnings)
 	state.Route = deriveRoute(project, workflowMode, issue.State, state, results)
+	state.Route = routeWithExternalCommand(project, state, state.Route, command)
 	state.Attention = deriveAttention(issue.State, state)
 	return state
+}
+
+func routeWithExternalCommand(project ProjectIdentity, state WorkUnitState, route Route, command *ExternalCommand) Route {
+	if command == nil {
+		return route
+	}
+	switch command.Status {
+	case "created", "delivery_pending":
+		return Route{
+			Action: "none", ReasonCode: "workflow_delivery_pending",
+			Reason:       "a Dashboard workflow command already exists and is awaiting confirmed browser delivery",
+			ExpectedHead: command.ExpectedHead, Guards: append(guardsForHead(command.ExpectedHead), "active_workflow_command", "no_duplicate_dispatch"), Warnings: state.Warnings,
+		}
+	case "awaiting_result":
+		return Route{
+			Action: "none", ReasonCode: "awaiting_worker_result",
+			Reason:       "the prompt was delivered; execution remains open until a correlated GitHub worker-result marker is accepted",
+			ExpectedHead: command.ExpectedHead, Guards: append(guardsForHead(command.ExpectedHead), "active_workflow_command", "github_result_required", "no_duplicate_dispatch"), Warnings: state.Warnings,
+		}
+	case "ambiguous":
+		return manualLeadRoute(project, state, "workflow_command_ambiguous", "workflow execution has conflicting or uncertain terminal evidence")
+	case "failed":
+		return manualLeadRoute(project, state, "workflow_command_failed", "workflow command delivery or execution failed and requires explicit Lead review")
+	default:
+		return route
+	}
+}
+
+func applyExternalResult(parsed *ParsedComment, external ExternalResult) {
+	parsed.Level = ParseLevelEnvelope
+	parsed.Meaningful = true
+	parsed.TransitionSafe = external.TransitionSafe
+	parsed.Event = external.Event
+	parsed.HardError = external.HardError
+	parsed.Warnings = append(parsed.Warnings[:0], external.Warnings...)
+	if parsed.HardError != nil {
+		parsed.Warnings = append(parsed.Warnings, warning(parsed.CommentID, parsed.HardError.Code, parsed.HardError.Message))
+	}
 }

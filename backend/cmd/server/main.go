@@ -66,10 +66,22 @@ func run() error {
 		return err
 	}
 	store := supervisor.NewStore(db)
-	workerLoopService := workerloop.NewService(workerloop.NewStore(db))
+	workerStore := workerloop.NewStore(db)
+	workerResultService := workerloop.NewService(workerStore)
+	workerStateService := workerloop.NewStateService(store, workerStore)
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
-	syncService.SetSnapshotObserver(workerLoopService)
+	syncService.SetSnapshotObserver(workerloop.NewSyncObserver(workerResultService, workerStateService))
 	poller := supervisor.NewPoller(store, syncService, cfg.GitHubPollScanInterval)
+
+	projects, err := store.ListProjects(startupContext)
+	if err != nil {
+		return fmt.Errorf("list projects for worker-loop recovery: %w", err)
+	}
+	for _, project := range projects {
+		if err := workerStateService.RefreshProject(startupContext, project.ID); err != nil {
+			return fmt.Errorf("restore worker-loop projection for project %d: %w", project.ID, err)
+		}
+	}
 
 	opencodePlanner, err := planning.NewOpenCodePlanner(planning.OpenCodeConfig{
 		Enabled: cfg.OpenCodeEnabled, Endpoint: cfg.OpenCodeEndpoint,
@@ -87,12 +99,15 @@ func run() error {
 		},
 		FallbackEnabled: cfg.PromptFallbackEnabled,
 	})
+	commandEngine := workerloop.NewCommandEngine(workerStore, resources)
+	deliveryPlanning := workerloop.NewDeliveryPlanningAdapter(planningService, commandEngine)
 	bindingService := browserbinding.New(db, cfg.BrowserBindingTTL)
-	deliveryService := delivery.New(db, planningService, delivery.NewBrowserBindingResolver(bindingService), delivery.Config{
+	browserDelivery := delivery.New(db, deliveryPlanning, delivery.NewBrowserBindingResolver(bindingService), delivery.Config{
 		Enabled: cfg.BrowserDeliveryEnabled, PendingTTL: cfg.BrowserDeliveryPendingTTL, ClaimTTL: cfg.BrowserDeliveryClaimTTL,
 	})
+	deliveryService := workerloop.NewDeliveryCoordinator(db, browserDelivery, planningService, commandEngine, workerStateService)
 	if err := deliveryService.Reconcile(startupContext); err != nil {
-		return fmt.Errorf("reconcile browser delivery commands: %w", err)
+		return fmt.Errorf("reconcile browser and workflow commands: %w", err)
 	}
 
 	server := &http.Server{
@@ -108,7 +123,7 @@ func run() error {
 
 	applicationContext, cancelApplication := context.WithCancel(context.Background())
 	go deliveryService.ReconcilePeriodically(applicationContext, minDuration(cfg.BrowserDeliveryClaimTTL/2, time.Minute), func(err error) {
-		slog.Error("reconcile browser delivery commands", "error", err)
+		slog.Error("reconcile browser and workflow commands", "error", err)
 	})
 	pollerDone := make(chan struct{})
 	go func() {
