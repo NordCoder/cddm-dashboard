@@ -36,6 +36,7 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 	if latest.Stale {
 		return manualLeadRoute(project, state, "stale_terminal_result", "latest terminal result is bound to a non-current Head")
 	}
+	dashboardBound := resultExtensionString(*latest, "command_id") != ""
 
 	if leadOwnerEscalation(*latest) {
 		if state.ActiveBlocker != nil && state.ActiveBlocker.CommentID != latest.CommentID {
@@ -47,7 +48,7 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 		return Route{Action: "owner_attention", ReasonCode: "owner_required", Reason: "Lead requires an Owner decision; the correlated blocker remains pending until Owner acts", ExpectedHead: state.CurrentHead, Guards: []string{"lead_first_blocker_flow", "active_blocker_pending", "no_worker_dispatch"}, Warnings: state.Warnings}
 	}
 
-	if latest.Role == "qa" && latest.Status == "inconclusive" {
+	if dashboardBound && latest.Role == "qa" && latest.Status == "inconclusive" {
 		if resultExtensionString(*latest, "reason_code") == "exact_candidate_ci_queued" && resultExtensionInt(*latest, "blocking_findings") == 0 {
 			if ciSucceeded(state.CI) {
 				next := dispatchRoute(project, state, "qa", "qa_retry_after_ci", "exact-Candidate CI succeeded; request a fresh QA session for the same Head")
@@ -77,11 +78,13 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 	}
 
 	if latest.Role == "implementor" {
-		switch latest.Status {
-		case "continue":
-			return dispatchRoute(project, state, "implementor", "implementation_continue", "Implementor requested another bounded turn in the same Change")
-		case "no_op":
-			return dispatchRoute(project, state, "lead", "implementation_no_op", "Implementor reported no source change; Lead must verify the Change outcome")
+		if dashboardBound {
+			switch latest.Status {
+			case "continue":
+				return dispatchRoute(project, state, "implementor", "implementation_continue", "Implementor requested another bounded turn in the same Change")
+			case "no_op":
+				return dispatchRoute(project, state, "lead", "implementation_no_op", "Implementor reported no source change; Lead must verify the Change outcome")
+			}
 		}
 		if ciFailed(state.CI) {
 			return dispatchRoute(project, state, "implementor", "candidate_ci_failed", "current Candidate CI failed and requires Implementor correction")
@@ -95,47 +98,54 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 
 	switch latest.Role {
 	case "implementor":
-		if latest.Status == "completed" {
+		if latest.Status == "completed" || (!dashboardBound && latest.Status == "no_op") {
 			if qaRequired(workflowMode) {
-				next := dispatchRoute(project, state, "qa", "implementation_completed", "Implementor Candidate advances to independent QA")
-				next.Guards = append(next.Guards, "ci_success", "fresh_qa_session")
+				next := dispatchRoute(project, state, "qa", "implementation_completed", "Implementor terminal result advances to independent QA")
+				next.Guards = append(next.Guards, "ci_success")
+				if dashboardBound {
+					next.Guards = append(next.Guards, "fresh_qa_session")
+				}
 				return next
 			}
-			next := dispatchRoute(project, state, "lead", "implementation_completed_no_qa", "Implementor Candidate advances to Lead because QA is not required")
+			next := dispatchRoute(project, state, "lead", "implementation_completed_no_qa", "Implementor terminal result advances to Lead because QA is not required")
 			next.Guards = append(next.Guards, "ci_success")
 			return next
 		}
 	case "qa":
 		switch latest.Verdict {
 		case "approved":
-			if !ciSucceeded(state.CI) {
+			if dashboardBound && !ciSucceeded(state.CI) {
 				route.ReasonCode = "waiting_for_ci"
 				route.Reason = "QA approval is preserved but cannot advance until exact-Candidate CI succeeds"
 				return route
 			}
-			return dispatchRoute(project, state, "lead", "qa_approved", "QA approved the current exact Head; Lead must perform merge review")
+			return dispatchRoute(project, state, "lead", "qa_approved", "QA approved the current exact Head")
 		case "changes_required":
-			return dispatchRoute(project, state, "lead", "qa_changes_required", "QA requested Candidate-bound changes; Lead must bound the correction before Implementor resume")
+			if dashboardBound {
+				return dispatchRoute(project, state, "lead", "qa_changes_required", "QA requested Candidate-bound changes; Lead must bound the correction before Implementor resume")
+			}
+			return dispatchRoute(project, state, "implementor", "qa_changes_required", "QA requested changes on the current exact Head")
 		case "inconclusive":
 			return dispatchRoute(project, state, "lead", "qa_inconclusive", "QA could not reach a conclusive verdict")
 		}
 	case "lead":
-		switch latest.Decision {
-		case "dispatch":
-			if !oneOf(latest.ResumeRole, "lead", "implementor", "qa") {
-				return manualLeadRoute(project, state, "invalid_lead_resume_role", "Lead dispatch result names an unsupported role")
+		if dashboardBound {
+			switch latest.Decision {
+			case "dispatch":
+				if !oneOf(latest.ResumeRole, "lead", "implementor", "qa") {
+					return manualLeadRoute(project, state, "invalid_lead_resume_role", "Lead dispatch result names an unsupported role")
+				}
+				return dispatchRoute(project, state, latest.ResumeRole, "lead_dispatch", "Lead selected the next validated worker role")
+			case "continue":
+				return dispatchRoute(project, state, "lead", "lead_continue", "Lead requested another bounded Lead turn")
+			case "correct":
+				return dispatchRoute(project, state, "implementor", "lead_correction", "Lead bounded a correction for the existing Change")
+			case "ready_to_merge":
+				return mergeGateRoute(state)
 			}
-			return dispatchRoute(project, state, latest.ResumeRole, "lead_dispatch", "Lead selected the next validated worker role")
-		case "continue":
-			return dispatchRoute(project, state, "lead", "lead_continue", "Lead requested another bounded Lead turn")
-		case "correct":
-			return dispatchRoute(project, state, "implementor", "lead_correction", "Lead bounded a correction for the existing Change")
-		case "ready_to_merge":
-			return mergeGateRoute(state)
-		}
-		if latest.ResumeRole != "" && oneOf(latest.Decision, "resume") {
+		} else if latest.ResumeRole != "" && oneOf(latest.Decision, "continue", "correct", "resume") {
 			if !leadResumeRoleAllowed(latest.ResumeRole) {
-				return manualLeadRoute(project, state, "invalid_lead_resume_role", "Lead automatic continuation may resume only Implementor or QA")
+				return manualLeadRoute(project, state, "invalid_lead_resume_role", "Lead automatic continuation may resume only Implementor or QA; resuming Lead would repeat the same lane")
 			}
 			return dispatchRoute(project, state, latest.ResumeRole, "lead_resume", "Lead decision resumes the validated worker role")
 		}
