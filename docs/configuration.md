@@ -9,6 +9,11 @@
 | `API_PORT` | `1337` | Direct API host port |
 | `WEB_PORT` | `1338` | Dashboard host port |
 
+Default operator endpoints:
+
+- Dashboard: `http://localhost:1338`
+- API: `http://localhost:1337`
+
 The server enforces loopback Host authorities. Changing `BIND_HOST` does not create a supported public deployment.
 
 ## GitHub
