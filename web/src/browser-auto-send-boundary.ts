@@ -1,12 +1,17 @@
-const ENABLED_KEY = 'cddm.browser-delivery.auto-send.enabled'
+import {
+  automaticDeliveryRoute,
+  readAutoSendEnabled,
+  writeAutoSendEnabled,
+} from './browser-auto-send-model.js'
 
 function manualReviewOpen(): boolean {
   return document.querySelector('.delivery-fields--review') !== null
 }
 
 function setPreference(enabled: boolean): void {
-  try { globalThis.localStorage?.setItem(ENABLED_KEY, String(enabled)) } catch { /* local preference only */ }
-  document.body.classList.toggle('delivery-auto-send-enabled', enabled)
+  const path = globalThis.location.pathname
+  const stored = writeAutoSendEnabled(path, enabled)
+  document.body.classList.toggle('delivery-auto-send-enabled', stored && enabled)
 }
 
 function setBoundaryStatus(message: string): void {
@@ -15,15 +20,21 @@ function setBoundaryStatus(message: string): void {
 }
 
 function synchronizeControl(): void {
+  const route = automaticDeliveryRoute(globalThis.location.pathname)
   const checkbox = document.querySelector('.delivery-auto-send input[type="checkbox"]') as HTMLInputElement | null
-  if (!checkbox) return
+  if (!route || !checkbox) {
+    document.body.classList.remove('delivery-auto-send-enabled')
+    return
+  }
   if (checkbox.checked && manualReviewOpen()) {
     checkbox.checked = false
     setPreference(false)
     setBoundaryStatus('Cancel the open manual review before enabling')
     return
   }
-  document.body.classList.toggle('delivery-auto-send-enabled', checkbox.checked)
+  const enabled = readAutoSendEnabled(globalThis.location.pathname)
+  checkbox.checked = enabled
+  document.body.classList.toggle('delivery-auto-send-enabled', enabled)
 }
 
 if (typeof document !== 'undefined') {
@@ -42,6 +53,10 @@ if (typeof document !== 'undefined') {
 
   const observer = new MutationObserver(synchronizeControl)
   observer.observe(document.body, { childList: true, subtree: true })
+  globalThis.addEventListener('popstate', synchronizeControl)
   queueMicrotask(synchronizeControl)
-  globalThis.addEventListener('pagehide', () => observer.disconnect(), { once: true })
+  globalThis.addEventListener('pagehide', () => {
+    observer.disconnect()
+    globalThis.removeEventListener('popstate', synchronizeControl)
+  }, { once: true })
 }

@@ -1,4 +1,5 @@
 import { ApiClient, ApiError } from './api.js'
+import { readAutoSendEnabled } from './browser-auto-send-model.js'
 import { BrowserApiClient, BrowserBinding, BrowserWorker } from './browser-api.js'
 import {
   buildConfirmationInput,
@@ -190,6 +191,12 @@ class BrowserDeliveryController {
 
   private openConfirmation(): void {
     if (this.busy()) return
+    if (readAutoSendEnabled(globalThis.location.pathname)) {
+      this.confirmation = null
+      this.feedback = 'Manual review is unavailable while Auto-send is enabled for this work unit. Disable Auto-send first.'
+      this.render()
+      return
+    }
     const snapshot = this.snapshot
     if (!snapshot?.plan?.plan || !snapshot.binding || !deliveryEligibility(snapshot.workUnit, snapshot.plan, snapshot.binding).ready) return
 
@@ -228,6 +235,12 @@ class BrowserDeliveryController {
   private async confirm(): Promise<void> {
     const frozen = this.confirmation
     if (this.busy() || !frozen) return
+    if (readAutoSendEnabled(globalThis.location.pathname)) {
+      this.confirmation = null
+      this.feedback = 'Manual confirmation was cancelled because Auto-send is enabled for this work unit.'
+      this.render()
+      return
+    }
     this.submitting = true
     this.feedback = ''
     this.render()

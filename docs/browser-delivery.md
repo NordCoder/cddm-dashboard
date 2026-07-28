@@ -59,9 +59,13 @@ Browser delivery is enabled only when the backend still projects a dispatchable 
 
 One confirmation intent receives one idempotency key. Network failure, unreadable or malformed success data, or HTTP `5xx` keeps that same frozen intent because the backend may already have committed it. A definitive stale/conflicting response cancels the intent and requires another review. `uncertain` delivery outcomes are never automatically replayed at the DOM layer.
 
+Manual review and automatic mode are mutually exclusive. The delivery controller rejects review or confirmation while Auto-send is active for the current Work Unit, independently of visual hiding of the controls.
+
 ## Automatic mode
 
-The Browser Delivery header contains an **Auto-send** switch. It is disabled by default and stored in local browser storage.
+The Browser Delivery header contains an **Auto-send** switch. It is disabled by default and stored separately in local browser storage for each Project/Work Unit.
+
+Auto-send is available only on the current Work Unit page and its current `/plans` view. It is unavailable on historical `/plans/:planID` routes, preventing the plan displayed on screen from differing from the latest plan considered for automatic delivery.
 
 When enabled, the dashboard automatically creates one delivery command for each new exact approved Prompt Plan as soon as the current binding is `ready`. The mode skips the review screen but does not skip backend authority validation.
 
@@ -69,13 +73,14 @@ Automatic mode:
 
 - uses only the immutable backend-generated prompt;
 - pauses when the visible prompt textarea has local edits;
-- derives its identity from project, issue, plan, plan hash, context hash, exact Head, lane, binding version and presence token;
+- derives its identity from project, issue, plan, plan hash, context hash, exact Head, lane, binding version and a fingerprint of the presence proof;
+- never persists the raw presence proof inside its local record;
 - stores one stable idempotency key for that exact identity;
 - detects a manually created command for the same exact plan and binding and does not create another;
 - throttles transport-ambiguous retries and reuses the same key;
 - blocks repeated attempts after a definitive backend rejection until the plan or binding identity changes.
 
-Automatic mode requires the relevant Work Unit or Prompt Plan page to remain open in the dashboard. It is a browser-local operator preference, not a server-wide scheduler.
+Automatic mode requires the relevant current Work Unit or current Plans page to remain open in the dashboard. It is a browser-local per-work-unit operator preference, not a server-wide scheduler.
 
 Local edits in the prompt textarea are intentionally not sent by either Browser Delivery mode. Use **Manual Copy** for edited prompt text or reset to the backend-generated prompt first.
 

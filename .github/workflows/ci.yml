@@ -145,6 +145,8 @@ jobs:
         run: |
           bash -n scripts/cddm-codex-change.sh
           bash -n scripts/build-cddm-change.sh
+          bash -n scripts/cddm-up.sh
+          pwsh -NoProfile -Command '$tokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "scripts/cddm-up.ps1"), [ref]$tokens, [ref]$parseErrors); if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { Write-Error $_ }; exit 1 }'
       - name: Build Go Host runtime
         run: |
           bash scripts/build-cddm-change.sh
@@ -183,3 +185,6 @@ jobs:
           docker compose config --quiet
           rendered="$(docker compose config)"
           test "$(grep -c 'host_ip: 127.0.0.1' <<<"$rendered")" -eq 2
+          grep -q 'published: "1337"' <<<"$rendered"
+          grep -q 'published: "1338"' <<<"$rendered"
+          grep -q 'GITHUB_AUTH_MODE: auto' <<<"$rendered"
