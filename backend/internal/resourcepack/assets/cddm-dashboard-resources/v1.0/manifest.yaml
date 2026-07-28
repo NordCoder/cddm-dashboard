@@ -1,0 +1,17 @@
+package: cddm-dashboard-resources
+version: "1.0"
+
+base_methodology:
+  package: cddm-minimal
+  version: "2.0"
+
+result_protocol:
+  package: cddm-worker-result
+  version: "1"
+
+resources:
+  lead: lead-trigger.md
+  implementor: implementor-trigger.md
+  qa: qa-trigger.md
+  result_marker: worker-result-marker.md
+  result_schema: worker-result.schema.json
