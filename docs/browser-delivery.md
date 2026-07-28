@@ -85,7 +85,9 @@ Each Dashboard Project execution profile has:
 }
 ```
 
-On the Dashboard Project page, paste the exact ChatGPT Project page that should own chats for that repository. The backend accepts only a credential-free `https://chatgpt.com/...` URL without query or fragment and rejects conversation URLs. A trailing slash is removed before persistence.
+Open the intended Project in ChatGPT and copy its current Project page URL from the address bar. Do not copy a chat/conversation URL. Paste the Project page URL into the matching Dashboard Project.
+
+The backend accepts only a credential-free `https://chatgpt.com/...` URL without query or fragment and rejects conversation URLs. A trailing slash is removed before persistence. The implementation intentionally does not invent or require a hard-coded human-readable URL template; it uses the actual Project page URL supplied by the operator.
 
 - empty `chatgpt_project_url` — create a global ChatGPT conversation;
 - configured `chatgpt_project_url` — open that exact project page and create the conversation inside its scope.
