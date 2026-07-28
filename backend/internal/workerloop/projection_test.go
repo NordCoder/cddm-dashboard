@@ -26,15 +26,21 @@ func TestExecutionProfileDefaultsAndRejectsAutoMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.ResourceProfile != resourcepack.DefaultProfile || profile.DeliveryMode != DeliveryModeReviewed || profile.QASessionMode != QAModeManualFresh || profile.ChatCreationMode != ChatCreationModeManual || profile.AutoMerge {
+	if profile.ResourceProfile != resourcepack.DefaultProfile || profile.DeliveryMode != DeliveryModeReviewed || profile.QASessionMode != QAModeManualFresh || profile.ChatCreationMode != ChatCreationModeManual || profile.ChatGPTProjectURL != "" || profile.AutoMerge {
 		t.Fatalf("profile = %+v", profile)
 	}
 	profile.DeliveryMode = DeliveryModeAuto
 	profile.ChatCreationMode = ChatCreationModeAutomatic
+	profile.ChatGPTProjectURL = "https://chatgpt.com/g/g-p-project-name/project/"
 	updated, err := service.UpdateProfile(context.Background(), profile)
-	if err != nil || updated.DeliveryMode != DeliveryModeAuto || updated.ChatCreationMode != ChatCreationModeAutomatic {
+	if err != nil || updated.DeliveryMode != DeliveryModeAuto || updated.ChatCreationMode != ChatCreationModeAutomatic || updated.ChatGPTProjectURL != "https://chatgpt.com/g/g-p-project-name/project" {
 		t.Fatalf("updated = %+v err=%v", updated, err)
 	}
+	profile.ChatGPTProjectURL = "https://chatgpt.com/c/existing-chat"
+	if _, err := service.UpdateProfile(context.Background(), profile); err == nil {
+		t.Fatal("conversation URL was accepted as chatgpt_project_url")
+	}
+	profile.ChatGPTProjectURL = updated.ChatGPTProjectURL
 	profile.ChatCreationMode = "background"
 	if _, err := service.UpdateProfile(context.Background(), profile); err == nil {
 		t.Fatal("unsupported chat_creation_mode was accepted")
