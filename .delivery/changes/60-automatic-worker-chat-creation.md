@@ -13,7 +13,7 @@ Allow the local Dashboard and bundled Chrome extension to create a fresh ChatGPT
 
 - Provide an explicit **Create new chat** action for the current routed role.
 - Provide browser-local Project mode `manual | automatic`.
-- In automatic mode, create only missing/unready Implementor and QA lanes while the Work Unit page is open.
+- While any Dashboard screen remains open, automatic mode supervises every enabled Project and creates only missing/unready Implementor and QA lanes from current backend `dispatch` routes.
 - One managed ChatGPT tab has one persistent extension worker identity and exact-tab executor.
 - Bootstrap references:
   - Lead: `@01-workflow.md`, `@cddm-minimal-issue-sizing-standard.md`;
@@ -32,6 +32,7 @@ Allow the local Dashboard and bundled Chrome extension to create a fresh ChatGPT
 - Never automatically replay an ambiguous or consumed bootstrap request.
 - Keep primary manual target tracking separate from managed exact-tab workers.
 - Register and poll every managed chat as an independent backend browser worker.
+- The browser-local supervisor processes at most one new chat per poll cycle and relies on backend routes plus idempotent bootstrap identities.
 - QA binding retirement remains version-specific and unchanged.
 - Do not read or classify ChatGPT responses.
 - Do not enable automatic merge.
@@ -39,6 +40,7 @@ Allow the local Dashboard and bundled Chrome extension to create a fresh ChatGPT
 ## Out of Scope
 
 - automatic Lead rotation;
+- operation while the Dashboard browser is fully closed;
 - response scraping;
 - automatic plan generation;
 - automatic merge;
