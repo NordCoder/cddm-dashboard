@@ -32,6 +32,7 @@ Browser delivery and worker completion are deliberately separate. The applicatio
 - typed Work Unit execution surfaces and Project Pilot Readiness diagnostics;
 - distinct Lead, Implementor and QA bindings with `manual_fresh_binding` QA mode;
 - manual or Project-scoped automatic fresh-chat creation for routed Implementor and QA lanes;
+- durable mapping from one Dashboard repository Project to an optional ChatGPT Project page;
 - one persistent exact-tab browser worker identity per Dashboard-created chat;
 - restart, duplicate synchronization, delivered-without-result and downtime-result recovery fixtures.
 
@@ -87,7 +88,9 @@ See:
 5. In extension Options, select `http://localhost:1338` or `http://localhost:1337` as the backend origin.
 6. Reload the extension after upgrading so the bounded `tabs` and local Dashboard connection permissions are active.
 
-For manual binding, activate the intended `https://chatgpt.com/c/...` tab once and bind that live target. For Dashboard-created chats, the extension opens a new ChatGPT tab, sends only the role bootstrap, waits for the resulting exact `/c/<id>` URL, registers a persistent worker identity for that tab and binds it through the current route guard.
+For manual binding, activate the intended ChatGPT conversation tab once and bind that live target. For Dashboard-created chats, the extension opens either global ChatGPT or the exact ChatGPT Project page configured for the repository, sends only the role bootstrap, waits for the resulting conversation URL, registers a persistent worker identity for that tab and binds the canonical `/c/<id>` target through the current route guard.
+
+When a ChatGPT Project URL is configured, the extension verifies both the bootstrap surface and the resulting conversation path against that project scope. A conversation created outside the configured project is rejected instead of being bound.
 
 The extension validates the exact tab, target URL, backend origin, binding version, presence proof, command identity and prompt hash before DOM execution. It never reads response content.
 
@@ -106,9 +109,12 @@ Lead and Implementor conversations may remain bound while they are healthy. QA u
 The Project and Work Unit UI support:
 
 - **Manual** chat creation and binding;
-- **Auto-create Implementor + QA**, stored per Project in the current browser.
+- **Auto-create Implementor + QA**, stored durably in the Project execution profile;
+- an optional exact **ChatGPT Project URL** for all chats created for that repository.
 
 Automatic mode reacts only to current backend routes with `action=dispatch`. While any Dashboard screen remains open, the supervisor scans every enabled Project, creates at most one missing Implementor or fresh QA chat per poll cycle, and binds the exact created target. Lead chat creation remains explicit. Bootstrap messages contain the role Library references and no `command_id`; the first real assignment still arrives through the normal durable Workflow Command and Browser Delivery path.
+
+If `chatgpt_project_url` is empty, creation uses global ChatGPT. If it is set, manual and automatic creation open that exact project page and fail closed if ChatGPT produces a conversation outside its scope. Changing the URL changes the bootstrap idempotency identity, so a request for the previous ChatGPT Project cannot be silently reused.
 
 Automatic creation is not required for pilot readiness. Existing manual bindings remain supported. Fully closing the Dashboard browser stops the browser-local supervisor; no background GitHub authority is introduced.
 
@@ -139,11 +145,13 @@ The default execution profile is:
   "result_protocol": "cddm-worker-result/v1",
   "delivery_mode": "reviewed",
   "qa_session_mode": "manual_fresh_binding",
+  "chat_creation_mode": "manual",
+  "chatgpt_project_url": "",
   "auto_merge": false
 }
 ```
 
-The fresh-chat creation preference is browser-local and Project-scoped; it is not durable GitHub authority and is intentionally separate from the backend execution profile.
+On the Dashboard Project page, paste the exact ChatGPT Project page URL that should own worker chats for that repository. The setting is stored in the local Dashboard database. Leave it empty for global ChatGPT creation.
 
 ## Pilot Readiness
 
