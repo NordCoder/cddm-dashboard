@@ -86,6 +86,7 @@ export function WorkerLoopPanel(props: {
         h('div', null, h('dt', null, 'Result protocol'), h('dd', null, props.execution.profile.result_protocol)),
         h('div', null, h('dt', null, 'QA mode'), h('dd', null, props.execution.profile.qa_session_mode)),
         h('div', null, h('dt', null, 'Chat creation'), h('dd', null, props.execution.profile.chat_creation_mode)),
+        h('div', null, h('dt', null, 'ChatGPT project'), h('dd', null, props.execution.profile.chatgpt_project_url || 'Global ChatGPT')),
         h('div', null, h('dt', null, 'Auto merge'), h('dd', null, props.execution.profile.auto_merge ? 'enabled' : 'disabled')),
       ),
       h('span', { className: 'label' }, 'Delivery mode'),
