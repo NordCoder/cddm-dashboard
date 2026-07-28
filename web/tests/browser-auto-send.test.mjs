@@ -2,9 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   automaticDeliveryIdentity,
+  automaticDeliveryRoute,
+  autoSendPreferenceKey,
   autoSendRetryDue,
   matchingDeliveryExists,
-} from '../dist/assets/browser-auto-send.js'
+  readAutoSendEnabled,
+  writeAutoSendEnabled,
+} from '../dist/assets/browser-auto-send-model.js'
 import { contextHash, generation, head } from './fixtures.mjs'
 
 function result() {
@@ -34,11 +38,40 @@ function binding(overrides = {}) {
   }
 }
 
-test('automatic delivery identity is exact-plan and exact-binding scoped', () => {
+function memoryStorage() {
+  const values = new Map()
+  return {
+    getItem(key) { return values.has(key) ? values.get(key) : null },
+    setItem(key, value) { values.set(key, String(value)) },
+  }
+}
+
+test('automatic delivery is allowed only on current work-unit and current-plans routes', () => {
+  assert.deepEqual(automaticDeliveryRoute('/projects/1/work-units/14'), { projectID: 1, issueNumber: 14 })
+  assert.deepEqual(automaticDeliveryRoute('/projects/1/work-units/14/plans'), { projectID: 1, issueNumber: 14 })
+  assert.equal(automaticDeliveryRoute('/projects/1/work-units/14/plans/7'), null)
+  assert.equal(automaticDeliveryRoute('/projects/1'), null)
+})
+
+test('automatic delivery preference is isolated per work unit', () => {
+  const storage = memoryStorage()
+  assert.equal(writeAutoSendEnabled('/projects/1/work-units/14', true, storage), true)
+  assert.equal(readAutoSendEnabled('/projects/1/work-units/14', storage), true)
+  assert.equal(readAutoSendEnabled('/projects/1/work-units/15', storage), false)
+  assert.equal(readAutoSendEnabled('/projects/1/work-units/14/plans/7', storage), false)
+  assert.notEqual(
+    autoSendPreferenceKey({ projectID: 1, issueNumber: 14 }),
+    autoSendPreferenceKey({ projectID: 1, issueNumber: 15 }),
+  )
+})
+
+test('automatic delivery identity is exact-plan and exact-binding scoped without persisting raw presence proof', () => {
   const first = automaticDeliveryIdentity(1, 14, result(), binding())
   assert.equal(first, automaticDeliveryIdentity(1, 14, result(), binding()))
   assert.notEqual(first, automaticDeliveryIdentity(1, 14, result(), binding({ binding_version: 5 })))
+  assert.notEqual(first, automaticDeliveryIdentity(1, 14, result(), binding({ presence_token: 'presence-2' })))
   assert.notEqual(first, automaticDeliveryIdentity(1, 15, result(), binding()))
+  assert.equal(first.includes('presence-1'), false)
 })
 
 test('existing exact command suppresses automatic duplicate creation', () => {
