@@ -33,13 +33,13 @@ func (a *DeliveryPlanningAdapter) Get(ctx context.Context, projectID int64, issu
 	if result.Plan == nil {
 		return result, nil
 	}
-	_, prompt, err := a.commands.PrepareWorkflowCommand(ctx, projectID, issueNumber, result)
+	prepared, err := a.commands.BuildWorkflowCommand(projectID, issueNumber, result)
 	if err != nil {
 		return planning.GenerationResult{}, err
 	}
 	copy := result
 	plan := *result.Plan
-	plan.Prompt = prompt
+	plan.Prompt = prepared.Prompt
 	copy.Plan = &plan
 	return copy, nil
 }
@@ -68,25 +68,46 @@ func NewDeliveryCoordinator(db *sql.DB, base BrowserDelivery, plans PlanningRead
 }
 
 func (c *DeliveryCoordinator) Create(ctx context.Context, projectID int64, issueNumber int, confirmation delivery.Confirmation) (delivery.Command, error) {
-	command, err := c.base.Create(ctx, projectID, issueNumber, confirmation)
+	browserCommand, err := c.base.Create(ctx, projectID, issueNumber, confirmation)
 	if err != nil {
 		return delivery.Command{}, err
 	}
 	generation, err := c.plans.Get(ctx, projectID, issueNumber, confirmation.PlanID)
 	if err != nil {
+		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_plan_unavailable")
 		return delivery.Command{}, err
 	}
-	workflowID, _, err := c.commands.PrepareWorkflowCommand(ctx, projectID, issueNumber, generation)
+	prepared, err := c.commands.BuildWorkflowCommand(projectID, issueNumber, generation)
 	if err != nil {
+		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_prompt_invalid")
 		return delivery.Command{}, err
 	}
-	if err := c.link(ctx, workflowID, command.ID); err != nil {
+	workflowCommand, err := c.commands.PersistWorkflowCommand(ctx, prepared)
+	if err != nil {
+		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_unavailable")
 		return delivery.Command{}, err
 	}
-	if err := c.commands.RecordDeliveryOutcome(ctx, workflowID, command.Status); err != nil {
+	if terminalCommandStatus(workflowCommand.Status) {
+		linked, linkErr := c.linkedDelivery(ctx, workflowCommand.ID)
+		if linkErr != nil {
+			c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_terminal")
+			return delivery.Command{}, linkErr
+		}
+		if linked != "" && linked != browserCommand.ID {
+			c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_command_terminal")
+			return delivery.Command{}, ErrConflict
+		}
+	}
+	if err := c.link(ctx, workflowCommand.ID, browserCommand.ID); err != nil {
+		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_link_failed")
+		_ = c.commands.RecordDeliveryOutcome(ctx, workflowCommand.ID, "failed")
 		return delivery.Command{}, err
 	}
-	return command, nil
+	if err := c.commands.RecordDeliveryOutcome(ctx, workflowCommand.ID, browserCommand.Status); err != nil {
+		c.invalidatePendingDelivery(ctx, browserCommand.ID, "workflow_status_failed")
+		return delivery.Command{}, err
+	}
+	return browserCommand, nil
 }
 
 func (c *DeliveryCoordinator) List(ctx context.Context, projectID int64, issueNumber int) ([]delivery.Command, error) {
@@ -165,4 +186,18 @@ func (c *DeliveryCoordinator) link(ctx context.Context, workflowID, deliveryID s
 		return fmt.Errorf("link workflow command to browser delivery: %w", err)
 	}
 	return nil
+}
+
+func (c *DeliveryCoordinator) linkedDelivery(ctx context.Context, workflowID string) (string, error) {
+	var deliveryID string
+	err := c.db.QueryRowContext(ctx, `SELECT delivery_command_id FROM workflow_delivery_links WHERE workflow_command_id=?`, workflowID).Scan(&deliveryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return deliveryID, err
+}
+
+func (c *DeliveryCoordinator) invalidatePendingDelivery(ctx context.Context, deliveryID, reason string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = c.db.ExecContext(ctx, `UPDATE delivery_commands SET status='invalidated',terminal_at=?,outcome_reason=? WHERE id=? AND status='pending'`, now, reason, deliveryID)
 }
