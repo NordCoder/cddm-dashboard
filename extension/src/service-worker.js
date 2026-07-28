@@ -190,8 +190,11 @@ export class ExtensionRuntime {
     const result = this.registeredManaged.has(record.worker_id)
       ? await this.backend.heartbeat(record.worker_id, payload)
       : await this.backend.register(payload);
+    if (result?.state === "conflict") {
+      this.registeredManaged.delete(record.worker_id);
+      throw new Error("managed_worker_session_conflict");
+    }
     this.registeredManaged.add(record.worker_id);
-    if (result?.state === "conflict") throw new Error("managed_worker_session_conflict");
     return target;
   }
 
