@@ -4,12 +4,18 @@ const SEND_ACK_TIMEOUT_MS = 1500;
 const SEND_ACK_INTERVAL_MS = 50;
 const COMPOSER_WAIT_TIMEOUT_MS = 20_000;
 
-function normalizeTargetUrl(value) {
+function cleanChatGPTURL(value) {
   let parsed;
   try { parsed = new URL(String(value ?? "")); } catch { return null; }
-  if (parsed.origin !== CHATGPT_ORIGIN || parsed.search || parsed.hash) return null;
-  const match = parsed.pathname.match(/^\/c\/([^/]+)$/);
-  return match && parsed.pathname === `/c/${match[1]}` ? { kind: TARGET_KIND, origin: CHATGPT_ORIGIN, path: parsed.pathname } : null;
+  if (parsed.origin !== CHATGPT_ORIGIN || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+  return parsed;
+}
+
+function normalizeTargetUrl(value) {
+  const parsed = cleanChatGPTURL(value);
+  if (!parsed) return null;
+  const match = parsed.pathname.match(/(?:^|\/)c\/([^/]+)$/);
+  return match?.[1] ? { kind: TARGET_KIND, origin: CHATGPT_ORIGIN, path: `/c/${match[1]}` } : null;
 }
 function normalizeTargetRef(value) {
   return value?.kind === TARGET_KIND && value.origin === CHATGPT_ORIGIN ? normalizeTargetUrl(`${value.origin}${value.path}`) : null;
@@ -17,10 +23,29 @@ function normalizeTargetRef(value) {
 function sameTarget(left, right) {
   return Boolean(left && right && left.kind === right.kind && left.origin === right.origin && left.path === right.path);
 }
-function bootstrapSurface() {
+function normalizeProjectUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const parsed = cleanChatGPTURL(raw);
+  if (!parsed) return null;
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  if (!pathname || pathname === "/" || pathname.length > 500 || /(?:^|\/)c\/[^/]+$/.test(pathname)) return null;
+  return `${CHATGPT_ORIGIN}${pathname}`;
+}
+function projectScope(value) {
+  const normalized = normalizeProjectUrl(value);
+  if (!normalized) return "";
+  const segments = new URL(normalized).pathname.split("/").filter(Boolean);
+  if (segments.at(-1) === "project") segments.pop();
+  return segments.length > 0 ? `/${segments.join("/")}` : "";
+}
+function bootstrapSurface(expectedProjectUrl) {
   try {
     const parsed = new URL(location.href);
-    return parsed.origin === CHATGPT_ORIGIN && (parsed.pathname === "/" || parsed.pathname === "");
+    if (parsed.origin !== CHATGPT_ORIGIN || parsed.search || parsed.hash) return false;
+    if (!expectedProjectUrl) return parsed.pathname === "/" || parsed.pathname === "";
+    const expectedScope = projectScope(expectedProjectUrl);
+    return Boolean(expectedScope && projectScope(location.href) === expectedScope && !normalizeTargetUrl(location.href));
   } catch { return false; }
 }
 
@@ -134,8 +159,8 @@ async function send(expected, prompt) {
   try { control.element.click(); } catch { return error("send_outcome_unknown", false); }
   return await submitAcknowledged(expected) ? { ok: true } : error("send_outcome_unknown", false);
 }
-async function bootstrap(prompt) {
-  if (!bootstrapSurface()) return error("bootstrap_surface_invalid");
+async function bootstrap(prompt, projectUrl) {
+  if (!bootstrapSurface(projectUrl)) return error(projectUrl ? "bootstrap_project_surface_invalid" : "bootstrap_surface_invalid");
   if (typeof prompt !== "string" || !prompt.trim()) return error("bootstrap_prompt_invalid");
   const composer = await waitForComposer();
   if (!composer.element || composer.ambiguous || composer.element.disabled || composer.element.readOnly) return error("compose_unavailable");
@@ -161,7 +186,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return true;
   }
   if (message?.type === "bootstrap-new-chat") {
-    bootstrap(message.prompt).then(respond, () => respond(error("send_outcome_unknown", false)));
+    bootstrap(message.prompt, message.project_url).then(respond, () => respond(error("send_outcome_unknown", false)));
     return true;
   }
   return false;
