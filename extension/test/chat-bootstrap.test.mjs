@@ -48,6 +48,7 @@ test("bootstrap provisions one exact project-scoped chat worker and binds it to 
       target,
     },
   }]);
+  assert.equal(storage.values.chat_bootstrap_jobs[message.request_id].chatgpt_project_url, message.chatgpt_project_url);
 });
 
 test("completed bootstrap request is idempotent and never creates a second chat", async () => {
