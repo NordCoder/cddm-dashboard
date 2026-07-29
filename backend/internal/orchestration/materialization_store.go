@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -49,7 +50,7 @@ func (s *Store) RecordMaterialization(ctx context.Context, input Materialization
 		return Materialization{}, fmt.Errorf("begin materialization outcome: %w", err)
 	}
 	defer tx.Rollback()
-	value, err := s.recordMaterializationTx(ctx, tx, input, false)
+	value, err := s.recordMaterializationTx(ctx, tx, input, true)
 	if err != nil {
 		return Materialization{}, err
 	}
@@ -109,6 +110,9 @@ func (s *Store) MaterializeBatch(ctx context.Context, outcome MaterializationInp
 			}
 			return existing, values, nil
 		}
+		if existing.Status == MaterializationAmbiguous {
+			return Materialization{}, nil, ErrConflict
+		}
 	} else if !errors.Is(err, ErrNotFound) {
 		return Materialization{}, nil, err
 	}
@@ -165,7 +169,7 @@ func (s *Store) MarkMaterializationAmbiguous(ctx context.Context, projectID, com
 	return nil
 }
 
-func (s *Store) recordMaterializationTx(ctx context.Context, tx *sql.Tx, input MaterializationInput, allowPromote bool) (Materialization, error) {
+func (s *Store) recordMaterializationTx(ctx context.Context, tx *sql.Tx, input MaterializationInput, allowTransition bool) (Materialization, error) {
 	existing, err := materializationTx(ctx, tx, input.ProjectID, input.SourceResultCommentID)
 	if err == nil {
 		if existing.PayloadHash != input.PayloadHash || existing.SourceCommandID != input.SourceCommandID {
@@ -174,12 +178,12 @@ func (s *Store) recordMaterializationTx(ctx context.Context, tx *sql.Tx, input M
 		if existing.Status == input.Status && existing.ReasonCode == input.ReasonCode {
 			return existing, nil
 		}
-		if !allowPromote || existing.Status == MaterializationMaterialized || existing.Status == MaterializationAmbiguous {
+		if !allowTransition || existing.Status == MaterializationMaterialized || existing.Status == MaterializationAmbiguous {
 			return Materialization{}, ErrConflict
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE workflow_materializations SET status=?,reason_code=?,updated_at=? WHERE project_id=? AND source_result_comment_id=?`, input.Status, input.ReasonCode, stamp(s.now()), input.ProjectID, input.SourceResultCommentID)
 		if err != nil {
-			return Materialization{}, fmt.Errorf("promote materialization outcome: %w", err)
+			return Materialization{}, fmt.Errorf("transition materialization outcome: %w", err)
 		}
 		return materializationTx(ctx, tx, input.ProjectID, input.SourceResultCommentID)
 	}
