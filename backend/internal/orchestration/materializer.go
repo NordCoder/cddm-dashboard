@@ -11,31 +11,17 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workerloop"
 )
 
-type CommandResultReconciler interface {
-	ReconcileCommandResult(context.Context, workerloop.Command, workerloop.Result, workerloop.MarkerPayload) error
-}
-
 type Materializer struct {
-	store    *Store
-	commands CommandResultReconciler
+	store *Store
 }
 
 func NewMaterializer(store *Store) *Materializer {
 	return &Materializer{store: store}
 }
 
-func (m *Materializer) SetCommandResultReconciler(value CommandResultReconciler) {
-	m.commands = value
-}
-
 // ReconcileResult consumes only command-correlated result evidence supplied by
-// workerloop. It never creates executable prompts directly.
+// workerloop. It never creates Workflow Commands or executable prompts.
 func (m *Materializer) ReconcileResult(ctx context.Context, snapshot supervisor.ProjectSnapshot, command workerloop.Command, result workerloop.Result, payload workerloop.MarkerPayload) error {
-	if command.ResourceProfile == ContinuousResourceProfile && payload.Version == 2 && m.commands != nil {
-		if err := m.commands.ReconcileCommandResult(ctx, command, result, payload); err != nil {
-			return err
-		}
-	}
 	if command.ResourceProfile != ContinuousResourceProfile || payload.Version != 2 || payload.Role != "lead" || payload.Result != "actions_ready" {
 		return nil
 	}
