@@ -44,15 +44,15 @@ M10 is stacked on the exact M9-C2 Candidate and remains unmergeable until the M9
 
 M10 ends at a durable scheduler decision. It does not create ChatGPT sessions, attach Library files, create Workflow Commands, deliver browser prompts or merge code.
 
-## Active — M11 Browser Session Provisioning
+## M11 — Browser Session Provisioning
 
-M11 is stacked on the exact M10-C3 Candidate and remains unmergeable until the M9/M10 dependency chain is independently approved and integrated.
+M11 is implemented as a stacked Candidate chain on the exact M10-C3 Candidate. It remains unmergeable until the M9/M10 dependency chain and every M11 Change receive fresh independent QA.
 
 | Change | Outcome | State |
 | --- | --- | --- |
 | #76 | Durable session-provision queue, exact lease-bound enqueue and extension claim/complete API | Draft PR #79 — QA pending |
-| #77 | Extension service-worker provisioning and managed exact-tab workers without an open Dashboard page | Implementation |
-| #78 | Exact Library resolution, bootstrap, session policy and role binding | Backlog — depends on #77 |
+| #77 | Extension service-worker provisioning and managed exact-tab workers without an open Dashboard page | Stacked draft PR #80 — QA pending |
+| #78 | Exact Library resolution, restart-safe bootstrap, session policy and atomic role binding | Stacked draft PR #81 — QA pending |
 
 M11 ends with a verified exact ChatGPT session registered and bound to the intended role lane. It does not materialize Workflow Commands, deliver the normal assignment prompt or merge code.
 
