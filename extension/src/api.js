@@ -48,8 +48,24 @@ export class BackendClient {
   heartbeat(workerId, payload) { return this.request(`/api/browser/workers/${encodeURIComponent(workerId)}/heartbeat`, payload); }
   claimNext(payload) { return this.request("/api/browser/deliveries/claim-next", payload, true); }
   complete(commandId, payload) { return this.request(`/api/browser/deliveries/${encodeURIComponent(commandId)}/complete`, payload, true); }
+  claimProvision(payload) { return this.request("/api/browser/provisioning/claim-next", payload, true); }
+  completeProvision(requestId, payload) { return this.request(`/api/browser/provisioning/${encodeURIComponent(requestId)}/complete`, payload, true); }
 }
 
 export function completionPayload(commandId, claimId, outcome, reason) {
   return { command_id: commandId, claim_id: claimId, outcome, reason: safeDiagnostic(reason), evidence: "extension_dom_executor" };
+}
+
+export function provisioningCompletionPayload(request, outcome, input = {}) {
+  const payload = {
+    claim_owner: request.claim_owner,
+    claim_token: request.claim_token,
+    outcome,
+    reason: safeDiagnostic(input.reason || ""),
+  };
+  if (input.workerId) payload.worker_id = input.workerId;
+  if (Number.isInteger(input.tabId) && input.tabId > 0) payload.tab_id = input.tabId;
+  if (input.target) payload.target = input.target;
+  if (Array.isArray(input.attachmentEvidence)) payload.attachment_evidence = input.attachmentEvidence;
+  return payload;
 }
