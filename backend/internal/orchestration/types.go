@@ -66,6 +66,7 @@ type ProjectProfile struct {
 	MaxActiveWorkUnits      int       `json:"max_active_work_units"`
 	MaxParallelImplementors int       `json:"max_parallel_implementors"`
 	MaxParallelQA           int       `json:"max_parallel_qa"`
+	ChatGPTProjectURL       string    `json:"chatgpt_project_url,omitempty"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }
 
@@ -83,6 +84,7 @@ type ProjectProfileInput struct {
 	MaxActiveWorkUnits      int
 	MaxParallelImplementors int
 	MaxParallelQA           int
+	ChatGPTProjectURL       string
 }
 
 type Intent struct {

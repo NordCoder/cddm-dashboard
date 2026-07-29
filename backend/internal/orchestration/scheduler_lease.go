@@ -185,7 +185,7 @@ func projectProfileTx(ctx context.Context, tx *sql.Tx, projectID int64) (Project
 	var value ProjectProfile
 	var autoMerge int
 	var updated string
-	err := tx.QueryRowContext(ctx, `SELECT project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa,updated_at FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode, &value.QASessionMode, &autoMerge, &value.AutonomyMode, &value.AutonomyState, &value.ControlIssueNumber, &value.MaxActiveWorkUnits, &value.MaxParallelImplementors, &value.MaxParallelQA, &updated)
+	err := tx.QueryRowContext(ctx, `SELECT project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa,chatgpt_project_url,updated_at FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode, &value.QASessionMode, &autoMerge, &value.AutonomyMode, &value.AutonomyState, &value.ControlIssueNumber, &value.MaxActiveWorkUnits, &value.MaxParallelImplementors, &value.MaxParallelQA, &value.ChatGPTProjectURL, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectProfile{}, ErrNotFound
 	}

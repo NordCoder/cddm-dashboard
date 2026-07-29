@@ -42,7 +42,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("validate worker resources: %w", err)
 	}
-	slog.Info("worker resources loaded", "profile", resources.Profile, "digest", resources.Digest)
+	continuousResources, err := resourcepack.Load(resourcepack.V2Profile)
+	if err != nil {
+		return fmt.Errorf("validate continuous worker resources: %w", err)
+	}
+	slog.Info("worker resources loaded", "profile", resources.Profile, "digest", resources.Digest, "continuous_profile", continuousResources.Profile, "continuous_digest", continuousResources.Digest)
 
 	startupContext, cancelStartup := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelStartup()
@@ -69,6 +73,10 @@ func run() error {
 	store := supervisor.NewStore(db)
 	workerStore := workerloop.NewStore(db)
 	orchestrationStore := orchestration.NewStore(db)
+	provisioningService, err := orchestration.NewProvisioningService(orchestrationStore, continuousResources)
+	if err != nil {
+		return fmt.Errorf("initialize session provisioning: %w", err)
+	}
 	workerResultService := workerloop.NewService(workerStore)
 	workerResultService.SetResultMaterializer(orchestration.NewMaterializer(orchestrationStore))
 	workerStateService := workerloop.NewStateService(store, workerStore)
@@ -117,10 +125,12 @@ func run() error {
 	baseHandler := httpapi.NewWithPlanningAndBindingServiceAndDelivery(
 		db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, bindingService, deliveryService,
 	)
+	workerHandler := httpapi.WithWorkerLoop(baseHandler, store, projectionService, bindingService)
+	provisioningHandler := httpapi.WithProvisioning(workerHandler, orchestrationStore, provisioningService)
 
 	server := &http.Server{
 		Addr:              cfg.Address,
-		Handler:           withMutationRequestGuard(httpapi.WithWorkerLoop(baseHandler, store, projectionService, bindingService)),
+		Handler:           withMutationRequestGuard(provisioningHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      maxDuration(cfg.GitHubSyncTimeout, cfg.OpenCodeTimeout) + 15*time.Second,
