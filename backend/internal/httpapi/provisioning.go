@@ -25,8 +25,8 @@ type provisionEnqueueRequest struct {
 }
 
 type provisionClaimRequest struct {
-	ClaimID        string `json:"claim_request_id"`
-	ClaimOwner     string `json:"claim_owner"`
+	ClaimID         string `json:"claim_request_id"`
+	ClaimOwner      string `json:"claim_owner"`
 	ClaimTTLSeconds int64  `json:"claim_ttl_seconds"`
 }
 
