@@ -1,4 +1,5 @@
 import { useRoute, routeLabel } from './app-routing.js'
+import { AutopilotPage } from './pages-autopilot.js'
 import { PlanningPage, WorkUnitPage } from './pages-work-unit.js'
 import { ProjectPage, WorkspacePage } from './pages-workspace.js'
 import { SettingsPage } from './pages-settings.js'
@@ -9,24 +10,14 @@ const h = React.createElement
 
 function routePage(route: RouteState, navigate: Navigate): unknown {
   switch (route.kind) {
-    case 'workspace':
-      return h(WorkspacePage, { navigate })
-    case 'project':
-      return h(ProjectPage, { projectID: route.projectID, navigate })
-    case 'work-unit':
-      return h(WorkUnitPage, { projectID: route.projectID, issueNumber: route.issueNumber, navigate })
-    case 'plans':
-      return h(PlanningPage, { projectID: route.projectID, issueNumber: route.issueNumber, planID: route.planID, navigate })
-    case 'settings':
-      return h(SettingsPage)
+    case 'workspace': return h(WorkspacePage, { navigate })
+    case 'project': return h(ProjectPage, { projectID: route.projectID, navigate })
+    case 'autopilot': return h(AutopilotPage, { projectID: route.projectID })
+    case 'work-unit': return h(WorkUnitPage, { projectID: route.projectID, issueNumber: route.issueNumber, navigate })
+    case 'plans': return h(PlanningPage, { projectID: route.projectID, issueNumber: route.issueNumber, planID: route.planID, navigate })
+    case 'settings': return h(SettingsPage)
     case 'not-found':
-      return h(
-        React.Fragment,
-        null,
-        h('h1', null, 'Page not found'),
-        h('p', { className: 'muted' }, `No dashboard route matches ${route.path}.`),
-        InternalLink({ href: paths.workspace(), navigate, className: 'button button--primary', children: 'Back to Workspace' }),
-      )
+      return h(React.Fragment, null, h('h1', null, 'Page not found'), h('p', { className: 'muted' }, `No dashboard route matches ${route.path}.`), InternalLink({ href: paths.workspace(), navigate, className: 'button button--primary', children: 'Back to Workspace' }))
   }
 }
 

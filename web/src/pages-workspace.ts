@@ -1,6 +1,7 @@
 import { BackendResponseError } from './api.js'
 import { paths } from './router.js'
 import {
+  InternalLink,
   Navigate,
   ProjectBundle,
   ProjectContent,
@@ -28,16 +29,13 @@ function CreateProjectPanel(props: { navigate: Navigate }): unknown {
     }
     setSubmitting(true)
     setFeedback('')
-    void api
-      .createProject({ owner: normalizedOwner, repository: normalizedRepository })
+    void api.createProject({ owner: normalizedOwner, repository: normalizedRepository })
       .then((project) => props.navigate(paths.project(project.id)))
       .catch((error: unknown) => setFeedback(errorMessage(error)))
       .finally(() => setSubmitting(false))
   }
 
-  return h(
-    'form',
-    { className: 'create-project-form', onSubmit: submit },
+  return h('form', { className: 'create-project-form', onSubmit: submit },
     h('div', { className: 'form-copy' }, h('h2', null, 'Create Project'), h('p', { className: 'muted' }, 'Repository identity only. GitHub credentials remain backend process configuration.')),
     h('label', null, h('span', null, 'Owner'), h('input', { value: owner, onChange: (event: { currentTarget: HTMLInputElement }) => setOwner(event.currentTarget.value), autoComplete: 'off', placeholder: 'NordCoder', required: true })),
     h('label', null, h('span', null, 'Repository'), h('input', { value: repository, onChange: (event: { currentTarget: HTMLInputElement }) => setRepository(event.currentTarget.value), autoComplete: 'off', placeholder: 'cddm-dashboard', required: true })),
@@ -59,19 +57,12 @@ async function loadWorkspace(signal: AbortSignal): Promise<WorkspaceBundle> {
 
 export function WorkspacePage(props: { navigate: Navigate }): unknown {
   const resource = useResource<WorkspaceBundle>('workspace', loadWorkspace)
-  return resourceContent(resource, (bundle) => WorkspaceContent({
-    bundle,
-    navigate: props.navigate,
-    createPanel: h(CreateProjectPanel, { navigate: props.navigate }),
-    onRefresh: resource.refresh,
-  }), 'Loading workspace…')
+  return resourceContent(resource, (bundle) => WorkspaceContent({ bundle, navigate: props.navigate, createPanel: h(CreateProjectPanel, { navigate: props.navigate }), onRefresh: resource.refresh }), 'Loading workspace…')
 }
 
 async function loadProject(projectID: number, signal: AbortSignal): Promise<ProjectBundle> {
   const [project, state] = await Promise.all([api.projectMetadata(projectID, signal), api.projectState(projectID, signal)])
-  if (state.project.id !== project.id) {
-    throw new BackendResponseError('Malformed backend response: Project metadata and workflow state identities do not match')
-  }
+  if (state.project.id !== project.id) throw new BackendResponseError('Malformed backend response: Project metadata and workflow state identities do not match')
   return { project, state }
 }
 
@@ -85,40 +76,20 @@ export function ProjectPage(props: { projectID: number; navigate: Navigate }): u
     if (syncing) return
     setSyncing(true)
     setFeedback('')
-    void api
-      .syncProject(props.projectID)
-      .then(() => {
-        setFeedback('Read-only synchronization completed.')
-        resource.refresh()
-      })
-      .catch((error: unknown) => setFeedback(errorMessage(error)))
-      .finally(() => setSyncing(false))
+    void api.syncProject(props.projectID).then(() => { setFeedback('Read-only synchronization completed.'); resource.refresh() }).catch((error: unknown) => setFeedback(errorMessage(error))).finally(() => setSyncing(false))
   }
 
   const remove = () => {
     if (deleting || resource.state.kind !== 'ready') return
     const identity = `${resource.state.data.project.owner}/${resource.state.data.project.repository}`
-    const confirmed = globalThis.confirm(`Delete Project ${identity}? This removes its isolated persisted snapshots and planning history.`)
-    if (!confirmed) return
+    if (!globalThis.confirm(`Delete Project ${identity}? This removes its isolated persisted snapshots and planning history.`)) return
     setDeleting(true)
     setFeedback('')
-    void api
-      .deleteProject(props.projectID)
-      .then(() => props.navigate(paths.workspace()))
-      .catch((error: unknown) => {
-        setFeedback(errorMessage(error))
-        setDeleting(false)
-      })
+    void api.deleteProject(props.projectID).then(() => props.navigate(paths.workspace())).catch((error: unknown) => { setFeedback(errorMessage(error)); setDeleting(false) })
   }
 
-  return resourceContent(resource, (bundle) => ProjectContent({
-    bundle,
-    navigate: props.navigate,
-    onRefresh: resource.refresh,
-    onSync: sync,
-    syncing,
-    syncFeedback: feedback || undefined,
-    onDelete: remove,
-    deleting,
-  }), 'Loading Project…')
+  return resourceContent(resource, (bundle) => h(React.Fragment, null,
+    h('div', { className: 'autopilot-entry' }, InternalLink({ href: paths.autopilot(props.projectID), navigate: props.navigate, className: 'button button--primary', children: 'Open Autopilot operations' })),
+    ProjectContent({ bundle, navigate: props.navigate, onRefresh: resource.refresh, onSync: sync, syncing, syncFeedback: feedback || undefined, onDelete: remove, deleting }),
+  ), 'Loading Project…')
 }

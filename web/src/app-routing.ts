@@ -25,6 +25,7 @@ export function routeLabel(route: RouteState): string {
     case 'workspace': return 'Workspace'
     case 'settings': return 'System health'
     case 'project': return `Project ${route.projectID}`
+    case 'autopilot': return `Project ${route.projectID} · Autopilot`
     case 'work-unit': return `Project ${route.projectID} · Issue #${route.issueNumber}`
     case 'plans': return `Project ${route.projectID} · #${route.issueNumber} · Plans`
     case 'not-found': return 'Not found'
