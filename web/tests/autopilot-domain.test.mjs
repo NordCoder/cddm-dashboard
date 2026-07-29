@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseAutopilotStatus } from '../dist/autopilot-domain.js'
+import { parseAutopilotStatus } from '../dist/assets/autopilot-domain.js'
 
 const base = {
   project_id: 1, repository: 'NordCoder/app', sync_status: 'healthy',
