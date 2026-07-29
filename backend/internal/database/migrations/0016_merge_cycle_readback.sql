@@ -38,5 +38,58 @@ CREATE UNIQUE INDEX workflow_intents_next_wave_idx
     ON workflow_intents(project_id, wave_id, action_type)
     WHERE action_type = 'plan_next_wave' AND wave_id <> '';
 
+-- Autopilot delivery commands are marked before they can be claimed. The
+-- existing M12-C1 materialization trigger remains the final authority binder.
+CREATE TRIGGER autonomous_delivery_commands_mark_authority
+AFTER INSERT ON delivery_commands
+WHEN NEW.idempotency_key LIKE 'autopilot:%'
+BEGIN
+    UPDATE delivery_commands
+    SET authority_kind = 'autonomous_intent',
+        authority_ref = substr(NEW.idempotency_key, 11)
+    WHERE id = NEW.id;
+END;
+
+UPDATE delivery_commands
+SET authority_kind = 'autonomous_intent',
+    authority_ref = substr(idempotency_key, 11)
+WHERE idempotency_key LIKE 'autopilot:%';
+
+-- A browser claim is ignored until the exact autonomous materialization is
+-- durable. Consequential merge commands additionally require the immutable
+-- merge-cycle identity and workflow-command correlation.
+CREATE TRIGGER autonomous_delivery_commands_require_activation
+BEFORE UPDATE OF status ON delivery_commands
+WHEN OLD.status = 'pending'
+ AND NEW.status = 'claimed'
+ AND OLD.authority_kind = 'autonomous_intent'
+ AND (
+    NOT EXISTS (
+        SELECT 1
+        FROM autonomous_command_materializations m
+        WHERE m.delivery_command_id = OLD.id
+          AND m.intent_id = OLD.authority_ref
+          AND m.status = 'materialized'
+    )
+    OR EXISTS (
+        SELECT 1
+        FROM workflow_intents i
+        WHERE i.id = OLD.authority_ref
+          AND i.action_type = 'merge_candidate'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM merge_cycle_readbacks c
+              JOIN workflow_delivery_links l
+                ON l.workflow_command_id = c.workflow_command_id
+              WHERE c.intent_id = i.id
+                AND l.delivery_command_id = OLD.id
+                AND c.status = 'pending'
+          )
+    )
+ )
+BEGIN
+    SELECT RAISE(IGNORE);
+END;
+
 INSERT INTO schema_migrations (version, name)
 VALUES (16, 'merge_cycle_readback');
