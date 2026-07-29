@@ -2,6 +2,7 @@ package orchestration_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -89,9 +90,7 @@ func TestAutonomousMergeDeliveryCannotBeClaimedBeforeDurableActivation(t *testin
 	}
 }
 
-func assertClaimIgnored(t *testing.T, db interface {
-	ExecContext(context.Context, string, ...any) (interface{ RowsAffected() (int64, error) }, error)
-}, deliveryID, stage string) {
+func assertClaimIgnored(t *testing.T, db *sql.DB, deliveryID, stage string) {
 	t.Helper()
 	result, err := db.ExecContext(context.Background(), `UPDATE delivery_commands SET status='claimed' WHERE id=? AND status='pending'`, deliveryID)
 	if err != nil {
