@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/orchestration"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workerloop"
@@ -31,6 +32,13 @@ func TestTypedMergeCommandCannotMaterializeActionsReadyBatch(t *testing.T) {
 
 func TestMergeActionsReadyFailsBeforePartialIntentMaterialization(t *testing.T) {
 	fixture := newMergeResultFixture(t)
+	c1, err := orchestration.NewAutopilotEngine(
+		fixture.store, orchestration.NewScheduler(fixture.store), provisioningService(t, fixture.store),
+		mergePlannerStub{}, mergeDeliveryStub{}, delivery.UnavailableBindingResolver{}, supervisor.NewStore(fixture.db),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	acceptedAt := time.Now().UTC()
 	result := workerloop.Result{
 		ProjectID: fixture.project.ID, GitHubCommentID: 3201, IssueNumber: 101,
@@ -47,7 +55,7 @@ func TestMergeActionsReadyFailsBeforePartialIntentMaterialization(t *testing.T) 
 		Wave: &workerloop.WavePayload{WaveID: "forbidden-wave", ControlIssue: 90, Issues: []int{102}},
 	}
 	pipeline := orchestration.NewResultMaterializationPipeline(
-		orchestration.NewCommandResultMux(fixture.engine), orchestration.NewMaterializer(fixture.store),
+		orchestration.NewCommandResultMux(fixture.engine, c1), orchestration.NewMaterializer(fixture.store),
 	)
 	snapshot := supervisor.ProjectSnapshot{Project: fixture.project, Issues: []supervisor.Issue{
 		{Number: 90, State: "open"}, {Number: 101, State: "open"}, {Number: 102, State: "open"},
