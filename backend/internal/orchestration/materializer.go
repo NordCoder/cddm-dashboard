@@ -84,7 +84,7 @@ func (m *Materializer) ReconcileResult(ctx context.Context, snapshot supervisor.
 			status = IntentBlocked
 		}
 		intents = append(intents, IntentInput{
-			ID: deterministicIntentID(snapshot.Project.ID, command.ID, action.ActionID),
+			ID:        deterministicIntentID(snapshot.Project.ID, command.ID, action.ActionID),
 			ProjectID: snapshot.Project.ID, SourceResultCommentID: result.GitHubCommentID,
 			SourceCommandID: command.ID, ActionID: action.ActionID, ActionType: action.Type,
 			Repository: repository, IssueNumber: action.Issue, Role: action.Role, PRNumber: action.PR,
