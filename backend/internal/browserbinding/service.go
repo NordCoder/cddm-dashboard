@@ -194,6 +194,20 @@ func (s *Service) ListWorkers(ctx context.Context) ([]Worker, error) {
 	return workers, rows.Err()
 }
 
+// RequireFreshTarget proves that exactly one live process-local worker session
+// currently observes the supplied exact conversation target. It is intended for
+// callers that perform their own durable transaction after this presence check.
+func (s *Service) RequireFreshTarget(workerID string, target TargetRef) error {
+	normalized, err := NormalizeTarget(target)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(workerID) == "" {
+		return fmt.Errorf("%w: worker required", ErrInvalid)
+	}
+	return s.requireFreshTarget(strings.TrimSpace(workerID), normalized)
+}
+
 func (s *Service) Put(ctx context.Context, projectID int64, laneKey string, input PutInput) (Binding, error) {
 	target, err := NormalizeTarget(input.Target)
 	if err != nil {
