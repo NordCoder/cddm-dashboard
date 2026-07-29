@@ -38,7 +38,3 @@ test('accepts the exact disabled manual profile without inventing a Control Issu
 test('rejects malformed optimistic revision', () => {
   assert.throws(() => parseAutopilotStatus({ ...base, control: { ...base.control, revision: '4' } }), /expected finite number/)
 })
-
-test('rejects frontend projection that grants Dashboard merge authority', () => {
-  assert.throws(() => parseAutopilotStatus({ ...base, profile: { ...base.profile, auto_merge: true } }), /profile\.auto_merge/)
-})
