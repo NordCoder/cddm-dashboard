@@ -18,8 +18,8 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 12 {
-		t.Fatalf("user_version = %d, want 12", version)
+	if version != 13 {
+		t.Fatalf("user_version = %d, want 13", version)
 	}
 
 	for _, table := range []string{
@@ -28,6 +28,7 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 		"browser_workers", "browser_lane_bindings", "delivery_commands",
 		"workflow_commands", "workflow_results", "workflow_delivery_links", "project_execution_profiles",
 		"workflow_intents", "workflow_waves", "workflow_wave_issues", "workflow_materializations", "workflow_lane_leases",
+		"session_provision_requests",
 	} {
 		var name string
 		if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
@@ -38,7 +39,7 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	if err := db.QueryRow(`SELECT name FROM pragma_table_info('github_issues') WHERE name = 'body'`).Scan(&bodyColumn); err != nil {
 		t.Fatalf("read github_issues.body column: %v", err)
 	}
-	for _, column := range []string{"autonomy_mode", "autonomy_state", "control_issue_number", "max_active_work_units", "max_parallel_implementors", "max_parallel_qa"} {
+	for _, column := range []string{"autonomy_mode", "autonomy_state", "control_issue_number", "max_active_work_units", "max_parallel_implementors", "max_parallel_qa", "chatgpt_project_url"} {
 		var name string
 		if err := db.QueryRow(`SELECT name FROM pragma_table_info('project_execution_profiles') WHERE name = ?`, column).Scan(&name); err != nil {
 			t.Fatalf("read project_execution_profiles.%s: %v", column, err)
@@ -65,7 +66,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	if err := second.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 12 {
-		t.Fatalf("migration count = %d, want 12", count)
+	if count != 13 {
+		t.Fatalf("migration count = %d, want 13", count)
 	}
 }
