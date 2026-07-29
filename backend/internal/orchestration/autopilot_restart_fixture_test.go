@@ -14,12 +14,22 @@ import (
 func persistRestartSoakSnapshot(t *testing.T, db *sql.DB, project supervisor.Project) supervisor.ProjectSnapshot {
 	t.Helper()
 	now := time.Now().UTC()
+	ci := func(head string) supervisor.CISummary {
+		return supervisor.CISummary{HeadSHA: head, Status: "completed", Conclusion: "success", Source: "restart-fixture", UpdatedAt: now}
+	}
+	pull := func(id int64, number int, head string) supervisor.PullRequest {
+		return supervisor.PullRequest{
+			GitHubID: id, Number: number, Title: "Restart Candidate", State: "open", Draft: true,
+			MergeableState: "clean", BaseRef: "change/base", HeadRef: fmt.Sprintf("restart/%d", number), HeadSHA: head,
+			URL: fmt.Sprintf("https://github.com/NordCoder/app/pull/%d", number), UpdatedAt: now, CI: ci(head),
+		}
+	}
 	issues := []supervisor.Issue{
 		{GitHubID: 9001, Number: 90, Title: "Control", State: "open", CreatedAt: now, UpdatedAt: now},
 		{GitHubID: 9101, Number: 101, Title: "Pending", State: "open", CreatedAt: now, UpdatedAt: now},
 		{GitHubID: 9102, Number: 102, Title: "Claimed", State: "open", CreatedAt: now, UpdatedAt: now},
-		{GitHubID: 9104, Number: 104, Title: "Delivery pending", State: "open", CreatedAt: now, UpdatedAt: now},
-		{GitHubID: 9105, Number: 105, Title: "Awaiting result", State: "open", CreatedAt: now, UpdatedAt: now},
+		{GitHubID: 9104, Number: 104, Title: "Delivery pending", State: "open", CreatedAt: now, UpdatedAt: now, PullRequests: []supervisor.PullRequest{pull(9154, 154, otherHead)}},
+		{GitHubID: 9105, Number: 105, Title: "Awaiting QA result", State: "open", CreatedAt: now, UpdatedAt: now, PullRequests: []supervisor.PullRequest{pull(9155, 155, testHead)}},
 	}
 	if err := supervisor.NewStore(db).ReplaceSnapshot(context.Background(), project.ID, supervisor.RepositorySnapshot{FetchedAt: now, Issues: issues}); err != nil {
 		t.Fatal(err)
