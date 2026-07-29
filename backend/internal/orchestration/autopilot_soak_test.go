@@ -16,17 +16,16 @@ func TestContinuousAutopilotRestartProjectionPreservesEveryDurableStage(t *testi
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "autopilot-soak.db")
 	db, project, store, _, _, sourceCommandID := schedulerFixture(t, path, 5, 5, 5)
-
 	wave := &orchestration.WaveInput{
 		ProjectID: project.ID, WaveID: "wave-restart-soak", ControlIssueNumber: 90,
 		SourceCommandID: sourceCommandID, Status: orchestration.WaveActive, Issues: []int{101, 102, 103},
 	}
 	inputs := []orchestration.IntentInput{
-		soakIntent(project.ID, sourceCommandID, "pending", 101, "implementor", "project:1:issue:101:implementor", "wave-restart-soak", 10),
-		soakIntent(project.ID, sourceCommandID, "claimed", 102, "implementor", "project:1:issue:102:implementor", "wave-restart-soak", 20),
-		soakIntent(project.ID, sourceCommandID, "provisioned", 103, "qa", "project:1:issue:103:qa:head", "wave-restart-soak", 30),
-		soakIntent(project.ID, sourceCommandID, "delivery", 101, "qa", "project:1:issue:101:qa:head", "wave-restart-soak", 40),
-		soakIntent(project.ID, sourceCommandID, "awaiting", 90, "lead", "project:1:lead", "wave-restart-soak", 50),
+		soakIntent(project.ID, sourceCommandID, "pending", 101, "implementor", "project:1:issue:101:implementor", wave.WaveID, 10),
+		soakIntent(project.ID, sourceCommandID, "claimed", 102, "implementor", "project:1:issue:102:implementor", wave.WaveID, 20),
+		soakIntent(project.ID, sourceCommandID, "provisioned", 103, "qa", "project:1:issue:103:qa:head", wave.WaveID, 30),
+		soakIntent(project.ID, sourceCommandID, "delivery", 101, "qa", "project:1:issue:101:qa:head", wave.WaveID, 40),
+		soakIntent(project.ID, sourceCommandID, "awaiting", 90, "lead", "project:1:lead", wave.WaveID, 50),
 	}
 	created, err := store.CreateBatch(ctx, wave, append([]orchestration.IntentInput(nil), inputs...))
 	if err != nil || len(created) != len(inputs) {
@@ -60,17 +59,20 @@ func TestContinuousAutopilotRestartProjectionPreservesEveryDurableStage(t *testi
 	}
 
 	commands := workerloop.NewStore(db)
-	for _, command := range []struct {
-		id, identity, status, intentID, leaseID, lane string
-		issue                                      int
+	commandFixtures := []struct {
+		id       string
+		identity string
+		status   string
+		intent   orchestration.IntentInput
 	}{
-		{id: "cmd-soak-delivery", identity: "soak-delivery", status: workerloop.CommandDeliveryPending, intentID: inputs[3].ID, leaseID: soakLeaseID(inputs[3].ID), lane: inputs[3].LaneKey, issue: inputs[3].IssueNumber},
-		{id: "cmd-soak-awaiting", identity: "soak-awaiting", status: workerloop.CommandAwaitingResult, intentID: inputs[4].ID, leaseID: soakLeaseID(inputs[4].ID), lane: inputs[4].LaneKey, issue: inputs[4].IssueNumber},
-	} {
+		{id: "cmd-soak-delivery", identity: "soak-delivery", status: workerloop.CommandDeliveryPending, intent: inputs[3]},
+		{id: "cmd-soak-awaiting", identity: "soak-awaiting", status: workerloop.CommandAwaitingResult, intent: inputs[4]},
+	}
+	for _, fixture := range commandFixtures {
 		if _, err := commands.CreateCommand(ctx, workerloop.CreateCommandInput{
-			ID: command.id, ProjectID: project.ID, IssueNumber: command.issue, IdentityKey: command.identity,
-			Role: inputs[3].Role, Action: "dispatch", ResourceProfile: orchestration.ContinuousResourceProfile,
-			ContextHash: command.id + "-context", ExpectedHead: testHead, Status: command.status,
+			ID: fixture.id, ProjectID: project.ID, IssueNumber: fixture.intent.IssueNumber, IdentityKey: fixture.identity,
+			Role: fixture.intent.Role, Action: "dispatch", ResourceProfile: orchestration.ContinuousResourceProfile,
+			ContextHash: fixture.id + "-context", ExpectedHead: testHead, Status: fixture.status,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -78,8 +80,8 @@ func TestContinuousAutopilotRestartProjectionPreservesEveryDurableStage(t *testi
 			id,project_id,intent_id,lease_id,provision_request_id,scheduler_lane_key,status,workflow_command_id,
 			context_hash,prompt_hash,created_at,updated_at
 		) VALUES(?,?,?,?,?,?,'materialized',?,?,?,?,?)`,
-			"materialization-"+command.id, project.ID, command.intentID, command.leaseID, "provision-"+command.id,
-			command.lane, command.id, command.id+"-context", command.id+"-prompt",
+			"materialization-"+fixture.id, project.ID, fixture.intent.ID, soakLeaseID(fixture.intent.ID), "provision-"+fixture.id,
+			fixture.intent.LaneKey, fixture.id, fixture.id+"-context", fixture.id+"-prompt",
 			now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
 			t.Fatal(err)
 		}
