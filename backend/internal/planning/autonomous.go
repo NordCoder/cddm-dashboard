@@ -14,7 +14,8 @@ func (s *Service) GenerateAutonomous(ctx context.Context, projectID int64, issue
 	if err != nil {
 		return GenerationResult{}, err
 	}
-	if contextValue.Route.Action != "dispatch" || contextValue.Route.TargetRole != strings.TrimSpace(expectedRole) || contextValue.CurrentHead != strings.TrimSpace(expectedHead) || contextValue.Route.ExpectedHead != contextValue.CurrentHead {
+	expectedHead = strings.TrimSpace(expectedHead)
+	if contextValue.Route.Action != "dispatch" || contextValue.Route.TargetRole != strings.TrimSpace(expectedRole) || (expectedHead != "" && contextValue.CurrentHead != expectedHead) || contextValue.Route.ExpectedHead != contextValue.CurrentHead {
 		return GenerationResult{}, fmt.Errorf("autonomous route no longer matches the claimed Intent")
 	}
 
