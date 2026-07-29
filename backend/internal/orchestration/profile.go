@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	pathpkg "path"
 	"strings"
 	"time"
 )
@@ -29,10 +31,11 @@ func (s *Store) ProjectProfile(ctx context.Context, projectID int64) (ProjectPro
 	now := stamp(s.now())
 	_, err := s.db.ExecContext(ctx, `INSERT INTO project_execution_profiles (
 		project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,updated_at,
-		autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa
-	) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO NOTHING`,
+		autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa,
+		chatgpt_project_url
+	) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO NOTHING`,
 		projectID, ManualResourceProfile, ManualMethodology, ManualResultProtocol, deliveryModeReviewed, qaModeManualFresh,
-		now, AutonomyModeManual, AutonomyStateDisabled, 0, 3, 3, 3)
+		now, AutonomyModeManual, AutonomyStateDisabled, 0, 3, 3, 3, "")
 	if err != nil {
 		return ProjectProfile{}, fmt.Errorf("ensure Project execution profile: %w", err)
 	}
@@ -41,6 +44,11 @@ func (s *Store) ProjectProfile(ctx context.Context, projectID int64) (ProjectPro
 
 func (s *Store) UpdateProjectProfile(ctx context.Context, input ProjectProfileInput) (ProjectProfile, error) {
 	input = normalizeProjectProfileInput(input)
+	projectURL, err := normalizeChatGPTProjectURL(input.ChatGPTProjectURL)
+	if err != nil {
+		return ProjectProfile{}, err
+	}
+	input.ChatGPTProjectURL = projectURL
 	if err := validateProjectProfileInput(input); err != nil {
 		return ProjectProfile{}, err
 	}
@@ -49,11 +57,12 @@ func (s *Store) UpdateProjectProfile(ctx context.Context, input ProjectProfileIn
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE project_execution_profiles SET
 		resource_profile=?,methodology=?,result_protocol=?,delivery_mode=?,qa_session_mode=?,auto_merge=0,
-		autonomy_mode=?,autonomy_state=?,control_issue_number=?,max_active_work_units=?,max_parallel_implementors=?,max_parallel_qa=?,updated_at=?
+		autonomy_mode=?,autonomy_state=?,control_issue_number=?,max_active_work_units=?,max_parallel_implementors=?,max_parallel_qa=?,
+		chatgpt_project_url=?,updated_at=?
 		WHERE project_id=?`,
 		input.ResourceProfile, input.Methodology, input.ResultProtocol, input.DeliveryMode, input.QASessionMode,
 		input.AutonomyMode, input.AutonomyState, input.ControlIssueNumber, input.MaxActiveWorkUnits,
-		input.MaxParallelImplementors, input.MaxParallelQA, stamp(s.now()), input.ProjectID)
+		input.MaxParallelImplementors, input.MaxParallelQA, input.ChatGPTProjectURL, stamp(s.now()), input.ProjectID)
 	if err != nil {
 		return ProjectProfile{}, fmt.Errorf("update Project autonomy profile: %w", err)
 	}
@@ -69,11 +78,12 @@ func (s *Store) readProjectProfile(ctx context.Context, projectID int64) (Projec
 	var updated string
 	err := s.db.QueryRowContext(ctx, `SELECT
 		project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,
-		autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa,updated_at
+		autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa,
+		chatgpt_project_url,updated_at
 		FROM project_execution_profiles WHERE project_id=?`, projectID).Scan(
 		&value.ProjectID, &value.ResourceProfile, &value.Methodology, &value.ResultProtocol, &value.DeliveryMode,
 		&value.QASessionMode, &autoMerge, &value.AutonomyMode, &value.AutonomyState, &value.ControlIssueNumber,
-		&value.MaxActiveWorkUnits, &value.MaxParallelImplementors, &value.MaxParallelQA, &updated)
+		&value.MaxActiveWorkUnits, &value.MaxParallelImplementors, &value.MaxParallelQA, &value.ChatGPTProjectURL, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ProjectProfile{}, ErrNotFound
@@ -96,6 +106,7 @@ func normalizeProjectProfileInput(input ProjectProfileInput) ProjectProfileInput
 	input.QASessionMode = strings.TrimSpace(input.QASessionMode)
 	input.AutonomyMode = strings.TrimSpace(input.AutonomyMode)
 	input.AutonomyState = strings.TrimSpace(input.AutonomyState)
+	input.ChatGPTProjectURL = strings.TrimSpace(input.ChatGPTProjectURL)
 	if input.AutonomyMode == "" {
 		input.AutonomyMode = AutonomyModeManual
 	}
@@ -149,13 +160,16 @@ func validateProjectProfileInput(input ProjectProfileInput) error {
 		return fmt.Errorf("delivery mode must be reviewed or auto")
 	}
 	if input.QASessionMode != qaModeManualFresh {
-		return fmt.Errorf("qa_session_mode must remain manual_fresh_binding until M11")
+		return fmt.Errorf("qa_session_mode must remain manual_fresh_binding until M11-C3")
 	}
 	if input.MaxActiveWorkUnits < 1 || input.MaxActiveWorkUnits > 64 || input.MaxParallelImplementors < 1 || input.MaxParallelImplementors > input.MaxActiveWorkUnits || input.MaxParallelQA < 1 || input.MaxParallelQA > input.MaxActiveWorkUnits {
 		return fmt.Errorf("invalid Project WIP limits")
 	}
 	if !validAutonomyState(input.AutonomyState) {
 		return fmt.Errorf("unsupported autonomy state %q", input.AutonomyState)
+	}
+	if _, err := normalizeChatGPTProjectURL(input.ChatGPTProjectURL); err != nil {
+		return err
 	}
 	switch input.AutonomyMode {
 	case AutonomyModeManual:
@@ -170,6 +184,25 @@ func validateProjectProfileInput(input ProjectProfileInput) error {
 		return fmt.Errorf("unsupported autonomy mode %q", input.AutonomyMode)
 	}
 	return nil
+}
+
+func normalizeChatGPTProjectURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host != "chatgpt.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("chatgpt_project_url must be an exact https://chatgpt.com Project URL")
+	}
+	pathname := strings.TrimRight(parsed.Path, "/")
+	if pathname == "" || pathname == "/" {
+		return "", nil
+	}
+	if len(pathname) > 500 || pathpkg.Clean(pathname) != pathname || strings.Contains(pathname, "/c/") || strings.HasPrefix(pathname, "/c/") {
+		return "", fmt.Errorf("chatgpt_project_url must identify a Project surface, not a conversation")
+	}
+	return "https://chatgpt.com" + pathname, nil
 }
 
 func validAutonomyState(value string) bool {
