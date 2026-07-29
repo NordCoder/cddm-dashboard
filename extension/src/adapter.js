@@ -13,6 +13,15 @@ const SURFACE_CREATE_POLL_MS = 100;
 
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
+export class SurfaceCreationError extends Error {
+  constructor(reason, outcome, tabId = 0) {
+    super(reason);
+    this.name = "SurfaceCreationError";
+    this.outcome = outcome;
+    this.tabId = Number.isInteger(tabId) && tabId > 0 ? tabId : 0;
+  }
+}
+
 class ExactTabAdapter {
   constructor(parent, tabId, target) {
     this.parent = parent;
@@ -183,22 +192,27 @@ export class ChromeTargetAdapter {
     try { projectUrl = normalizeChatGPTProjectUrl(chatGPTProjectUrl); } catch (error) {
       throw new PreSendError(error instanceof Error ? error.message : "chatgpt_project_url_invalid");
     }
-    const tab = await this.chrome.tabs.create({ url: projectUrl || NEW_CHAT_URL, active: false });
+    let tab;
+    try { tab = await this.chrome.tabs.create({ url: projectUrl || NEW_CHAT_URL, active: false }); } catch {
+      throw new PreSendError("chat_creation_tab_unavailable");
+    }
     if (!tab?.id) throw new PreSendError("chat_creation_tab_unavailable");
     this.reserveManagedTab(tab.id);
     const deadline = Date.now() + SURFACE_CREATE_TIMEOUT_MS;
     while (Date.now() < deadline) {
       let current;
-      try { current = await this.chrome.tabs.get(tab.id); } catch { throw new PreSendError("chat_creation_tab_closed"); }
+      try { current = await this.chrome.tabs.get(tab.id); } catch {
+        throw new SurfaceCreationError("chat_creation_tab_closed", "safe_failed", tab.id);
+      }
       if (current?.url && creationSurfaceMatches(current.url, projectUrl)) {
         return { tabId: tab.id, chatGPTProjectUrl: projectUrl, target: normalizeTargetUrl(current.url) };
       }
       if (current?.status === "complete" && current?.url && !String(current.url).startsWith("https://chatgpt.com/")) {
-        throw new PreSendError("created_surface_outside_chatgpt");
+        throw new SurfaceCreationError("created_surface_outside_chatgpt", "safe_failed", tab.id);
       }
       await delay(SURFACE_CREATE_POLL_MS);
     }
-    throw new PreSendError("chat_creation_surface_timeout");
+    throw new SurfaceCreationError("chat_creation_surface_timeout", "uncertain", tab.id);
   }
 
   async managedObservation(tabId, chatGPTProjectUrl = "", expectedTarget = null) {
