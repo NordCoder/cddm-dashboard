@@ -216,7 +216,13 @@ func TestPauseStopAndBreakerPreserveAmbiguousEvidence(t *testing.T) {
 		t.Fatalf("ambiguous materialization after stop = %s err=%v", materializationStatus, err)
 	}
 	storedResults, err := results.ResultsForCommand(ctx, project.ID, commandID)
-	if err != nil || len(storedResults) != 1 || storedResults[0].ValidationStatus != workerloop.ValidationAmbiguous {
+	ambiguousResults := 0
+	for _, storedResult := range storedResults {
+		if storedResult.GitHubCommentID == result.GitHubCommentID && storedResult.ValidationStatus == workerloop.ValidationAmbiguous {
+			ambiguousResults++
+		}
+	}
+	if err != nil || len(storedResults) != 2 || ambiguousResults != 1 {
 		t.Fatalf("ambiguous result after duplicate/stop = %+v err=%v", storedResults, err)
 	}
 }
