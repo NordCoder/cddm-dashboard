@@ -11,7 +11,7 @@ func TestAutonomousIntentMatchesOnlyCompatibleCurrentRoutes(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	merge := PromptContext{
 		CurrentHead: head,
-		Route: workflow.Route{Action: "dispatch", TargetRole: "lead", ExpectedHead: head},
+		Route:       workflow.Route{Action: "dispatch", TargetRole: "lead", ExpectedHead: head},
 	}
 	if !autonomousIntentMatchesRoute(merge, "merge_candidate", "lead", head) {
 		t.Fatal("exact Lead merge Intent rejected")
@@ -25,7 +25,7 @@ func TestAutonomousIntentMatchesOnlyCompatibleCurrentRoutes(t *testing.T) {
 
 	nextWave := PromptContext{
 		CurrentHead: "",
-		Route: workflow.Route{Action: "dispatch", TargetRole: "lead", ExpectedHead: ""},
+		Route:       workflow.Route{Action: "dispatch", TargetRole: "lead", ExpectedHead: ""},
 	}
 	if !autonomousIntentMatchesRoute(nextWave, "plan_next_wave", "lead", "") {
 		t.Fatal("Lead next-Wave Intent rejected")
@@ -38,8 +38,8 @@ func TestAutonomousIntentMatchesOnlyCompatibleCurrentRoutes(t *testing.T) {
 func TestTypedAutonomousPromptMakesMergeAndPlanningBoundariesExplicit(t *testing.T) {
 	head := strings.Repeat("c", 40)
 	contextValue := PromptContext{
-		Repository: RepositoryIdentity{Owner: "NordCoder", Repository: "app"},
-		Issue: IssueIdentity{Number: 101, Title: "Candidate", Lifecycle: "qa"},
+		Repository:  RepositoryIdentity{Owner: "NordCoder", Repository: "app"},
+		Issue:       IssueIdentity{Number: 101, Title: "Candidate", Lifecycle: "qa"},
 		CurrentHead: head, ContextHash: "context-hash",
 		Route: workflow.Route{Action: "dispatch", TargetRole: "lead", ExpectedHead: head, Reason: "qa approved"},
 	}
