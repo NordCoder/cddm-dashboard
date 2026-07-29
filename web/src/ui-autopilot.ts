@@ -16,7 +16,7 @@ function BreakerCard(props: { breaker: AutopilotBreaker; busy: boolean; onAcknow
   return h('article', { className: `autopilot-breaker autopilot-breaker--${breaker.status}` },
     h('div', { className: 'autopilot-breaker__head' },
       h('div', null, StatusBadge({ value: breaker.status }), h('strong', null, breaker.code)),
-      h('code', null, breaker.scope_kind === 'lane' ? breaker.lane_key : 'project'),
+      h('code', null, breaker.scope_kind === 'lane' ? breaker.lane_key : `project:${breaker.project_id}`),
     ),
     h('p', null, breaker.reason),
     h('p', { className: 'muted' }, breaker.recovery_requirements),
@@ -35,7 +35,7 @@ function QueueTable(status: AutopilotStatus): unknown {
   const rows = status.queue.map((item) => h('tr', { key: item.intent.intent_id },
     h('td', null, String(item.intent.priority)),
     h('td', null, item.intent.action_type),
-    h('td', null, item.intent.issue_number > 0 ? `#${item.intent.issue_number} ${item.intent.role ?? ''}` : item.intent.role ?? 'Project'),
+    h('td', null, item.intent.issue_number ? `#${item.intent.issue_number} ${item.intent.role ?? ''}` : item.intent.role ?? 'Project'),
     h('td', null, h('code', null, item.intent.lane_key ?? '—')),
     h('td', null, StatusBadge({ value: item.intent.status }), h('small', null, item.waiting_reason ?? '')),
     h('td', null, h('code', { title: item.intent.expected_head ?? '' }, shortSha(item.intent.expected_head))),
@@ -47,13 +47,36 @@ function QueueTable(status: AutopilotStatus): unknown {
 }
 
 function ExecutionEvidence(status: AutopilotStatus): unknown {
-  const leaseRows = status.active_leases.map((lease) => h('p', { key: lease.lease_id }, h('code', null, lease.lane_key), h('span', { className: 'muted' }, ` ${lease.lease_owner} · expires ${formatDate(lease.expires_at)}`)))
-  const provisionRows = status.provisioning.slice(0, 12).map((request) => h('p', { key: request.id }, StatusBadge({ value: request.status }), ' ', h('code', null, request.lane_key), request.expected_head ? h('code', { title: request.expected_head }, ` ${shortSha(request.expected_head)}`) : null))
-  const commandRows = status.commands.slice(0, 12).map((command) => h('p', { key: command.materialization_id }, StatusBadge({ value: command.delivery_status ?? command.workflow_status ?? command.status }), ' ', h('code', null, command.lane_key), h('small', null, ` ${command.workflow_command_id || command.materialization_id}`)))
+  const leaseRows = status.active_leases.map((lease) => h('p', { key: lease.lease_id },
+    StatusBadge({ value: lease.status }), ' ', h('code', null, lease.lane_key),
+    h('small', null, ` lease ${lease.lease_id} · intent ${lease.intent_id} · claim ${lease.claim_id} · ${lease.lease_owner} · expires ${formatDate(lease.expires_at)}`),
+  ))
+  const provisionRows = status.provisioning.slice(0, 12).map((request) => h('p', { key: request.id },
+    StatusBadge({ value: request.status }), ' ', h('code', null, request.lane_key),
+    h('small', null, ` request ${request.id} · intent ${request.intent_id} · Issue #${request.issue_number} · ${request.role}`),
+    request.expected_head ? h('code', { title: request.expected_head }, ` ${shortSha(request.expected_head)}`) : null,
+    request.worker_id ? h('small', null, ` · worker ${request.worker_id} · tab ${request.tab_id ?? '—'}`) : null,
+    request.bound_binding_id ? h('small', null, ` · binding ${request.bound_binding_id}@${request.bound_binding_version}`) : null,
+  ))
+  const commandRows = status.commands.slice(0, 12).map((command) => h('p', { key: command.materialization_id },
+    StatusBadge({ value: command.delivery_status ?? command.workflow_status ?? command.status }), ' ', h('code', null, command.lane_key),
+    h('small', null, ` materialization ${command.materialization_id} · intent ${command.intent_id} · lease ${command.lease_id}`),
+    command.workflow_command_id ? h('small', null, ` · workflow ${command.workflow_command_id}`) : null,
+    command.delivery_command_id ? h('small', null, ` · delivery ${command.delivery_command_id}`) : null,
+    command.context_hash ? h('code', { title: command.context_hash }, ` context ${shortSha(command.context_hash)}`) : null,
+    command.prompt_hash ? h('code', { title: command.prompt_hash }, ` prompt ${shortSha(command.prompt_hash)}`) : null,
+  ))
+  const mergeRows = status.merge_cycles.slice(0, 12).map((cycle) => h('p', { key: cycle.id },
+    StatusBadge({ value: cycle.status }), ' ', h('small', null, `cycle ${cycle.id} · intent ${cycle.intent_id} · Issue #${cycle.issue_number} · PR #${cycle.pr_number} · approved `),
+    h('code', { title: cycle.approved_head }, shortSha(cycle.approved_head)),
+    cycle.observed_merge_commit ? h('small', null, ' · observed ') : null,
+    cycle.observed_merge_commit ? h('code', { title: cycle.observed_merge_commit }, shortSha(cycle.observed_merge_commit)) : null,
+  ))
   return h('div', { className: 'autopilot-evidence-grid' },
     h('article', null, h('h3', null, `Active leases · ${status.active_leases.length}`), ...leaseRows),
     h('article', null, h('h3', null, `Provisioning · ${status.provisioning.length}`), ...provisionRows),
     h('article', null, h('h3', null, `Commands · ${status.commands.length}`), ...commandRows),
+    h('article', null, h('h3', null, `Merge read-back · ${status.merge_cycles.length}`), ...mergeRows),
   )
 }
 
@@ -88,6 +111,8 @@ export function AutopilotContent(props: {
   return h(React.Fragment, null,
     PageHeader({ eyebrow: 'Continuous delivery operations', title: `Autopilot · ${value.repository}`, summary: value.next_action, actions: [h('button', { type: 'button', className: 'button button--secondary', onClick: props.onRefresh, disabled: props.busy, key: 'refresh' }, 'Refresh')] }),
     h('section', { className: 'autopilot-status-strip' },
+      h('div', null, h('span', { className: 'label' }, 'Project'), h('strong', null, String(value.project_id))),
+      h('div', null, h('span', { className: 'label' }, 'Wave'), h('code', null, value.active_wave?.wave_id ?? '—')),
       h('div', null, h('span', { className: 'label' }, 'Autonomy'), StatusBadge({ value: value.profile.autonomy_state })),
       h('div', null, h('span', { className: 'label' }, 'GitHub sync'), StatusBadge({ value: value.sync_status })),
       h('div', null, h('span', { className: 'label' }, 'Operator revision'), h('strong', null, String(value.control.revision))),
@@ -111,7 +136,7 @@ export function AutopilotContent(props: {
     props.breakerForm,
     SectionHeading({ title: 'Intent queue', count: value.queue.length, copy: 'Priority-ordered durable work with exact waiting reasons.' }),
     QueueTable(value),
-    SectionHeading({ title: 'Execution evidence', copy: 'Leases, provisioning and command identities remain separate.' }),
+    SectionHeading({ title: 'Execution evidence', copy: 'Correlated lease, provisioning, binding, command and merge identities remain explicit.' }),
     ExecutionEvidence(value),
     Warnings(value),
   )
