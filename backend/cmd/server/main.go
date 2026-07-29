@@ -114,6 +114,10 @@ func run() error {
 	commandEngine := workerloop.NewCommandEngine(workerStore, resources)
 	deliveryPlanning := workerloop.NewDeliveryPlanningAdapter(planningService, commandEngine)
 	bindingService := browserbinding.New(db, cfg.BrowserBindingTTL)
+	provisioningFinalizer, err := orchestration.NewProvisioningFinalizer(orchestrationStore, bindingService)
+	if err != nil {
+		return fmt.Errorf("initialize provisioning finalizer: %w", err)
+	}
 	browserDelivery := delivery.New(db, deliveryPlanning, delivery.NewBrowserBindingResolver(bindingService), delivery.Config{
 		Enabled: cfg.BrowserDeliveryEnabled, PendingTTL: cfg.BrowserDeliveryPendingTTL, ClaimTTL: cfg.BrowserDeliveryClaimTTL,
 	})
@@ -126,7 +130,7 @@ func run() error {
 		db, store, syncService, cfg.GitHubDefaultPollInterval, planningService, bindingService, deliveryService,
 	)
 	workerHandler := httpapi.WithWorkerLoop(baseHandler, store, projectionService, bindingService)
-	provisioningHandler := httpapi.WithProvisioning(workerHandler, orchestrationStore, provisioningService)
+	provisioningHandler := httpapi.WithProvisioningAndFinalizer(workerHandler, orchestrationStore, provisioningService, provisioningFinalizer)
 
 	server := &http.Server{
 		Addr:              cfg.Address,
