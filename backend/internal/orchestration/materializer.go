@@ -11,17 +11,31 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workerloop"
 )
 
+type CommandResultReconciler interface {
+	ReconcileCommandResult(context.Context, workerloop.Command, workerloop.Result, workerloop.MarkerPayload) error
+}
+
 type Materializer struct {
-	store *Store
+	store    *Store
+	commands CommandResultReconciler
 }
 
 func NewMaterializer(store *Store) *Materializer {
 	return &Materializer{store: store}
 }
 
+func (m *Materializer) SetCommandResultReconciler(value CommandResultReconciler) {
+	m.commands = value
+}
+
 // ReconcileResult consumes only command-correlated result evidence supplied by
-// workerloop. It never creates Workflow Commands or executable prompts.
+// workerloop. It never creates executable prompts directly.
 func (m *Materializer) ReconcileResult(ctx context.Context, snapshot supervisor.ProjectSnapshot, command workerloop.Command, result workerloop.Result, payload workerloop.MarkerPayload) error {
+	if command.ResourceProfile == ContinuousResourceProfile && payload.Version == 2 && m.commands != nil {
+		if err := m.commands.ReconcileCommandResult(ctx, command, result, payload); err != nil {
+			return err
+		}
+	}
 	if command.ResourceProfile != ContinuousResourceProfile || payload.Version != 2 || payload.Role != "lead" || payload.Result != "actions_ready" {
 		return nil
 	}
@@ -84,7 +98,7 @@ func (m *Materializer) ReconcileResult(ctx context.Context, snapshot supervisor.
 			status = IntentBlocked
 		}
 		intents = append(intents, IntentInput{
-			ID:        deterministicIntentID(snapshot.Project.ID, command.ID, action.ActionID),
+			ID: deterministicIntentID(snapshot.Project.ID, command.ID, action.ActionID),
 			ProjectID: snapshot.Project.ID, SourceResultCommentID: result.GitHubCommentID,
 			SourceCommandID: command.ID, ActionID: action.ActionID, ActionType: action.Type,
 			Repository: repository, IssueNumber: action.Issue, Role: action.Role, PRNumber: action.PR,
