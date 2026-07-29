@@ -10,13 +10,22 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 )
 
+type ResultMaterializer interface {
+	ReconcileResult(context.Context, supervisor.ProjectSnapshot, Command, Result, MarkerPayload) error
+}
+
 type Service struct {
-	store *Store
-	now   func() time.Time
+	store        *Store
+	materializer ResultMaterializer
+	now          func() time.Time
 }
 
 func NewService(store *Store) *Service {
 	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (s *Service) SetResultMaterializer(materializer ResultMaterializer) {
+	s.materializer = materializer
 }
 
 func (s *Service) ObserveProjectSnapshot(ctx context.Context, snapshot supervisor.ProjectSnapshot) error {
@@ -32,8 +41,19 @@ func (s *Service) ObserveProjectSnapshot(ctx context.Context, snapshot superviso
 			}
 			seen = append(seen, comment.GitHubID)
 			result := s.correlate(ctx, snapshot.Project.ID, issue.Number, comment, parsed)
-			if err := s.persistResult(ctx, result); err != nil {
+			stored, err := s.persistResult(ctx, result)
+			if err != nil {
 				return err
+			}
+			if s.materializer != nil && stored.CommandID != "" {
+				command, commandErr := s.store.GetCommand(ctx, stored.CommandID)
+				if commandErr == nil {
+					if err := s.materializer.ReconcileResult(ctx, snapshot, command, stored, parsed.Payload); err != nil {
+						return fmt.Errorf("materialize result comment %d: %w", comment.GitHubID, err)
+					}
+				} else if !errors.Is(commandErr, ErrNotFound) {
+					return commandErr
+				}
 			}
 		}
 	}
@@ -54,16 +74,19 @@ func (s *Service) ObserveProjectSnapshot(ctx context.Context, snapshot superviso
 	return nil
 }
 
-func (s *Service) persistResult(ctx context.Context, result Result) error {
+func (s *Service) persistResult(ctx context.Context, result Result) (Result, error) {
 	existing, err := s.store.ResultByComment(ctx, result.ProjectID, result.GitHubCommentID)
 	if err == nil && existing.ValidationStatus == ValidationAccepted && (result.ValidationStatus != ValidationAccepted || existing.PayloadHash != result.PayloadHash) {
 		result.ValidationStatus = ValidationAmbiguous
 		result.ValidationReason = "accepted_result_mutated"
 		result.AcceptedAt = nil
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+		return Result{}, err
 	}
-	return s.store.UpsertResult(ctx, result)
+	if err := s.store.UpsertResult(ctx, result); err != nil {
+		return Result{}, err
+	}
+	return s.store.ResultByComment(ctx, result.ProjectID, result.GitHubCommentID)
 }
 
 func (s *Service) correlate(ctx context.Context, projectID int64, issueNumber int, comment supervisor.Comment, parsed ParsedMarker) Result {
