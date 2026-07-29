@@ -72,6 +72,11 @@ func TestFinalizeProvisioningRollsBackOnBindingVersionConflict(t *testing.T) {
 	fixture := newFinalizeFixture(t, testHead)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	bindingID := "existing-binding"
+	if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO browser_workers(
+		worker_id,protocol_version,capabilities_json,created_at,updated_at
+	) VALUES(?,?,?,?,?)`, "old-worker", "test", "[]", now, now); err != nil {
+		t.Fatal(err)
+	}
 	_, err := fixture.db.ExecContext(context.Background(), `INSERT INTO browser_lane_bindings(
 		binding_id,project_id,lane_key,worker_id,target_kind,target_origin,target_path,target_label,
 		enabled,binding_version,created_at,updated_at
