@@ -111,30 +111,30 @@ type ProvisioningProjection struct {
 }
 
 type CommandProjection struct {
-	ProjectID           int64     `json:"project_id"`
-	MaterializationID   string    `json:"materialization_id"`
-	IntentID            string    `json:"intent_id"`
-	LeaseID             string    `json:"lease_id"`
-	ProvisionRequestID  string    `json:"provision_request_id"`
-	LaneKey             string    `json:"lane_key"`
-	IssueNumber         int       `json:"issue_number"`
-	Role                string    `json:"role"`
-	ExpectedHead        string    `json:"expected_head,omitempty"`
-	Status              string    `json:"status"`
-	ReasonCode          string    `json:"reason_code,omitempty"`
-	WorkflowCommandID   string    `json:"workflow_command_id,omitempty"`
-	WorkflowStatus      string    `json:"workflow_status,omitempty"`
-	DeliveryCommandID   string    `json:"delivery_command_id,omitempty"`
-	DeliveryStatus      string    `json:"delivery_status,omitempty"`
-	WorkerID            string    `json:"worker_id,omitempty"`
-	WorkerSessionID     string    `json:"worker_session_id,omitempty"`
-	TabID               int       `json:"tab_id,omitempty"`
-	BindingID           string    `json:"binding_id,omitempty"`
-	BindingVersion      int64     `json:"binding_version,omitempty"`
-	ObservedChatGPTURL  string    `json:"observed_chatgpt_url,omitempty"`
-	ContextHash         string    `json:"context_hash,omitempty"`
-	PromptHash          string    `json:"prompt_hash,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ProjectID          int64     `json:"project_id"`
+	MaterializationID  string    `json:"materialization_id"`
+	IntentID           string    `json:"intent_id"`
+	LeaseID            string    `json:"lease_id"`
+	ProvisionRequestID string    `json:"provision_request_id"`
+	LaneKey            string    `json:"lane_key"`
+	IssueNumber        int       `json:"issue_number"`
+	Role               string    `json:"role"`
+	ExpectedHead       string    `json:"expected_head,omitempty"`
+	Status             string    `json:"status"`
+	ReasonCode         string    `json:"reason_code,omitempty"`
+	WorkflowCommandID  string    `json:"workflow_command_id,omitempty"`
+	WorkflowStatus     string    `json:"workflow_status,omitempty"`
+	DeliveryCommandID  string    `json:"delivery_command_id,omitempty"`
+	DeliveryStatus     string    `json:"delivery_status,omitempty"`
+	WorkerID           string    `json:"worker_id,omitempty"`
+	WorkerSessionID    string    `json:"worker_session_id,omitempty"`
+	TabID              int       `json:"tab_id,omitempty"`
+	BindingID          string    `json:"binding_id,omitempty"`
+	BindingVersion     int64     `json:"binding_version,omitempty"`
+	ObservedChatGPTURL string    `json:"observed_chatgpt_url,omitempty"`
+	ContextHash        string    `json:"context_hash,omitempty"`
+	PromptHash         string    `json:"prompt_hash,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type ResultProjection struct {
