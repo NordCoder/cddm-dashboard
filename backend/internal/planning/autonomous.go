@@ -66,7 +66,7 @@ func autonomousIntentMatchesRoute(value PromptContext, action, role, head string
 	case "dispatch", "correct":
 		return value.Route.Action == "dispatch"
 	case "merge_candidate":
-		return role == "lead" && (value.Route.Action == "dispatch" || value.Route.Action == "merge_gate") && value.CurrentHead != ""
+		return role == "lead" && value.Route.Action == "dispatch" && value.CurrentHead != ""
 	case "plan_next_wave":
 		return role == "lead" && value.Route.Action == "dispatch"
 	default:
