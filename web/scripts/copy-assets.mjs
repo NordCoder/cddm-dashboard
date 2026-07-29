@@ -9,11 +9,6 @@ await copyFile(new URL('src/index.html', projectRoot), new URL('index.html', dis
 await copyFile(new URL('src/styles.css', projectRoot), new URL('assets/styles.css', distRoot))
 await copyFile(new URL('src/mobile.css', projectRoot), new URL('assets/mobile.css', distRoot))
 await copyFile(new URL('src/auto-send.css', projectRoot), new URL('assets/auto-send.css', distRoot))
-await copyFile(
-  new URL('node_modules/react/umd/react.production.min.js', projectRoot),
-  new URL('react.production.min.js', vendorRoot),
-)
-await copyFile(
-  new URL('node_modules/react-dom/umd/react-dom.production.min.js', projectRoot),
-  new URL('react-dom.production.min.js', vendorRoot),
-)
+await copyFile(new URL('src/autopilot.css', projectRoot), new URL('assets/autopilot.css', distRoot))
+await copyFile(new URL('node_modules/react/umd/react.production.min.js', projectRoot), new URL('react.production.min.js', vendorRoot))
+await copyFile(new URL('node_modules/react-dom/umd/react-dom.production.min.js', projectRoot), new URL('react-dom.production.min.js', vendorRoot))

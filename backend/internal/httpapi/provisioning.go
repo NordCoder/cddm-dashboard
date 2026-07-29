@@ -57,7 +57,8 @@ func WithProvisioning(legacy http.Handler, store *orchestration.Store, service *
 }
 
 func WithProvisioningAndFinalizer(legacy http.Handler, store *orchestration.Store, service *orchestration.ProvisioningService, finalizer *orchestration.ProvisioningFinalizer) http.Handler {
-	return &provisioningHandler{legacy: legacy, store: store, service: service, finalizer: finalizer}
+	provisioning := &provisioningHandler{legacy: legacy, store: store, service: service, finalizer: finalizer}
+	return WithAutopilotOperations(provisioning, orchestration.NewOperationsService(store))
 }
 
 func (h *provisioningHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
