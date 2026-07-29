@@ -72,7 +72,6 @@ export type AutopilotLease = {
   intent_id: string
   claim_id: string
   lease_owner: string
-  lease_token: string
   status: string
   acquired_at: string
   expires_at: string
@@ -99,7 +98,9 @@ export type AutopilotBreaker = {
 
 export type AutopilotProvisioning = {
   id: string
+  project_id: number
   intent_id: string
+  lease_id: string
   lane_key: string
   issue_number: number
   role: string
@@ -107,6 +108,7 @@ export type AutopilotProvisioning = {
   status: string
   completion_reason?: string
   worker_id?: string
+  worker_session_id?: string
   tab_id?: number
   observed_chatgpt_url?: string
   bound_binding_id?: string
@@ -116,19 +118,44 @@ export type AutopilotProvisioning = {
 }
 
 export type AutopilotCommand = {
+  project_id: number
   materialization_id: string
   intent_id: string
   lease_id: string
+  provision_request_id: string
   lane_key: string
+  issue_number: number
+  role: string
+  expected_head?: string
   status: string
   reason_code?: string
   workflow_command_id?: string
   workflow_status?: string
   delivery_command_id?: string
   delivery_status?: string
+  worker_id?: string
+  worker_session_id?: string
+  tab_id?: number
+  binding_id?: string
+  binding_version?: number
+  observed_chatgpt_url?: string
   context_hash?: string
   prompt_hash?: string
   updated_at: string
+}
+
+export type AutopilotResult = {
+  project_id: number
+  github_comment_id: number
+  issue_number: number
+  command_id: string
+  role: string
+  result: string
+  payload_hash: string
+  validation_status: string
+  validation_reason?: string
+  accepted_at?: string
+  observed_at: string
 }
 
 export type AutopilotWarning = {
@@ -154,6 +181,7 @@ export type AutopilotWave = {
 
 export type AutopilotMergeCycle = {
   id: string
+  project_id: number
   intent_id: string
   issue_number: number
   pr_number: number
@@ -172,10 +200,13 @@ export type AutopilotStatus = {
   profile: AutopilotProfile
   control: AutopilotControl
   active_wave?: AutopilotWave
+  intents: AutopilotIntent[]
   queue: AutopilotQueueItem[]
+  leases: AutopilotLease[]
   active_leases: AutopilotLease[]
   provisioning: AutopilotProvisioning[]
   commands: AutopilotCommand[]
+  results: AutopilotResult[]
   circuit_breakers: AutopilotBreaker[]
   warnings: AutopilotWarning[]
   merge_cycles: AutopilotMergeCycle[]
@@ -332,7 +363,6 @@ function parseIntent(value: unknown, path: string): AutopilotIntent {
     created_at: nonEmptyString(item.created_at, `${path}.created_at`),
     updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
   }
-
   if (parsed.action_type === 'dispatch' || parsed.action_type === 'correct' || parsed.action_type === 'merge_candidate') {
     if (parsed.issue_number === undefined) throw new ValidationError(`${path}.issue_number`, 'positive Issue number for Issue-scoped action')
     if (!parsed.lane_key) throw new ValidationError(`${path}.lane_key`, 'non-empty lane identity for Issue-scoped action')
@@ -352,10 +382,7 @@ function parseIntent(value: unknown, path: string): AutopilotIntent {
 
 function parseQueue(value: unknown, path: string): AutopilotQueueItem {
   const item = record(value, path)
-  return {
-    intent: parseIntent(item.intent, `${path}.intent`),
-    waiting_reason: optionalString(item.waiting_reason, `${path}.waiting_reason`),
-  }
+  return { intent: parseIntent(item.intent, `${path}.intent`), waiting_reason: optionalString(item.waiting_reason, `${path}.waiting_reason`) }
 }
 
 function parseLease(value: unknown, path: string): AutopilotLease {
@@ -367,7 +394,6 @@ function parseLease(value: unknown, path: string): AutopilotLease {
     intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`),
     claim_id: nonEmptyString(item.claim_id, `${path}.claim_id`),
     lease_owner: nonEmptyString(item.lease_owner, `${path}.lease_owner`),
-    lease_token: nonEmptyString(item.lease_token, `${path}.lease_token`),
     status: nonEmptyString(item.status, `${path}.status`),
     acquired_at: nonEmptyString(item.acquired_at, `${path}.acquired_at`),
     expires_at: nonEmptyString(item.expires_at, `${path}.expires_at`),
@@ -378,20 +404,13 @@ function parseLease(value: unknown, path: string): AutopilotLease {
 function parseBreaker(value: unknown, path: string): AutopilotBreaker {
   const item = record(value, path)
   const parsed: AutopilotBreaker = {
-    id: nonEmptyString(item.id, `${path}.id`),
-    project_id: positiveInteger(item.project_id, `${path}.project_id`),
-    scope_kind: nonEmptyString(item.scope_kind, `${path}.scope_kind`),
-    lane_key: optionalString(item.lane_key, `${path}.lane_key`),
-    code: nonEmptyString(item.code, `${path}.code`),
-    reason: nonEmptyString(item.reason, `${path}.reason`),
-    recovery_requirements: nonEmptyString(item.recovery_requirements, `${path}.recovery_requirements`),
-    evidence: optionalString(item.evidence, `${path}.evidence`),
-    expected_head: optionalSha(item.expected_head, `${path}.expected_head`),
-    status: nonEmptyString(item.status, `${path}.status`),
-    occurrence_count: positiveInteger(item.occurrence_count, `${path}.occurrence_count`),
-    created_at: nonEmptyString(item.created_at, `${path}.created_at`),
-    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
-    acknowledged_at: optionalString(item.acknowledged_at, `${path}.acknowledged_at`),
+    id: nonEmptyString(item.id, `${path}.id`), project_id: positiveInteger(item.project_id, `${path}.project_id`),
+    scope_kind: nonEmptyString(item.scope_kind, `${path}.scope_kind`), lane_key: optionalString(item.lane_key, `${path}.lane_key`),
+    code: nonEmptyString(item.code, `${path}.code`), reason: nonEmptyString(item.reason, `${path}.reason`),
+    recovery_requirements: nonEmptyString(item.recovery_requirements, `${path}.recovery_requirements`), evidence: optionalString(item.evidence, `${path}.evidence`),
+    expected_head: optionalSha(item.expected_head, `${path}.expected_head`), status: nonEmptyString(item.status, `${path}.status`),
+    occurrence_count: positiveInteger(item.occurrence_count, `${path}.occurrence_count`), created_at: nonEmptyString(item.created_at, `${path}.created_at`),
+    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`), acknowledged_at: optionalString(item.acknowledged_at, `${path}.acknowledged_at`),
     resolved_at: optionalString(item.resolved_at, `${path}.resolved_at`),
   }
   if (parsed.scope_kind === 'lane' && !parsed.lane_key) throw new ValidationError(`${path}.lane_key`, 'lane identity for lane-scoped breaker')
@@ -401,28 +420,19 @@ function parseBreaker(value: unknown, path: string): AutopilotBreaker {
 function parseProvisioning(value: unknown, path: string): AutopilotProvisioning {
   const item = record(value, path)
   const parsed: AutopilotProvisioning = {
-    id: nonEmptyString(item.id, `${path}.id`),
-    intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`),
-    lane_key: nonEmptyString(item.lane_key, `${path}.lane_key`),
-    issue_number: positiveInteger(item.issue_number, `${path}.issue_number`),
-    role: nonEmptyString(item.role, `${path}.role`),
-    expected_head: optionalSha(item.expected_head, `${path}.expected_head`),
-    status: nonEmptyString(item.status, `${path}.status`),
-    completion_reason: optionalString(item.completion_reason, `${path}.completion_reason`),
-    worker_id: optionalString(item.worker_id, `${path}.worker_id`),
-    tab_id: optionalPositiveInteger(item.tab_id, `${path}.tab_id`),
-    observed_chatgpt_url: optionalString(item.observed_chatgpt_url, `${path}.observed_chatgpt_url`),
-    bound_binding_id: optionalString(item.bound_binding_id, `${path}.bound_binding_id`),
-    bound_binding_version: optionalPositiveInteger(item.bound_binding_version, `${path}.bound_binding_version`),
-    created_at: nonEmptyString(item.created_at, `${path}.created_at`),
-    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
+    id: nonEmptyString(item.id, `${path}.id`), project_id: positiveInteger(item.project_id, `${path}.project_id`),
+    intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`), lease_id: nonEmptyString(item.lease_id, `${path}.lease_id`),
+    lane_key: nonEmptyString(item.lane_key, `${path}.lane_key`), issue_number: positiveInteger(item.issue_number, `${path}.issue_number`),
+    role: nonEmptyString(item.role, `${path}.role`), expected_head: optionalSha(item.expected_head, `${path}.expected_head`),
+    status: nonEmptyString(item.status, `${path}.status`), completion_reason: optionalString(item.completion_reason, `${path}.completion_reason`),
+    worker_id: optionalString(item.worker_id, `${path}.worker_id`), worker_session_id: optionalString(item.worker_session_id, `${path}.worker_session_id`),
+    tab_id: optionalPositiveInteger(item.tab_id, `${path}.tab_id`), observed_chatgpt_url: optionalString(item.observed_chatgpt_url, `${path}.observed_chatgpt_url`),
+    bound_binding_id: optionalString(item.bound_binding_id, `${path}.bound_binding_id`), bound_binding_version: optionalPositiveInteger(item.bound_binding_version, `${path}.bound_binding_version`),
+    created_at: nonEmptyString(item.created_at, `${path}.created_at`), updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
   }
-  if (parsed.bound_binding_id && parsed.bound_binding_version === undefined) {
-    throw new ValidationError(`${path}.bound_binding_version`, 'positive binding version when binding identity is present')
-  }
-  if (!parsed.bound_binding_id && parsed.bound_binding_version !== undefined) {
-    throw new ValidationError(`${path}.bound_binding_id`, 'binding identity when binding version is present')
-  }
+  if (parsed.worker_session_id && !parsed.worker_id) throw new ValidationError(`${path}.worker_id`, 'worker identity when managed session identity is present')
+  if (parsed.bound_binding_id && parsed.bound_binding_version === undefined) throw new ValidationError(`${path}.bound_binding_version`, 'positive binding version when binding identity is present')
+  if (!parsed.bound_binding_id && parsed.bound_binding_version !== undefined) throw new ValidationError(`${path}.bound_binding_id`, 'binding identity when binding version is present')
   if (parsed.status === 'provisioned') {
     if (!parsed.worker_id) throw new ValidationError(`${path}.worker_id`, 'managed worker identity for provisioned request')
     if (parsed.tab_id === undefined) throw new ValidationError(`${path}.tab_id`, 'positive exact-tab identity for provisioned request')
@@ -435,41 +445,53 @@ function parseProvisioning(value: unknown, path: string): AutopilotProvisioning 
 function parseCommand(value: unknown, path: string): AutopilotCommand {
   const item = record(value, path)
   const parsed: AutopilotCommand = {
-    materialization_id: nonEmptyString(item.materialization_id, `${path}.materialization_id`),
-    intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`),
-    lease_id: nonEmptyString(item.lease_id, `${path}.lease_id`),
-    lane_key: nonEmptyString(item.lane_key, `${path}.lane_key`),
-    status: nonEmptyString(item.status, `${path}.status`),
-    reason_code: optionalString(item.reason_code, `${path}.reason_code`),
-    workflow_command_id: optionalString(item.workflow_command_id, `${path}.workflow_command_id`),
-    workflow_status: optionalString(item.workflow_status, `${path}.workflow_status`),
-    delivery_command_id: optionalString(item.delivery_command_id, `${path}.delivery_command_id`),
-    delivery_status: optionalString(item.delivery_status, `${path}.delivery_status`),
-    context_hash: optionalString(item.context_hash, `${path}.context_hash`),
-    prompt_hash: optionalString(item.prompt_hash, `${path}.prompt_hash`),
-    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
+    project_id: positiveInteger(item.project_id, `${path}.project_id`), materialization_id: nonEmptyString(item.materialization_id, `${path}.materialization_id`),
+    intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`), lease_id: nonEmptyString(item.lease_id, `${path}.lease_id`),
+    provision_request_id: nonEmptyString(item.provision_request_id, `${path}.provision_request_id`), lane_key: nonEmptyString(item.lane_key, `${path}.lane_key`),
+    issue_number: positiveInteger(item.issue_number, `${path}.issue_number`), role: nonEmptyString(item.role, `${path}.role`),
+    expected_head: optionalSha(item.expected_head, `${path}.expected_head`), status: nonEmptyString(item.status, `${path}.status`),
+    reason_code: optionalString(item.reason_code, `${path}.reason_code`), workflow_command_id: optionalString(item.workflow_command_id, `${path}.workflow_command_id`),
+    workflow_status: optionalString(item.workflow_status, `${path}.workflow_status`), delivery_command_id: optionalString(item.delivery_command_id, `${path}.delivery_command_id`),
+    delivery_status: optionalString(item.delivery_status, `${path}.delivery_status`), worker_id: optionalString(item.worker_id, `${path}.worker_id`),
+    worker_session_id: optionalString(item.worker_session_id, `${path}.worker_session_id`), tab_id: optionalPositiveInteger(item.tab_id, `${path}.tab_id`),
+    binding_id: optionalString(item.binding_id, `${path}.binding_id`), binding_version: optionalPositiveInteger(item.binding_version, `${path}.binding_version`),
+    observed_chatgpt_url: optionalString(item.observed_chatgpt_url, `${path}.observed_chatgpt_url`), context_hash: optionalString(item.context_hash, `${path}.context_hash`),
+    prompt_hash: optionalString(item.prompt_hash, `${path}.prompt_hash`), updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
   }
-  if (parsed.workflow_status && !parsed.workflow_command_id) {
-    throw new ValidationError(`${path}.workflow_command_id`, 'Workflow Command identity when workflow status is present')
-  }
-  if (parsed.delivery_status && !parsed.delivery_command_id) {
-    throw new ValidationError(`${path}.delivery_command_id`, 'delivery command identity when delivery status is present')
-  }
-  if (parsed.delivery_command_id && !parsed.workflow_command_id) {
-    throw new ValidationError(`${path}.workflow_command_id`, 'Workflow Command identity before delivery identity')
+  if (parsed.workflow_status && !parsed.workflow_command_id) throw new ValidationError(`${path}.workflow_command_id`, 'Workflow Command identity when workflow status is present')
+  if (parsed.delivery_status && !parsed.delivery_command_id) throw new ValidationError(`${path}.delivery_command_id`, 'delivery command identity when delivery status is present')
+  if (parsed.delivery_command_id && !parsed.workflow_command_id) throw new ValidationError(`${path}.workflow_command_id`, 'Workflow Command identity before delivery identity')
+  if (parsed.binding_id && parsed.binding_version === undefined) throw new ValidationError(`${path}.binding_version`, 'binding version when binding identity is present')
+  if (!parsed.binding_id && parsed.binding_version !== undefined) throw new ValidationError(`${path}.binding_id`, 'binding identity when binding version is present')
+  if (parsed.status === 'materialized' || parsed.status === 'completed' || parsed.workflow_command_id || parsed.delivery_command_id) {
+    if (!parsed.workflow_command_id) throw new ValidationError(`${path}.workflow_command_id`, 'Workflow Command identity for materialized command')
+    if (!parsed.delivery_command_id) throw new ValidationError(`${path}.delivery_command_id`, 'delivery command identity for materialized command')
+    if (!parsed.worker_id) throw new ValidationError(`${path}.worker_id`, 'worker identity for materialized command')
+    if (!parsed.worker_session_id) throw new ValidationError(`${path}.worker_session_id`, 'managed session identity for materialized command')
+    if (parsed.tab_id === undefined) throw new ValidationError(`${path}.tab_id`, 'exact tab identity for materialized command')
+    if (!parsed.binding_id) throw new ValidationError(`${path}.binding_id`, 'binding identity for materialized command')
   }
   return parsed
+}
+
+function parseResult(value: unknown, path: string): AutopilotResult {
+  const item = record(value, path)
+  return {
+    project_id: positiveInteger(item.project_id, `${path}.project_id`), github_comment_id: positiveInteger(item.github_comment_id, `${path}.github_comment_id`),
+    issue_number: positiveInteger(item.issue_number, `${path}.issue_number`), command_id: nonEmptyString(item.command_id, `${path}.command_id`),
+    role: nonEmptyString(item.role, `${path}.role`), result: nonEmptyString(item.result, `${path}.result`), payload_hash: nonEmptyString(item.payload_hash, `${path}.payload_hash`),
+    validation_status: nonEmptyString(item.validation_status, `${path}.validation_status`), validation_reason: optionalString(item.validation_reason, `${path}.validation_reason`),
+    accepted_at: optionalString(item.accepted_at, `${path}.accepted_at`), observed_at: nonEmptyString(item.observed_at, `${path}.observed_at`),
+  }
 }
 
 function parseWarning(value: unknown, path: string): AutopilotWarning {
   const item = record(value, path)
   return {
-    code: nonEmptyString(item.code, `${path}.code`),
-    intent_id: optionalString(item.intent_id, `${path}.intent_id`),
+    code: nonEmptyString(item.code, `${path}.code`), intent_id: optionalString(item.intent_id, `${path}.intent_id`),
     issue_number: item.issue_number === undefined || item.issue_number === null ? undefined : positiveInteger(item.issue_number, `${path}.issue_number`),
     pr_number: item.pr_number === undefined || item.pr_number === null ? undefined : positiveInteger(item.pr_number, `${path}.pr_number`),
-    expected_head: optionalSha(item.expected_head, `${path}.expected_head`),
-    observed_head: optionalSha(item.observed_head, `${path}.observed_head`),
+    expected_head: optionalSha(item.expected_head, `${path}.expected_head`), observed_head: optionalSha(item.observed_head, `${path}.observed_head`),
     message: nonEmptyString(item.message, `${path}.message`),
   }
 }
@@ -477,92 +499,148 @@ function parseWarning(value: unknown, path: string): AutopilotWarning {
 function parseWave(value: unknown, path: string): AutopilotWave {
   const item = record(value, path)
   return {
-    project_id: positiveInteger(item.project_id, `${path}.project_id`),
-    wave_id: nonEmptyString(item.wave_id, `${path}.wave_id`),
-    control_issue_number: positiveInteger(item.control_issue_number, `${path}.control_issue_number`),
-    source_command_id: nonEmptyString(item.source_command_id, `${path}.source_command_id`),
-    status: nonEmptyString(item.status, `${path}.status`),
-    issues: requiredArray(item.issues, `${path}.issues`, (entry, itemPath) => positiveInteger(entry, itemPath)),
-    created_at: nonEmptyString(item.created_at, `${path}.created_at`),
-    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
+    project_id: positiveInteger(item.project_id, `${path}.project_id`), wave_id: nonEmptyString(item.wave_id, `${path}.wave_id`),
+    control_issue_number: positiveInteger(item.control_issue_number, `${path}.control_issue_number`), source_command_id: nonEmptyString(item.source_command_id, `${path}.source_command_id`),
+    status: nonEmptyString(item.status, `${path}.status`), issues: requiredArray(item.issues, `${path}.issues`, (entry, itemPath) => positiveInteger(entry, itemPath)),
+    created_at: nonEmptyString(item.created_at, `${path}.created_at`), updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
   }
 }
 
 function parseMergeCycle(value: unknown, path: string): AutopilotMergeCycle {
   const item = record(value, path)
   return {
-    id: nonEmptyString(item.id, `${path}.id`),
-    intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`),
-    issue_number: positiveInteger(item.issue_number, `${path}.issue_number`),
-    pr_number: positiveInteger(item.pr_number, `${path}.pr_number`),
-    approved_head: shaValue(item.approved_head, `${path}.approved_head`),
-    observed_merge_commit: optionalSha(item.observed_merge_commit, `${path}.observed_merge_commit`),
-    status: nonEmptyString(item.status, `${path}.status`),
-    reason_code: optionalString(item.reason_code, `${path}.reason_code`),
-    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
+    id: nonEmptyString(item.id, `${path}.id`), project_id: positiveInteger(item.project_id, `${path}.project_id`),
+    intent_id: nonEmptyString(item.intent_id, `${path}.intent_id`), issue_number: positiveInteger(item.issue_number, `${path}.issue_number`),
+    pr_number: positiveInteger(item.pr_number, `${path}.pr_number`), approved_head: shaValue(item.approved_head, `${path}.approved_head`),
+    observed_merge_commit: optionalSha(item.observed_merge_commit, `${path}.observed_merge_commit`), status: nonEmptyString(item.status, `${path}.status`),
+    reason_code: optionalString(item.reason_code, `${path}.reason_code`), updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
   }
+}
+
+function compareIntent(actual: AutopilotIntent, expected: AutopilotIntent, path: string): void {
+  same(actual.project_id, expected.project_id, `${path}.project_id`, 'project identity matching authoritative Intent')
+  same(actual.repository, expected.repository, `${path}.repository`, 'repository matching authoritative Intent')
+  same(actual.issue_number, expected.issue_number, `${path}.issue_number`, 'Issue identity matching authoritative Intent')
+  same(actual.role, expected.role, `${path}.role`, 'role matching authoritative Intent')
+  same(actual.pr_number, expected.pr_number, `${path}.pr_number`, 'PR identity matching authoritative Intent')
+  same(actual.expected_head, expected.expected_head, `${path}.expected_head`, 'Head identity matching authoritative Intent')
+  same(actual.wave_id, expected.wave_id, `${path}.wave_id`, 'Wave identity matching authoritative Intent')
+  same(actual.lane_key, expected.lane_key, `${path}.lane_key`, 'lane identity matching authoritative Intent')
+  same(actual.status, expected.status, `${path}.status`, 'status matching authoritative Intent')
 }
 
 function validateIdentityGraph(status: AutopilotStatus): void {
   same(status.profile.project_id, status.project_id, '$.profile.project_id', 'top-level project identity')
+  same(status.control.project_id, status.project_id, '$.control.project_id', 'top-level project identity')
   if (status.profile.autonomy_mode === 'continuous_dashboard_orchestration' && status.profile.control_issue_number <= 0) {
     throw new ValidationError('$.profile.control_issue_number', 'positive Control Issue for continuous Autopilot')
   }
-  same(status.control.project_id, status.project_id, '$.control.project_id', 'top-level project identity')
   if (status.active_wave) {
     same(status.active_wave.project_id, status.project_id, '$.active_wave.project_id', 'top-level project identity')
     same(status.active_wave.control_issue_number, status.profile.control_issue_number, '$.active_wave.control_issue_number', 'profile Control Issue identity')
   }
 
   const intentByID = new Map<string, AutopilotIntent>()
-  for (const [index, queueItem] of status.queue.entries()) {
-    const path = `$.queue[${index}].intent`
-    const intent = queueItem.intent
+  for (const [index, intent] of status.intents.entries()) {
+    const path = `$.intents[${index}]`
     if (intentByID.has(intent.intent_id)) throw new ValidationError(`${path}.intent_id`, 'unique Intent identity')
     intentByID.set(intent.intent_id, intent)
     same(intent.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     same(intent.repository, status.repository, `${path}.repository`, 'top-level repository identity')
   }
+  for (const [index, queueItem] of status.queue.entries()) {
+    const path = `$.queue[${index}].intent`
+    const intent = intentByID.get(queueItem.intent.intent_id)
+    if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
+    compareIntent(queueItem.intent, intent, path)
+  }
 
   const leaseByID = new Map<string, AutopilotLease>()
-  for (const [index, lease] of status.active_leases.entries()) {
-    const path = `$.active_leases[${index}]`
-    if (leaseByID.has(lease.lease_id)) throw new ValidationError(`${path}.lease_id`, 'unique active lease identity')
+  for (const [index, lease] of status.leases.entries()) {
+    const path = `$.leases[${index}]`
+    if (leaseByID.has(lease.lease_id)) throw new ValidationError(`${path}.lease_id`, 'unique durable lease identity')
     leaseByID.set(lease.lease_id, lease)
     same(lease.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(lease.intent_id)
-    if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in queue')
+    if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
     same(lease.lane_key, intent.lane_key, `${path}.lane_key`, 'lane identity matching referenced Intent')
   }
+  for (const [index, active] of status.active_leases.entries()) {
+    const path = `$.active_leases[${index}]`
+    const lease = leaseByID.get(active.lease_id)
+    if (!lease) throw new ValidationError(`${path}.lease_id`, 'lease identity present in durable leases')
+    same(active.intent_id, lease.intent_id, `${path}.intent_id`, 'Intent identity matching durable lease')
+    same(active.lane_key, lease.lane_key, `${path}.lane_key`, 'lane identity matching durable lease')
+    same(active.status, 'active', `${path}.status`, 'active lease status')
+    same(lease.status, 'active', `${path}.status`, 'durable lease marked active')
+  }
 
+  const provisionByID = new Map<string, AutopilotProvisioning>()
   for (const [index, request] of status.provisioning.entries()) {
     const path = `$.provisioning[${index}]`
+    if (provisionByID.has(request.id)) throw new ValidationError(`${path}.id`, 'unique provisioning identity')
+    provisionByID.set(request.id, request)
+    same(request.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(request.intent_id)
-    if (!intent) continue
+    if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
+    const lease = leaseByID.get(request.lease_id)
+    if (!lease) throw new ValidationError(`${path}.lease_id`, 'lease identity present in durable leases')
+    same(lease.intent_id, request.intent_id, `${path}.lease_id`, 'lease belonging to referenced Intent')
     same(request.lane_key, intent.lane_key, `${path}.lane_key`, 'lane identity matching referenced Intent')
+    same(request.lane_key, lease.lane_key, `${path}.lane_key`, 'lane identity matching referenced lease')
     same(request.issue_number, intent.issue_number, `${path}.issue_number`, 'Issue identity matching referenced Intent')
     same(request.role, intent.role, `${path}.role`, 'role matching referenced Intent')
     if (request.expected_head || intent.expected_head) same(request.expected_head, intent.expected_head, `${path}.expected_head`, 'Head identity matching referenced Intent')
   }
 
+  const commandByWorkflowID = new Map<string, AutopilotCommand>()
   for (const [index, command] of status.commands.entries()) {
     const path = `$.commands[${index}]`
+    same(command.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(command.intent_id)
-    if (intent) same(command.lane_key, intent.lane_key, `${path}.lane_key`, 'lane identity matching referenced Intent')
+    if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
     const lease = leaseByID.get(command.lease_id)
-    if (!lease) continue
-    same(command.intent_id, lease.intent_id, `${path}.intent_id`, 'Intent identity matching referenced lease')
+    if (!lease) throw new ValidationError(`${path}.lease_id`, 'lease identity present in durable leases')
+    const request = provisionByID.get(command.provision_request_id)
+    if (!request) throw new ValidationError(`${path}.provision_request_id`, 'provisioning identity present in projection')
+    same(lease.intent_id, command.intent_id, `${path}.lease_id`, 'lease belonging to referenced Intent')
+    same(request.intent_id, command.intent_id, `${path}.provision_request_id`, 'provisioning belonging to referenced Intent')
+    same(request.lease_id, command.lease_id, `${path}.lease_id`, 'lease identity matching provisioning')
+    same(command.lane_key, intent.lane_key, `${path}.lane_key`, 'lane identity matching referenced Intent')
     same(command.lane_key, lease.lane_key, `${path}.lane_key`, 'lane identity matching referenced lease')
+    same(command.lane_key, request.lane_key, `${path}.lane_key`, 'lane identity matching provisioning')
+    same(command.issue_number, intent.issue_number, `${path}.issue_number`, 'Issue identity matching referenced Intent')
+    same(command.role, intent.role, `${path}.role`, 'role matching referenced Intent')
+    same(command.expected_head, request.expected_head, `${path}.expected_head`, 'Head identity matching provisioning')
+    same(command.worker_id, request.worker_id, `${path}.worker_id`, 'worker identity matching provisioning')
+    same(command.tab_id, request.tab_id, `${path}.tab_id`, 'tab identity matching provisioning')
+    same(command.binding_id, request.bound_binding_id, `${path}.binding_id`, 'binding identity matching provisioning')
+    same(command.binding_version, request.bound_binding_version, `${path}.binding_version`, 'binding version matching provisioning')
+    same(command.observed_chatgpt_url, request.observed_chatgpt_url, `${path}.observed_chatgpt_url`, 'observed target matching provisioning')
+    if (command.worker_session_id) same(request.worker_session_id, command.worker_session_id, `${path}.worker_session_id`, 'managed session matching command')
+    if (command.workflow_command_id) {
+      if (commandByWorkflowID.has(command.workflow_command_id)) throw new ValidationError(`${path}.workflow_command_id`, 'unique Workflow Command identity')
+      commandByWorkflowID.set(command.workflow_command_id, command)
+    }
+  }
+
+  for (const [index, result] of status.results.entries()) {
+    const path = `$.results[${index}]`
+    same(result.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
+    const command = commandByWorkflowID.get(result.command_id)
+    if (!command) throw new ValidationError(`${path}.command_id`, 'Workflow Command identity present in projected commands')
+    same(result.issue_number, command.issue_number, `${path}.issue_number`, 'Issue identity matching Workflow Command')
+    same(result.role, command.role, `${path}.role`, 'role matching Workflow Command')
   }
 
   for (const [index, breaker] of status.circuit_breakers.entries()) {
     same(breaker.project_id, status.project_id, `$.circuit_breakers[${index}].project_id`, 'top-level project identity')
   }
-
   for (const [index, cycle] of status.merge_cycles.entries()) {
     const path = `$.merge_cycles[${index}]`
+    same(cycle.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(cycle.intent_id)
-    if (!intent) continue
+    if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
     same(cycle.issue_number, intent.issue_number, `${path}.issue_number`, 'Issue identity matching merge Intent')
     same(cycle.pr_number, intent.pr_number, `${path}.pr_number`, 'PR identity matching merge Intent')
     same(cycle.approved_head, intent.expected_head, `${path}.approved_head`, 'approved Head matching merge Intent')
@@ -572,24 +650,17 @@ function validateIdentityGraph(status: AutopilotStatus): void {
 export function parseAutopilotStatus(value: unknown): AutopilotStatus {
   const item = record(value, '$')
   const parsed: AutopilotStatus = {
-    project_id: positiveInteger(item.project_id, '$.project_id'),
-    repository: nonEmptyString(item.repository, '$.repository'),
-    sync_status: nonEmptyString(item.sync_status, '$.sync_status'),
-    sync_error: optionalString(item.sync_error, '$.sync_error'),
-    profile: parseProfile(item.profile, '$.profile'),
-    control: parseControl(item.control, '$.control'),
+    project_id: positiveInteger(item.project_id, '$.project_id'), repository: nonEmptyString(item.repository, '$.repository'),
+    sync_status: nonEmptyString(item.sync_status, '$.sync_status'), sync_error: optionalString(item.sync_error, '$.sync_error'),
+    profile: parseProfile(item.profile, '$.profile'), control: parseControl(item.control, '$.control'),
     active_wave: item.active_wave === undefined || item.active_wave === null ? undefined : parseWave(item.active_wave, '$.active_wave'),
-    queue: requiredArray(item.queue, '$.queue', parseQueue),
-    active_leases: requiredArray(item.active_leases, '$.active_leases', parseLease),
-    provisioning: requiredArray(item.provisioning, '$.provisioning', parseProvisioning),
-    commands: requiredArray(item.commands, '$.commands', parseCommand),
-    circuit_breakers: requiredArray(item.circuit_breakers, '$.circuit_breakers', parseBreaker),
-    warnings: requiredArray(item.warnings, '$.warnings', parseWarning),
-    merge_cycles: requiredArray(item.merge_cycles, '$.merge_cycles', parseMergeCycle),
-    counts: parseCounts(item.counts, '$.counts'),
-    project_hold_reason: optionalString(item.project_hold_reason, '$.project_hold_reason'),
-    lead_busy: booleanValue(item.lead_busy, '$.lead_busy'),
-    next_action: nonEmptyString(item.next_action, '$.next_action'),
+    intents: requiredArray(item.intents, '$.intents', parseIntent), queue: requiredArray(item.queue, '$.queue', parseQueue),
+    leases: requiredArray(item.leases, '$.leases', parseLease), active_leases: requiredArray(item.active_leases, '$.active_leases', parseLease),
+    provisioning: requiredArray(item.provisioning, '$.provisioning', parseProvisioning), commands: requiredArray(item.commands, '$.commands', parseCommand),
+    results: requiredArray(item.results, '$.results', parseResult), circuit_breakers: requiredArray(item.circuit_breakers, '$.circuit_breakers', parseBreaker),
+    warnings: requiredArray(item.warnings, '$.warnings', parseWarning), merge_cycles: requiredArray(item.merge_cycles, '$.merge_cycles', parseMergeCycle),
+    counts: parseCounts(item.counts, '$.counts'), project_hold_reason: optionalString(item.project_hold_reason, '$.project_hold_reason'),
+    lead_busy: booleanValue(item.lead_busy, '$.lead_busy'), next_action: nonEmptyString(item.next_action, '$.next_action'),
     generated_at: nonEmptyString(item.generated_at, '$.generated_at'),
   }
   validateIdentityGraph(parsed)
