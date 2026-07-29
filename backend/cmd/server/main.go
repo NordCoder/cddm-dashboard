@@ -73,12 +73,14 @@ func run() error {
 	store := supervisor.NewStore(db)
 	workerStore := workerloop.NewStore(db)
 	orchestrationStore := orchestration.NewStore(db)
+	scheduler := orchestration.NewScheduler(orchestrationStore)
 	provisioningService, err := orchestration.NewProvisioningService(orchestrationStore, continuousResources)
 	if err != nil {
 		return fmt.Errorf("initialize session provisioning: %w", err)
 	}
+	materializer := orchestration.NewMaterializer(orchestrationStore)
 	workerResultService := workerloop.NewService(workerStore)
-	workerResultService.SetResultMaterializer(orchestration.NewMaterializer(orchestrationStore))
+	workerResultService.SetResultMaterializer(materializer)
 	workerStateService := workerloop.NewStateService(store, workerStore)
 	qaBindingRetirer := workerloop.NewQABindingRetirer(db)
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
@@ -112,18 +114,37 @@ func run() error {
 		FallbackEnabled: cfg.PromptFallbackEnabled,
 	})
 	commandEngine := workerloop.NewCommandEngine(workerStore, resources)
+	continuousCommandEngine := workerloop.NewCommandEngine(workerStore, continuousResources)
 	deliveryPlanning := workerloop.NewDeliveryPlanningAdapter(planningService, commandEngine)
+	continuousDeliveryPlanning := workerloop.NewDeliveryPlanningAdapter(planningService, continuousCommandEngine)
 	bindingService := browserbinding.New(db, cfg.BrowserBindingTTL)
+	baseBindingResolver := delivery.NewBrowserBindingResolver(bindingService)
+	bindingResolver := orchestration.NewDeliveryBindingResolver(db, baseBindingResolver)
 	provisioningFinalizer, err := orchestration.NewProvisioningFinalizer(orchestrationStore, bindingService)
 	if err != nil {
 		return fmt.Errorf("initialize provisioning finalizer: %w", err)
 	}
-	browserDelivery := delivery.New(db, deliveryPlanning, delivery.NewBrowserBindingResolver(bindingService), delivery.Config{
+	browserDelivery := delivery.New(db, deliveryPlanning, bindingResolver, delivery.Config{
+		Enabled: cfg.BrowserDeliveryEnabled, PendingTTL: cfg.BrowserDeliveryPendingTTL, ClaimTTL: cfg.BrowserDeliveryClaimTTL,
+	})
+	continuousBrowserDelivery := delivery.New(db, continuousDeliveryPlanning, bindingResolver, delivery.Config{
 		Enabled: cfg.BrowserDeliveryEnabled, PendingTTL: cfg.BrowserDeliveryPendingTTL, ClaimTTL: cfg.BrowserDeliveryClaimTTL,
 	})
 	deliveryService := workerloop.NewDeliveryCoordinator(db, browserDelivery, planningService, commandEngine, workerStateService)
+	continuousDeliveryService := workerloop.NewDeliveryCoordinator(db, continuousBrowserDelivery, planningService, continuousCommandEngine, workerStateService)
+	autopilot, err := orchestration.NewAutopilotEngine(
+		orchestrationStore, scheduler, provisioningService, planningService,
+		continuousDeliveryService, baseBindingResolver, store,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize Autopilot: %w", err)
+	}
+	materializer.SetCommandResultReconciler(autopilot)
 	if err := deliveryService.Reconcile(startupContext); err != nil {
 		return fmt.Errorf("reconcile browser and workflow commands: %w", err)
+	}
+	if err := autopilot.ReconcileAll(startupContext); err != nil {
+		return fmt.Errorf("reconcile Autopilot: %w", err)
 	}
 	projectionService := workerloop.NewProjectionService(db, store, workerStore, bindingService, resources, planningService)
 	baseHandler := httpapi.NewWithPlanningAndBindingServiceAndDelivery(
@@ -144,6 +165,9 @@ func run() error {
 	applicationContext, cancelApplication := context.WithCancel(context.Background())
 	go deliveryService.ReconcilePeriodically(applicationContext, minDuration(cfg.BrowserDeliveryClaimTTL/2, time.Minute), func(err error) {
 		slog.Error("reconcile browser and workflow commands", "error", err)
+	})
+	go autopilot.Run(applicationContext, 5*time.Second, func(err error) {
+		slog.Error("reconcile Autopilot", "error", err)
 	})
 	pollerDone := make(chan struct{})
 	go func() {
