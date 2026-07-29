@@ -114,9 +114,9 @@ func (p *typedPlannerRecorder) GenerateAutonomousIntent(_ context.Context, proje
 	p.result = planning.GenerationResult{
 		Status: planning.StatusFallback, PlanID: 77, CreatedAt: time.Now().UTC(),
 		Context: planning.PromptContext{
-			Version: planning.PromptContextVersion,
-			Repository: planning.RepositoryIdentity{ProjectID: projectID, Owner: "NordCoder", Repository: "app", WorkflowMode: "pull_request"},
-			Issue: planning.IssueIdentity{Number: issueNumber, Title: "Candidate", Lifecycle: "qa"},
+			Version:     planning.PromptContextVersion,
+			Repository:  planning.RepositoryIdentity{ProjectID: projectID, Owner: "NordCoder", Repository: "app", WorkflowMode: "pull_request"},
+			Issue:       planning.IssueIdentity{Number: issueNumber, Title: "Candidate", Lifecycle: "qa"},
 			CurrentHead: head, ContextHash: "typed-context",
 			Route: workflow.Route{Action: "dispatch", TargetRole: role, LaneKey: lane, ExpectedHead: head},
 		},
