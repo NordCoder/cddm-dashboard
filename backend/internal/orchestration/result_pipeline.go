@@ -7,6 +7,10 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workerloop"
 )
 
+type CommandResultReconciler interface {
+	ReconcileCommandResult(context.Context, workerloop.Command, workerloop.Result, workerloop.MarkerPayload) error
+}
+
 type ResultMaterializationPipeline struct {
 	commands CommandResultReconciler
 	actions  *Materializer
