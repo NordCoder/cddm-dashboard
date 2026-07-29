@@ -25,7 +25,7 @@ function projection() {
     sync_status: 'healthy',
     profile: {
       project_id: 9, resource_version: 'cddm-dashboard-resources/v2.0', methodology_version: 'cddm-minimal/v2.1', result_protocol: 'cddm-worker-result/v2',
-      delivery_mode: 'chatgpt_project', qa_session_mode: 'fresh', auto_merge: false, autonomy_mode: 'continuous_dashboard_orchestration', autonomy_state: 'paused',
+      delivery_mode: 'auto', qa_session_mode: 'manual_fresh_binding', auto_merge: false, autonomy_mode: 'continuous_dashboard_orchestration', autonomy_state: 'paused',
       control_issue_number: 90, max_active_work_units: 3, max_parallel_implementors: 1, max_parallel_qa: 1,
       chatgpt_project_url: 'https://chatgpt.com/g/g-project/repository/project', updated_at: timestamp,
     },
