@@ -6,21 +6,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
-)
 
-type MergeFacts struct {
-	Repository     string
-	IssueNumber   int
-	IssueState    string
-	IssueLabels   []string
-	PRNumber      int
-	PRState       string
-	Merged        bool
-	ApprovedHead  string
-	BaseRef       string
-	MergeCommit   string
-	MergedAt      *time.Time
-}
+	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
+)
 
 type mergePullRequestDetail struct {
 	Number         int        `json:"number"`
@@ -36,27 +24,27 @@ type mergePullRequestDetail struct {
 	} `json:"head"`
 }
 
-func (c *Client) ReadMergeFacts(ctx context.Context, owner, repository string, issueNumber, prNumber int) (MergeFacts, error) {
+func (c *Client) ReadMergeFacts(ctx context.Context, owner, repository string, issueNumber, prNumber int) (supervisor.MergeFacts, error) {
 	owner = strings.TrimSpace(owner)
 	repository = strings.TrimSpace(repository)
 	if owner == "" || repository == "" || issueNumber <= 0 || prNumber <= 0 {
-		return MergeFacts{}, fmt.Errorf("owner, repository, Issue and PR are required")
+		return supervisor.MergeFacts{}, fmt.Errorf("owner, repository, Issue and PR are required")
 	}
 	var issue apiIssue
 	issuePath := fmt.Sprintf("repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repository), issueNumber)
 	if err := c.getJSON(ctx, issuePath, &issue); err != nil {
-		return MergeFacts{}, fmt.Errorf("read Issue #%d for merge verification: %w", issueNumber, err)
+		return supervisor.MergeFacts{}, fmt.Errorf("read Issue #%d for merge verification: %w", issueNumber, err)
 	}
 	var pull mergePullRequestDetail
 	pullPath := fmt.Sprintf("repos/%s/%s/pulls/%d", url.PathEscape(owner), url.PathEscape(repository), prNumber)
 	if err := c.getJSON(ctx, pullPath, &pull); err != nil {
-		return MergeFacts{}, fmt.Errorf("read PR #%d for merge verification: %w", prNumber, err)
+		return supervisor.MergeFacts{}, fmt.Errorf("read PR #%d for merge verification: %w", prNumber, err)
 	}
 	labels := make([]string, 0, len(issue.Labels))
 	for _, label := range issue.Labels {
 		labels = append(labels, label.Name)
 	}
-	return MergeFacts{
+	return supervisor.MergeFacts{
 		Repository: owner + "/" + repository, IssueNumber: issue.Number,
 		IssueState: issue.State, IssueLabels: labels, PRNumber: pull.Number,
 		PRState: pull.State, Merged: pull.Merged, ApprovedHead: pull.Head.SHA,
