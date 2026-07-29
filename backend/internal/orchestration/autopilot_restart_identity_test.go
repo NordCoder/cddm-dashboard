@@ -10,7 +10,6 @@ import (
 
 	"github.com/NordCoder/cddm-dashboard/backend/internal/browserbinding"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/database"
-	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/orchestration"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
@@ -93,7 +92,7 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 		t.Fatal(err)
 	}
 	finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *provisionedDecision.Lease, "provisioned", 71)
-	deliveryRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *deliveryDecision.Lease, "delivery", 72)
+	finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *deliveryDecision.Lease, "delivery", 72)
 	awaitingRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *awaitingDecision.Lease, "awaiting", 73)
 
 	plans := map[int]planning.GenerationResult{
@@ -112,7 +111,7 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	observedResult := workerloop.Result{
 		ProjectID: project.ID, GitHubCommentID: 99002, IssueNumber: awaitingResult.IssueNumber,
 		CommandID: awaitingChain.WorkflowID, Role: awaitingResult.Role, Result: "changes_required",
-		Payload: []byte(fmt.Sprintf(`{"version":2,"command_id":%q,"reviewed_head":%q}`, awaitingChain.WorkflowID, testHead)),
+		Payload:     []byte(fmt.Sprintf(`{"version":2,"command_id":%q,"reviewed_head":%q}`, awaitingChain.WorkflowID, testHead)),
 		PayloadHash: "restart-result-evidence", ValidationStatus: workerloop.ValidationMalformed,
 		ValidationReason: "non_terminal_observation", ObservedAt: time.Now().UTC(),
 	}
@@ -209,5 +208,4 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	if qaCommand.IssueNumber != 105 || qaCommand.Role != "qa" || qaCommand.ExpectedHead != testHead {
 		t.Fatalf("exact-Head QA command chain = %+v", qaCommand)
 	}
-	_ = deliveryRequest
 }
