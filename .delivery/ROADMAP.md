@@ -38,9 +38,9 @@ M10 is stacked on the exact M9-C2 Candidate and remains unmergeable until the M9
 
 | Change | Outcome | State |
 | --- | --- | --- |
-| #70 | Project autonomy profile plus durable Workflow Intent and ordered Wave storage | Implementation |
-| #71 | Atomic typed Lead action ingestion and fail-closed Intent materialization | Backlog — depends on #70 |
-| #72 | Deterministic priority/WIP scheduler with durable lane leases | Backlog — depends on #71 |
+| #70 | Project autonomy profile plus durable Workflow Intent and ordered Wave storage | Draft PR #73 — QA pending |
+| #71 | Atomic typed Lead action ingestion and fail-closed Intent materialization | Stacked draft PR #74 — QA pending |
+| #72 | Deterministic priority/WIP scheduler with durable lane leases | Stacked draft PR #75 — QA pending |
 
 M10 ends at a durable scheduler decision. It does not create ChatGPT sessions, attach Library files, create Workflow Commands, deliver browser prompts or merge code.
 
