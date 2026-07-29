@@ -95,7 +95,7 @@ func TestSnapshotPaginatesAndBuildsNormalizedIssueState(t *testing.T) {
 	mu.Lock()
 	joined := strings.Join(requestedPages, "\n")
 	mu.Unlock()
-	if !strings.Contains(joined, "/issues?state=open&per_page=100&page=2") {
+	if !strings.Contains(joined, "/issues?state=all&sort=updated&direction=desc&per_page=100&page=2") {
 		t.Fatalf("second issue page was not requested:\n%s", joined)
 	}
 }
