@@ -110,6 +110,12 @@ func eventFromMarker(snapshot supervisor.ProjectSnapshot, issueNumber int, comme
 			if !candidateMatches(snapshot, issueNumber, payload.PR, payload.ApprovedHead) {
 				return event, []workflow.Warning{{CommentID: commentID, Code: "worker_result_merge_candidate_mismatch", Message: "Lead merge claim does not match the current linked primary PR and approved Head"}}
 			}
+		case "actions_ready":
+			event.Status, event.ResumeRole = "completed", "lead"
+		case "merged":
+			event.Status, event.Head = "completed", payload.ApprovedHead
+			putExtension(event.Extensions, "pr", payload.PR)
+			putExtension(event.Extensions, "merge_commit", payload.MergeCommit)
 		case "owner_required":
 			event.Status, event.EscalateTo = "blocked", "owner"
 		case "hold":
