@@ -42,5 +42,14 @@ CREATE INDEX autonomous_command_materializations_lane_idx
 CREATE INDEX delivery_commands_authority_idx
     ON delivery_commands(authority_kind, authority_ref, status, created_at);
 
+CREATE TRIGGER autonomous_command_materializations_bind_authority
+AFTER UPDATE OF status, delivery_command_id ON autonomous_command_materializations
+WHEN NEW.status = 'materialized' AND NEW.delivery_command_id <> ''
+BEGIN
+    UPDATE delivery_commands
+    SET authority_kind = 'autonomous_intent', authority_ref = NEW.intent_id
+    WHERE id = NEW.delivery_command_id;
+END;
+
 INSERT INTO schema_migrations (version, name)
 VALUES (15, 'autonomous_command_materializations');
