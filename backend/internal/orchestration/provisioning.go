@@ -262,9 +262,14 @@ func (s *ProvisioningService) Complete(ctx context.Context, input ProvisionCompl
 		}
 		target = &normalized
 	}
-	if input.Outcome == ProvisionSurfaceReady || input.Outcome == ProvisionProvisioned {
+	if input.Outcome == ProvisionSurfaceReady {
+		if !identifierPattern.MatchString(workerID) || tabID <= 0 {
+			return ProvisionRequest{}, fmt.Errorf("surface_ready requires exact worker and tab identity")
+		}
+	}
+	if input.Outcome == ProvisionProvisioned {
 		if !identifierPattern.MatchString(workerID) || tabID <= 0 || target == nil {
-			return ProvisionRequest{}, fmt.Errorf("successful provisioning state requires exact worker, tab and target")
+			return ProvisionRequest{}, fmt.Errorf("provisioned requires exact worker, tab and conversation target")
 		}
 	}
 	if input.Outcome == ProvisionSurfaceReady && len(input.AttachmentEvidence) != 0 {

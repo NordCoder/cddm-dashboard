@@ -50,8 +50,8 @@ M11 is stacked on the exact M10-C3 Candidate and remains unmergeable until the M
 
 | Change | Outcome | State |
 | --- | --- | --- |
-| #76 | Durable session-provision queue, exact lease-bound enqueue and extension claim/complete API | Implementation |
-| #77 | Extension service-worker provisioning and managed exact-tab workers without an open Dashboard page | Backlog — depends on #76 |
+| #76 | Durable session-provision queue, exact lease-bound enqueue and extension claim/complete API | Draft PR #79 — QA pending |
+| #77 | Extension service-worker provisioning and managed exact-tab workers without an open Dashboard page | Implementation |
 | #78 | Exact Library resolution, bootstrap, session policy and role binding | Backlog — depends on #77 |
 
 M11 ends with a verified exact ChatGPT session registered and bound to the intended role lane. It does not materialize Workflow Commands, deliver the normal assignment prompt or merge code.

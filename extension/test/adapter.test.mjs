@@ -9,8 +9,11 @@ const targetOne = { kind: "chatgpt_conversation", origin: "https://chatgpt.com",
 function fixture() {
   const tabs = new Map([[chatOne.id, { ...chatOne }], [dashboard.id, { ...dashboard }]]);
   let activeId = chatOne.id;
+  let nextId = 100;
   const session = {};
   const messages = [];
+  const creates = [];
+  const removals = [];
   const chrome = {
     storage: { session: {
       async get(key) { return { [key]: session[key] }; },
@@ -20,11 +23,18 @@ function fixture() {
     tabs: {
       async query() { const tab = tabs.get(activeId); return tab ? [{ ...tab }] : []; },
       async get(id) { const tab = tabs.get(id); if (!tab) throw new Error("missing tab"); return { ...tab }; },
+      async create(input) {
+        creates.push({ ...input });
+        const tab = { id: nextId++, url: input.url, status: "complete" };
+        tabs.set(tab.id, tab);
+        return { ...tab };
+      },
+      async remove(id) { removals.push(id); tabs.delete(id); },
       async sendMessage(id, message) { messages.push({ id, message }); return { ok: true }; }
     }
   };
   return {
-    adapter: new ChromeTargetAdapter(chrome), tabs, messages,
+    adapter: new ChromeTargetAdapter(chrome), tabs, messages, creates, removals,
     activate(id) { activeId = id; },
     close(id) { tabs.delete(id); },
     navigate(id, url) { tabs.get(id).url = url; }
@@ -83,4 +93,48 @@ test("activating a different supported ChatGPT conversation replaces the tracked
   assert.deepEqual(await f.adapter.currentTarget(), { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/two" });
   f.activate(dashboard.id);
   assert.deepEqual(await f.adapter.currentTarget(), { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/two" });
+});
+
+test("creates an inactive global ChatGPT surface without sending bootstrap content", async () => {
+  const f = fixture();
+  const created = await f.adapter.createConversationSurface("");
+  assert.deepEqual(f.creates, [{ url: "https://chatgpt.com/", active: false }]);
+  assert.equal(created.tabId, 100);
+  assert.equal(created.target, null);
+  assert.equal(f.messages.length, 0);
+  assert.deepEqual(await f.adapter.managedObservation(created.tabId), { available: true, target: null });
+
+  f.navigate(created.tabId, "https://chatgpt.com/c/new-global");
+  assert.deepEqual(await f.adapter.managedObservation(created.tabId), {
+    available: true,
+    target: { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/new-global" },
+  });
+});
+
+test("keeps a managed creation tab inside its exact ChatGPT Project scope", async () => {
+  const f = fixture();
+  const project = "https://chatgpt.com/g/g-project/repository/project";
+  const created = await f.adapter.createConversationSurface(`${project}/`);
+  assert.deepEqual(f.creates, [{ url: project, active: false }]);
+  assert.equal(created.target, null);
+
+  f.navigate(created.tabId, "https://chatgpt.com/g/g-project/repository/c/project-chat");
+  assert.deepEqual(await f.adapter.managedObservation(created.tabId, project), {
+    available: true,
+    target: { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/project-chat" },
+  });
+  f.navigate(created.tabId, "https://chatgpt.com/g/other/repository/project");
+  assert.deepEqual(await f.adapter.managedObservation(created.tabId, project), { available: false, target: null });
+  f.close(created.tabId);
+  assert.deepEqual(await f.adapter.managedObservation(created.tabId, project), { available: false, target: null });
+});
+
+test("closing a managed surface releases only that exact tab", async () => {
+  const f = fixture();
+  const created = await f.adapter.createConversationSurface("");
+  assert.equal(f.adapter.isManagedTab(created.tabId), true);
+  await f.adapter.closeManagedTab(created.tabId);
+  assert.equal(f.adapter.isManagedTab(created.tabId), false);
+  assert.deepEqual(f.removals, [created.tabId]);
+  assert.equal(f.tabs.has(created.tabId), false);
 });
