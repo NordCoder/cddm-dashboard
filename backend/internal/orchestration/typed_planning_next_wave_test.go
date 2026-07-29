@@ -69,7 +69,7 @@ func (p *nextWavePlannerRecorder) GenerateAutonomousIntent(_ context.Context, pr
 	p.result = planning.GenerationResult{
 		Status: planning.StatusFallback, PlanID: 88, CreatedAt: time.Now().UTC(),
 		Context: planning.PromptContext{
-			Version:     planning.PromptContextVersion,
+			Version: planning.PromptContextVersion,
 			Repository: planning.RepositoryIdentity{
 				ProjectID: projectID, Owner: "NordCoder", Repository: "app", WorkflowMode: "pull_request",
 			},
