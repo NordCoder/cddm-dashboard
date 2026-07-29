@@ -10,6 +10,8 @@ CREATE TABLE autonomous_command_materializations (
     intent_id TEXT NOT NULL REFERENCES workflow_intents(id) ON DELETE CASCADE,
     lease_id TEXT NOT NULL,
     provision_request_id TEXT NOT NULL,
+    scheduler_lane_key TEXT NOT NULL,
+    delivery_lane_key TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL CHECK (status IN ('pending','materialized','completed','blocked','superseded','ambiguous')),
     reason_code TEXT NOT NULL DEFAULT '',
     workflow_command_id TEXT NOT NULL DEFAULT '',
@@ -32,6 +34,9 @@ CREATE UNIQUE INDEX autonomous_command_materializations_delivery_idx
 
 CREATE INDEX autonomous_command_materializations_status_idx
     ON autonomous_command_materializations(project_id, status, created_at, id);
+
+CREATE INDEX autonomous_command_materializations_lane_idx
+    ON autonomous_command_materializations(project_id, delivery_lane_key, status, created_at, id);
 
 CREATE INDEX delivery_commands_authority_idx
     ON delivery_commands(authority_kind, authority_ref, status, created_at);
