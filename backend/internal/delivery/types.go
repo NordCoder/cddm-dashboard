@@ -20,7 +20,7 @@ const (
 )
 
 const (
-	AuthorityPlanningRoute   = "planning_route"
+	AuthorityPlanningRoute    = "planning_route"
 	AuthorityAutonomousIntent = "autonomous_intent"
 )
 
@@ -84,27 +84,6 @@ type Confirmation struct {
 	ExpectedPresenceToken string `json:"expected_presence_token"`
 }
 
-type AuthorizedCreate struct {
-	ProjectID       int64
-	IssueNumber     int
-	IdempotencyKey  string
-	AuthorityRef    string
-	PlanHash        string
-	ContextHash     string
-	Prompt          string
-	Action          string
-	TargetRole      string
-	LaneKey         string
-	ExpectedHead    string
-	BindingID       string
-	BindingVersion  int64
-	PresenceToken   string
-}
-
-type AutonomousAuthorityChecker interface {
-	CurrentAutonomousDelivery(context.Context, Command) error
-}
-
 type Command struct {
 	ID              string     `json:"id"`
 	ProjectID       int64      `json:"project_id"`
@@ -144,11 +123,13 @@ type ClaimRequest struct {
 	WorkerSessionID string `json:"worker_session_id"`
 	ClaimRequestID  string `json:"claim_request_id"`
 }
+
 type Execution struct {
 	Command Command `json:"command"`
 	ClaimID string  `json:"claim_id"`
 	Prompt  string  `json:"prompt"`
 }
+
 type Completion struct {
 	CommandID string `json:"command_id,omitempty"`
 	ClaimID   string `json:"claim_id"`
