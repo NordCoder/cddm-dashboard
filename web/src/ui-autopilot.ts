@@ -34,50 +34,49 @@ function QueueTable(status: AutopilotStatus): unknown {
   if (status.queue.length === 0) return h('p', { className: 'empty-inline' }, 'No active or waiting Intents.')
   const rows = status.queue.map((item) => h('tr', { key: item.intent.intent_id },
     h('td', null, String(item.intent.priority)),
-    h('td', null, item.intent.action_type),
-    h('td', null, item.intent.issue_number ? `#${item.intent.issue_number} ${item.intent.role ?? ''}` : item.intent.role ?? 'Project'),
+    h('td', null, h('code', null, item.intent.intent_id), h('small', null, ` · ${item.intent.action_type}`)),
+    h('td', null, h('code', null, item.intent.wave_id ?? '—')),
+    h('td', null, item.intent.issue_number ? `#${item.intent.issue_number}` : 'Project', item.intent.pr_number ? h('small', null, ` · PR #${item.intent.pr_number}`) : null, h('small', null, ` · ${item.intent.role ?? 'project'}`)),
     h('td', null, h('code', null, item.intent.lane_key ?? '—')),
     h('td', null, StatusBadge({ value: item.intent.status }), h('small', null, item.waiting_reason ?? '')),
-    h('td', null, h('code', { title: item.intent.expected_head ?? '' }, shortSha(item.intent.expected_head))),
+    h('td', null, item.intent.expected_head ? h('code', { title: item.intent.expected_head }, shortSha(item.intent.expected_head)) : '—'),
   ))
   return h('div', { className: 'autopilot-table-wrap' }, h('table', { className: 'autopilot-table' },
-    h('thead', null, h('tr', null, h('th', null, 'Priority'), h('th', null, 'Action'), h('th', null, 'Target'), h('th', null, 'Lane'), h('th', null, 'Status'), h('th', null, 'Exact Head'))),
+    h('thead', null, h('tr', null, h('th', null, 'Priority'), h('th', null, 'Intent / action'), h('th', null, 'Wave'), h('th', null, 'Issue / PR / role'), h('th', null, 'Lane'), h('th', null, 'Status'), h('th', null, 'Exact Head'))),
     h('tbody', null, ...rows),
   ))
 }
 
 function ExecutionEvidence(status: AutopilotStatus): unknown {
-  const leaseRows = status.active_leases.map((lease) => h('p', { key: lease.lease_id },
-    StatusBadge({ value: lease.status }), ' ', h('code', null, lease.lane_key),
-    h('small', null, ` lease ${lease.lease_id} · intent ${lease.intent_id} · claim ${lease.claim_id} · ${lease.lease_owner} · expires ${formatDate(lease.expires_at)}`),
+  if (status.commands.length === 0 && status.merge_cycles.length === 0) return h('p', { className: 'empty-inline' }, 'No correlated command or merge evidence.')
+  const commandRows = status.commands.map((command) => {
+    const intent = status.intents.find((value) => value.intent_id === command.intent_id)
+    const provision = status.provisioning.find((value) => value.id === command.provision_request_id)
+    const results = status.results.filter((value) => value.command_id === command.workflow_command_id)
+    return h('tr', { key: command.materialization_id },
+      h('td', null, h('code', null, `project:${command.project_id}`), h('small', null, ` · wave ${intent?.wave_id ?? '—'}`)),
+      h('td', null, `#${command.issue_number}`, intent?.pr_number ? h('small', null, ` · PR #${intent.pr_number}`) : null, command.expected_head ? h('code', { title: command.expected_head }, ` · ${shortSha(command.expected_head)}`) : null),
+      h('td', null, h('code', null, command.intent_id), h('small', null, ` · ${command.role}`), h('code', null, ` · ${command.lane_key}`), h('small', null, ` · lease ${command.lease_id}`)),
+      h('td', null, h('code', null, command.provision_request_id), h('small', null, ` · worker ${command.worker_id ?? '—'} / session ${command.worker_session_id ?? '—'} / tab ${command.tab_id ?? '—'}`), h('small', null, ` · binding ${command.binding_id ?? '—'}@${command.binding_version ?? '—'}`), provision?.observed_chatgpt_url ? h('code', { title: provision.observed_chatgpt_url }, ' · observed target') : null),
+      h('td', null, h('code', null, command.materialization_id), h('small', null, ` · workflow ${command.workflow_command_id ?? '—'} (${command.workflow_status ?? '—'})`), h('small', null, ` · delivery ${command.delivery_command_id ?? '—'} (${command.delivery_status ?? '—'})`)),
+      h('td', null, results.length === 0 ? '—' : ...results.map((result) => h('p', { key: result.github_comment_id }, h('code', null, `comment:${result.github_comment_id}`), h('small', null, ` · ${result.result} / ${result.validation_status}`), result.validation_reason ? h('small', null, ` · ${result.validation_reason}`) : null))),
+    )
+  })
+  const mergeRows = status.merge_cycles.map((cycle) => {
+    const intent = status.intents.find((value) => value.intent_id === cycle.intent_id)
+    return h('tr', { key: cycle.id },
+      h('td', null, h('code', null, `project:${cycle.project_id}`), h('small', null, ` · wave ${intent?.wave_id ?? '—'}`)),
+      h('td', null, `#${cycle.issue_number}`, h('small', null, ` · PR #${cycle.pr_number}`), h('code', { title: cycle.approved_head }, ` · ${shortSha(cycle.approved_head)}`)),
+      h('td', null, h('code', null, cycle.intent_id), h('small', null, ` · ${intent?.role ?? 'lead'}`), h('code', null, ` · ${intent?.lane_key ?? '—'}`)),
+      h('td', null, '—'),
+      h('td', null, h('code', null, cycle.id), h('small', null, ` · ${cycle.status}`)),
+      h('td', null, cycle.observed_merge_commit ? h('code', { title: cycle.observed_merge_commit }, `merge ${shortSha(cycle.observed_merge_commit)}`) : 'awaiting read-back'),
+    )
+  })
+  return h('div', { className: 'autopilot-table-wrap' }, h('table', { className: 'autopilot-table' },
+    h('thead', null, h('tr', null, h('th', null, 'Project / Wave'), h('th', null, 'Issue / PR / Head'), h('th', null, 'Intent / lane / lease'), h('th', null, 'Provision / worker / session / binding'), h('th', null, 'Materialization / commands'), h('th', null, 'Result / merge read-back'))),
+    h('tbody', null, ...commandRows, ...mergeRows),
   ))
-  const provisionRows = status.provisioning.slice(0, 12).map((request) => h('p', { key: request.id },
-    StatusBadge({ value: request.status }), ' ', h('code', null, request.lane_key),
-    h('small', null, ` request ${request.id} · intent ${request.intent_id} · Issue #${request.issue_number} · ${request.role}`),
-    request.expected_head ? h('code', { title: request.expected_head }, ` ${shortSha(request.expected_head)}`) : null,
-    request.worker_id ? h('small', null, ` · worker ${request.worker_id} · tab ${request.tab_id ?? '—'}`) : null,
-    request.bound_binding_id ? h('small', null, ` · binding ${request.bound_binding_id}@${request.bound_binding_version}`) : null,
-  ))
-  const commandRows = status.commands.slice(0, 12).map((command) => h('p', { key: command.materialization_id },
-    StatusBadge({ value: command.delivery_status ?? command.workflow_status ?? command.status }), ' ', h('code', null, command.lane_key),
-    h('small', null, ` materialization ${command.materialization_id} · intent ${command.intent_id} · lease ${command.lease_id}`),
-    command.workflow_command_id ? h('small', null, ` · workflow ${command.workflow_command_id}`) : null,
-    command.delivery_command_id ? h('small', null, ` · delivery ${command.delivery_command_id}`) : null,
-    command.context_hash ? h('code', { title: command.context_hash }, ` context ${shortSha(command.context_hash)}`) : null,
-    command.prompt_hash ? h('code', { title: command.prompt_hash }, ` prompt ${shortSha(command.prompt_hash)}`) : null,
-  ))
-  const mergeRows = status.merge_cycles.slice(0, 12).map((cycle) => h('p', { key: cycle.id },
-    StatusBadge({ value: cycle.status }), ' ', h('small', null, `cycle ${cycle.id} · intent ${cycle.intent_id} · Issue #${cycle.issue_number} · PR #${cycle.pr_number} · approved `),
-    h('code', { title: cycle.approved_head }, shortSha(cycle.approved_head)),
-    cycle.observed_merge_commit ? h('small', null, ' · observed ') : null,
-    cycle.observed_merge_commit ? h('code', { title: cycle.observed_merge_commit }, shortSha(cycle.observed_merge_commit)) : null,
-  ))
-  return h('div', { className: 'autopilot-evidence-grid' },
-    h('article', null, h('h3', null, `Active leases · ${status.active_leases.length}`), ...leaseRows),
-    h('article', null, h('h3', null, `Provisioning · ${status.provisioning.length}`), ...provisionRows),
-    h('article', null, h('h3', null, `Commands · ${status.commands.length}`), ...commandRows),
-    h('article', null, h('h3', null, `Merge read-back · ${status.merge_cycles.length}`), ...mergeRows),
-  )
 }
 
 function Warnings(status: AutopilotStatus): unknown {
@@ -134,9 +133,9 @@ export function AutopilotContent(props: {
     SectionHeading({ title: 'Circuit breakers', count: activeBreakers.length, copy: 'Acknowledged breakers continue blocking their exact project or lane until resolved.' }),
     breakerContent,
     props.breakerForm,
-    SectionHeading({ title: 'Intent queue', count: value.queue.length, copy: 'Priority-ordered durable work with exact waiting reasons.' }),
+    SectionHeading({ title: 'Intent queue', count: value.queue.length, copy: 'Priority-ordered durable work with exact Intent, Wave, PR, Head and lane identities.' }),
     QueueTable(value),
-    SectionHeading({ title: 'Execution evidence', copy: 'Correlated lease, provisioning, binding, command and merge identities remain explicit.' }),
+    SectionHeading({ title: 'Correlated execution evidence', copy: 'Record one complete row before recovery, breaker resolution, retry decisions or cleanup. Lease tokens are intentionally excluded.' }),
     ExecutionEvidence(value),
     Warnings(value),
   )
