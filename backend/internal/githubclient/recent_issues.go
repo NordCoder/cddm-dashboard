@@ -2,7 +2,6 @@ package githubclient
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
