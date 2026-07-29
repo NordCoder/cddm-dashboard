@@ -19,5 +19,6 @@ test("manifest keeps page access, identity, and provisioning permissions bounded
   assert.ok(!manifest.permissions.includes("webRequest"));
   assert.ok(!manifest.permissions.includes("clipboardRead"));
   assert.equal(manifest.content_scripts[0].matches[0], "https://chatgpt.com/*");
+  assert.deepEqual(manifest.content_scripts[0].js, ["src/library-resolver.js", "src/content.js"]);
   assert.equal(manifest.externally_connectable, undefined);
 });
