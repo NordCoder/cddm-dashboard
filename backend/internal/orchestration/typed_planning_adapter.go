@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -158,4 +157,3 @@ func sameAutonomousDetail(left, right planning.AutonomousIntentDetail) bool {
 }
 
 var _ TypedAutonomousPlanner = (*TypedPlanningAdapter)(nil)
-var _ = errors.Is
