@@ -18,6 +18,7 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/githubauth"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/githubclient"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/httpapi"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/orchestration"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/resourcepack"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
@@ -67,7 +68,9 @@ func run() error {
 	}
 	store := supervisor.NewStore(db)
 	workerStore := workerloop.NewStore(db)
+	orchestrationStore := orchestration.NewStore(db)
 	workerResultService := workerloop.NewService(workerStore)
+	workerResultService.SetResultMaterializer(orchestration.NewMaterializer(orchestrationStore))
 	workerStateService := workerloop.NewStateService(store, workerStore)
 	qaBindingRetirer := workerloop.NewQABindingRetirer(db)
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
@@ -181,15 +184,15 @@ func waitForPoller(ctx context.Context, done <-chan struct{}) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("stop polling coordinator: %w", ctx.Err())
+		return ctx.Err()
 	}
 }
 
 func maxDuration(left, right time.Duration) time.Duration {
-	if right > left {
-		return right
+	if left > right {
+		return left
 	}
-	return left
+	return right
 }
 
 func minDuration(left, right time.Duration) time.Duration {
