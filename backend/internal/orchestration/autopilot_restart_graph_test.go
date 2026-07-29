@@ -13,12 +13,14 @@ type restartIdentityGraph struct {
 	Leases           []string
 	Provisioning     []string
 	Workers          []string
+	ManagedSessions  []string
 	Bindings         []string
 	Materializations []string
 	WorkflowCommands []string
 	DeliveryCommands []string
 	DeliveryLinks    []string
 	Results          []string
+	ResultLinks      []string
 }
 
 func captureRestartIdentityGraph(t *testing.T, db *sql.DB, projectID int64) restartIdentityGraph {
@@ -31,12 +33,14 @@ func captureRestartIdentityGraph(t *testing.T, db *sql.DB, projectID int64) rest
 		Leases:           identityRows(t, db, `SELECT id||'|'||project_id||'|'||lane_key||'|'||intent_id||'|'||claim_id||'|'||lease_owner||'|'||lease_token||'|'||status FROM workflow_lane_leases WHERE project_id=? ORDER BY id`, projectID),
 		Provisioning:     identityRows(t, db, `SELECT id||'|'||project_id||'|'||intent_id||'|'||lane_lease_id||'|'||lane_key||'|'||issue_number||'|'||role||'|'||expected_head||'|'||attachment_profile||'|'||session_policy||'|'||chatgpt_project_url||'|'||expected_binding_version||'|'||status||'|'||claim_id||'|'||claim_owner||'|'||claim_token||'|'||worker_id||'|'||tab_id||'|'||target_kind||'|'||target_origin||'|'||target_path||'|'||observed_chatgpt_url||'|'||bound_binding_id||'|'||bound_binding_version FROM session_provision_requests WHERE project_id=? ORDER BY id`, projectID),
 		Workers:          identityRows(t, db, `SELECT worker_id||'|'||protocol_version||'|'||capabilities_json FROM browser_workers ORDER BY worker_id`),
+		ManagedSessions:  identityRows(t, db, `SELECT p.id||'|'||p.worker_id||'|'||d.worker_session_id||'|'||p.tab_id||'|'||p.bound_binding_id||'|'||p.bound_binding_version FROM session_provision_requests p JOIN autonomous_command_materializations m ON m.provision_request_id=p.id JOIN delivery_commands d ON d.id=m.delivery_command_id WHERE p.project_id=? ORDER BY p.id`, projectID),
 		Bindings:         identityRows(t, db, `SELECT binding_id||'|'||project_id||'|'||lane_key||'|'||worker_id||'|'||target_kind||'|'||target_origin||'|'||target_path||'|'||enabled||'|'||binding_version FROM browser_lane_bindings WHERE project_id=? ORDER BY binding_id`, projectID),
 		Materializations: identityRows(t, db, `SELECT id||'|'||project_id||'|'||intent_id||'|'||lease_id||'|'||provision_request_id||'|'||scheduler_lane_key||'|'||delivery_lane_key||'|'||plan_id||'|'||status||'|'||workflow_command_id||'|'||delivery_command_id||'|'||context_hash||'|'||prompt_hash FROM autonomous_command_materializations WHERE project_id=? ORDER BY id`, projectID),
 		WorkflowCommands: identityRows(t, db, `SELECT id||'|'||project_id||'|'||issue_number||'|'||identity_key||'|'||role||'|'||action||'|'||resource_profile||'|'||context_hash||'|'||expected_head||'|'||status FROM workflow_commands WHERE project_id=? ORDER BY id`, projectID),
 		DeliveryCommands: identityRows(t, db, `SELECT id||'|'||project_id||'|'||issue_number||'|'||plan_id||'|'||idempotency_key||'|'||plan_hash||'|'||context_hash||'|'||prompt_hash||'|'||action||'|'||target_role||'|'||lane_key||'|'||expected_head||'|'||binding_id||'|'||binding_version||'|'||worker_id||'|'||worker_session_id||'|'||target_kind||'|'||target_ref||'|'||authority_kind||'|'||authority_ref||'|'||status||'|'||claim_id||'|'||claim_request_id||'|'||outcome_reason||'|'||outcome_evidence FROM delivery_commands WHERE project_id=? ORDER BY id`, projectID),
 		DeliveryLinks:    identityRows(t, db, `SELECT l.workflow_command_id||'|'||l.delivery_command_id FROM workflow_delivery_links l JOIN workflow_commands w ON w.id=l.workflow_command_id WHERE w.project_id=? ORDER BY l.workflow_command_id,l.delivery_command_id`, projectID),
 		Results:          identityRows(t, db, `SELECT project_id||'|'||github_comment_id||'|'||issue_number||'|'||asserted_command_id||'|'||role||'|'||result||'|'||payload_hash||'|'||validation_status||'|'||validation_reason FROM workflow_results WHERE project_id=? ORDER BY github_comment_id`, projectID),
+		ResultLinks:      identityRows(t, db, `SELECT r.github_comment_id||'|'||r.asserted_command_id||'|'||l.delivery_command_id||'|'||m.intent_id||'|'||m.lease_id FROM workflow_results r JOIN workflow_delivery_links l ON l.workflow_command_id=r.asserted_command_id JOIN autonomous_command_materializations m ON m.workflow_command_id=r.asserted_command_id WHERE r.project_id=? ORDER BY r.github_comment_id`, projectID),
 	}
 }
 
@@ -54,8 +58,9 @@ func assertRestartFixtureCardinality(t *testing.T, db *sql.DB, projectID int64) 
 		{name: "provisioning", query: `SELECT COUNT(*) FROM session_provision_requests WHERE project_id=?`, want: 4},
 		{name: "binding", query: `SELECT COUNT(*) FROM browser_lane_bindings WHERE project_id=?`, want: 3},
 		{name: "materialization", query: `SELECT COUNT(*) FROM autonomous_command_materializations WHERE project_id=?`, want: 2},
-		{name: "Workflow Command", query: `SELECT COUNT(*) FROM workflow_commands WHERE project_id=? AND id LIKE 'cmd-soak-%'`, want: 2},
-		{name: "delivery command", query: `SELECT COUNT(*) FROM delivery_commands WHERE project_id=? AND id LIKE 'delivery-soak-%'`, want: 2},
+		{name: "Workflow Command", query: `SELECT COUNT(*) FROM workflow_commands w JOIN autonomous_command_materializations m ON m.workflow_command_id=w.id WHERE m.project_id=?`, want: 2},
+		{name: "delivery command", query: `SELECT COUNT(*) FROM delivery_commands d JOIN autonomous_command_materializations m ON m.delivery_command_id=d.id WHERE m.project_id=?`, want: 2},
+		{name: "delivery link", query: `SELECT COUNT(*) FROM workflow_delivery_links l JOIN autonomous_command_materializations m ON m.workflow_command_id=l.workflow_command_id WHERE m.project_id=?`, want: 2},
 		{name: "result evidence", query: `SELECT COUNT(*) FROM workflow_results WHERE project_id=? AND github_comment_id=99002`, want: 1},
 	}
 	for _, check := range checks {
