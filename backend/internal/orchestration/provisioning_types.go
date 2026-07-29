@@ -44,6 +44,9 @@ type ProvisionRequest struct {
 	WorkerID               string                    `json:"worker_id,omitempty"`
 	TabID                  int                       `json:"tab_id,omitempty"`
 	Target                 *browserbinding.TargetRef `json:"target,omitempty"`
+	ObservedChatGPTURL     string                    `json:"observed_chatgpt_url,omitempty"`
+	BoundBindingID         string                    `json:"bound_binding_id,omitempty"`
+	BoundBindingVersion    int64                     `json:"bound_binding_version,omitempty"`
 	CompletionReason       string                    `json:"completion_reason,omitempty"`
 	AttachmentEvidence     []string                  `json:"attachment_evidence,omitempty"`
 	CreatedAt              time.Time                 `json:"created_at"`
@@ -73,5 +76,16 @@ type ProvisionCompletionInput struct {
 	WorkerID           string
 	TabID              int
 	Target             *browserbinding.TargetRef
+	AttachmentEvidence []string
+}
+
+type FinalizeProvisioningInput struct {
+	RequestID          string
+	ClaimOwner         string
+	ClaimToken         string
+	WorkerID           string
+	TabID              int
+	Target             browserbinding.TargetRef
+	ObservedChatGPTURL string
 	AttachmentEvidence []string
 }
