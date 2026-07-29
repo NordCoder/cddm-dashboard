@@ -21,7 +21,22 @@ func NewResultMaterializationPipeline(commands CommandResultReconciler, actions 
 }
 
 func (p *ResultMaterializationPipeline) ReconcileResult(ctx context.Context, snapshot supervisor.ProjectSnapshot, command workerloop.Command, result workerloop.Result, payload workerloop.MarkerPayload) error {
-	if command.ResourceProfile == ContinuousResourceProfile && payload.Version == 2 && p.commands != nil {
+	continuous := command.ResourceProfile == ContinuousResourceProfile && payload.Version == 2
+	// A next-Wave planner command is complete only after its actions were
+	// atomically materialized. All other command results keep the established
+	// command-first order.
+	if continuous && payload.Role == "lead" && payload.Result == "actions_ready" {
+		if p.actions != nil {
+			if err := p.actions.ReconcileResult(ctx, snapshot, command, result, payload); err != nil {
+				return err
+			}
+		}
+		if p.commands != nil {
+			return p.commands.ReconcileCommandResult(ctx, command, result, payload)
+		}
+		return nil
+	}
+	if continuous && p.commands != nil {
 		if err := p.commands.ReconcileCommandResult(ctx, command, result, payload); err != nil {
 			return err
 		}
