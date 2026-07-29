@@ -28,15 +28,21 @@ func TestSurfaceReadyAcceptsExactTabWithoutConversationTarget(t *testing.T) {
 		t.Fatalf("claim = %+v err=%v", claimed, err)
 	}
 	surface, err := service.Complete(context.Background(), orchestration.ProvisionCompletionInput{
-		RequestID: request.ID, ClaimOwner: "extension", ClaimToken: claimed.ClaimToken,
-		Outcome: orchestration.ProvisionSurfaceReady, WorkerID: "managed-worker", TabID: 77,
+		RequestID:  request.ID,
+		ClaimOwner: "extension",
+		ClaimToken: claimed.ClaimToken,
+		Outcome:    orchestration.ProvisionSurfaceReady,
+		WorkerID:   "managed-worker",
+		TabID:      77,
 	})
 	if err != nil || surface.Status != orchestration.ProvisionSurfaceReady || surface.Target != nil {
 		t.Fatalf("surface_ready = %+v err=%v", surface, err)
 	}
 	if _, err := service.Complete(context.Background(), orchestration.ProvisionCompletionInput{
-		RequestID: request.ID, ClaimOwner: "extension", ClaimToken: claimed.ClaimToken,
-		Outcome: orchestration.ProvisionProvisioned,
+		RequestID:          request.ID,
+		ClaimOwner:         "extension",
+		ClaimToken:         claimed.ClaimToken,
+		Outcome:            orchestration.ProvisionProvisioned,
 		AttachmentEvidence: []string{"02-implementor-trigger.md", "gpt-gh-connector-guidelines.md"},
 	}); err == nil {
 		t.Fatal("provisioned accepted without an exact conversation target")
