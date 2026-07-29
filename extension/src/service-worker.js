@@ -1,5 +1,5 @@
 import { BackendClient, BackendHTTPError, provisioningCompletionPayload } from "./api.js";
-import { ChromeTargetAdapter } from "./adapter.js";
+import { ChromeTargetAdapter, SurfaceCreationError } from "./adapter.js";
 import { ExecutionCoordinator, PreSendError } from "./executor.js";
 import { ClaimLedger } from "./ledger.js";
 import {
@@ -331,14 +331,18 @@ export class ExtensionRuntime {
     return completed;
   }
 
+  async terminalSurfaceFailure(request, outcome, reason, tabId = 0) {
+    if (tabId > 0) await this.adapter.closeManagedTab?.(tabId);
+    return this.backend.completeProvision(request.request_id, provisioningCompletionPayload(request, outcome, { reason }));
+  }
+
   async createManagedSurface(request) {
     let created;
     try {
       created = await this.adapter.createConversationSurface(request.chatgpt_project_url || "");
     } catch (error) {
-      await this.backend.completeProvision(request.request_id, provisioningCompletionPayload(request, "safe_failed", {
-        reason: error?.message || "chat_creation_failed",
-      }));
+      const outcome = error instanceof SurfaceCreationError ? error.outcome : "safe_failed";
+      await this.terminalSurfaceFailure(request, outcome, error?.message || "chat_creation_failed", error?.tabId || 0);
       throw error;
     }
     const workerID = randomId();
@@ -364,14 +368,36 @@ export class ExtensionRuntime {
     await this.saveManagedWorkers();
     try {
       await this.completeSurfaceReady(request, record);
-    } catch (error) {
+    } catch {
       await this.status("surface_completion_pending");
     }
     return record;
   }
 
+  async retireUnavailableSurface(record) {
+    if (record.provision_status !== "claimed" && record.provision_status !== "surface_ready") return false;
+    const request = {
+      request_id: record.request_id,
+      claim_owner: record.claim_owner,
+      claim_token: record.claim_token,
+    };
+    try {
+      await this.terminalSurfaceFailure(request, "safe_failed", "managed_creation_tab_unavailable", record.tab_id);
+    } catch { return false; }
+    this.registeredManaged.delete(record.worker_id);
+    this.managedWorkers.delete(record.worker_id);
+    await this.saveManagedWorkers();
+    return true;
+  }
+
   async reconcileManagedProvisioning() {
-    for (const record of this.managedWorkers.values()) {
+    for (const record of [...this.managedWorkers.values()]) {
+      if (record.provision_status !== "claimed" && record.provision_status !== "surface_ready") continue;
+      const observation = await this.managedObservation(record);
+      if (!observation.available) {
+        await this.retireUnavailableSurface(record);
+        continue;
+      }
       if (!record.pending_surface_completion) continue;
       const request = {
         request_id: record.request_id,
@@ -425,7 +451,7 @@ export class ExtensionRuntime {
         await this.pollIdentity({ workerId: this.workerId, sessionId: this.sessionId }, target, this.adapter);
       }
       for (const record of this.managedWorkers.values()) {
-        if (!record.target) continue;
+        if (record.provision_status !== "provisioned" || !record.target) continue;
         const adapter = this.adapter.exactTab(record.tab_id, record.target);
         const managedTarget = await adapter.currentTarget();
         if (!managedTarget) continue;
