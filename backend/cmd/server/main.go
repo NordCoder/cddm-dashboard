@@ -138,12 +138,23 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initialize Autopilot: %w", err)
 	}
-	workerResultService.SetResultMaterializer(orchestration.NewResultMaterializationPipeline(autopilot, actionMaterializer))
+	mergeAutopilot, err := orchestration.NewMergeAutopilotEngine(
+		orchestrationStore, scheduler, provisioningService, planningService,
+		continuousDeliveryService, baseBindingResolver, store, client,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize merge Autopilot: %w", err)
+	}
+	resultMux := orchestration.NewCommandResultMux(mergeAutopilot, autopilot)
+	workerResultService.SetResultMaterializer(orchestration.NewResultMaterializationPipeline(resultMux, actionMaterializer))
 	if err := deliveryService.Reconcile(startupContext); err != nil {
 		return fmt.Errorf("reconcile browser and workflow commands: %w", err)
 	}
 	if err := autopilot.ReconcileAll(startupContext); err != nil {
 		return fmt.Errorf("reconcile Autopilot: %w", err)
+	}
+	if err := mergeAutopilot.ReconcileAll(startupContext); err != nil {
+		return fmt.Errorf("reconcile merge Autopilot: %w", err)
 	}
 	projectionService := workerloop.NewProjectionService(db, store, workerStore, bindingService, resources, planningService)
 	baseHandler := httpapi.NewWithPlanningAndBindingServiceAndDelivery(
@@ -167,6 +178,9 @@ func run() error {
 	})
 	go autopilot.Run(applicationContext, 5*time.Second, func(err error) {
 		slog.Error("reconcile Autopilot", "error", err)
+	})
+	go mergeAutopilot.Run(applicationContext, 5*time.Second, func(err error) {
+		slog.Error("reconcile merge Autopilot", "error", err)
 	})
 	pollerDone := make(chan struct{})
 	go func() {
