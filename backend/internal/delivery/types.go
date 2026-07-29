@@ -19,6 +19,11 @@ const (
 	StatusInvalidated = "invalidated"
 )
 
+const (
+	AuthorityPlanningRoute   = "planning_route"
+	AuthorityAutonomousIntent = "autonomous_intent"
+)
+
 type BindingSnapshot struct {
 	LaneKey         string
 	BindingID       string
@@ -79,6 +84,27 @@ type Confirmation struct {
 	ExpectedPresenceToken string `json:"expected_presence_token"`
 }
 
+type AuthorizedCreate struct {
+	ProjectID       int64
+	IssueNumber     int
+	IdempotencyKey  string
+	AuthorityRef    string
+	PlanHash        string
+	ContextHash     string
+	Prompt          string
+	Action          string
+	TargetRole      string
+	LaneKey         string
+	ExpectedHead    string
+	BindingID       string
+	BindingVersion  int64
+	PresenceToken   string
+}
+
+type AutonomousAuthorityChecker interface {
+	CurrentAutonomousDelivery(context.Context, Command) error
+}
+
 type Command struct {
 	ID              string     `json:"id"`
 	ProjectID       int64      `json:"project_id"`
@@ -99,6 +125,8 @@ type Command struct {
 	PresenceToken   string     `json:"-"`
 	TargetKind      string     `json:"target_kind"`
 	TargetRef       string     `json:"target_ref"`
+	AuthorityKind   string     `json:"authority_kind"`
+	AuthorityRef    string     `json:"authority_ref,omitempty"`
 	Status          string     `json:"status"`
 	CreatedAt       time.Time  `json:"created_at"`
 	ExpiresAt       time.Time  `json:"expires_at"`
