@@ -2,6 +2,7 @@ package orchestration_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -79,7 +80,6 @@ func TestFinalizeProvisioningRollsBackOnBindingVersionConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The request was enqueued before this binding existed and therefore carries expected version 0.
 	if _, err := fixture.finalizer.Finalize(context.Background(), fixture.finalizeInput("https://chatgpt.com/g/g-project/repository/c/final-chat")); !errors.Is(err, orchestration.ErrConflict) {
 		t.Fatalf("binding version conflict = %v", err)
 	}
@@ -94,9 +94,7 @@ func TestFinalizeProvisioningRollsBackOnBindingVersionConflict(t *testing.T) {
 }
 
 type finalizeFixture struct {
-	db        interface {
-		ExecContext(context.Context, string, ...any) (sqlResult, error)
-	}
+	db        *sql.DB
 	project   supervisor.Project
 	service   *orchestration.ProvisioningService
 	bindings  *browserbinding.Service
@@ -104,10 +102,6 @@ type finalizeFixture struct {
 	request   orchestration.ProvisionRequest
 	claimed   orchestration.ProvisionRequest
 	target    browserbinding.TargetRef
-}
-
-type sqlResult interface {
-	RowsAffected() (int64, error)
 }
 
 func newFinalizeFixture(t *testing.T, persistedHead string) finalizeFixture {
@@ -172,7 +166,7 @@ func (f finalizeFixture) finalizeInput(observedURL string) orchestration.Finaliz
 	}
 }
 
-func persistFinalizeSnapshot(t *testing.T, db supervisorDB, projectID int64, head string) error {
+func persistFinalizeSnapshot(t *testing.T, db *sql.DB, projectID int64, head string) error {
 	t.Helper()
 	now := time.Now().UTC()
 	return supervisor.NewStore(db).ReplaceSnapshot(context.Background(), projectID, supervisor.RepositorySnapshot{
@@ -189,11 +183,4 @@ func persistFinalizeSnapshot(t *testing.T, db supervisorDB, projectID int64, hea
 			},
 		},
 	})
-}
-
-type supervisorDB interface {
-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
