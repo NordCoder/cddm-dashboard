@@ -53,13 +53,16 @@ function ExecutionEvidence(status: AutopilotStatus): unknown {
     const intent = status.intents.find((value) => value.intent_id === command.intent_id)
     const provision = status.provisioning.find((value) => value.id === command.provision_request_id)
     const results = status.results.filter((value) => value.command_id === command.workflow_command_id)
+    const resultEvidence = results.length === 0
+      ? '—'
+      : h('div', null, ...results.map((result) => h('p', { key: result.github_comment_id }, h('code', null, `comment:${result.github_comment_id}`), h('small', null, ` · ${result.result} / ${result.validation_status}`), result.validation_reason ? h('small', null, ` · ${result.validation_reason}`) : null)))
     return h('tr', { key: command.materialization_id },
       h('td', null, h('code', null, `project:${command.project_id}`), h('small', null, ` · wave ${intent?.wave_id ?? '—'}`)),
       h('td', null, `#${command.issue_number}`, intent?.pr_number ? h('small', null, ` · PR #${intent.pr_number}`) : null, command.expected_head ? h('code', { title: command.expected_head }, ` · ${shortSha(command.expected_head)}`) : null),
       h('td', null, h('code', null, command.intent_id), h('small', null, ` · ${command.role}`), h('code', null, ` · ${command.lane_key}`), h('small', null, ` · lease ${command.lease_id}`)),
       h('td', null, h('code', null, command.provision_request_id), h('small', null, ` · worker ${command.worker_id ?? '—'} / session ${command.worker_session_id ?? '—'} / tab ${command.tab_id ?? '—'}`), h('small', null, ` · binding ${command.binding_id ?? '—'}@${command.binding_version ?? '—'}`), provision?.observed_chatgpt_url ? h('code', { title: provision.observed_chatgpt_url }, ' · observed target') : null),
       h('td', null, h('code', null, command.materialization_id), h('small', null, ` · workflow ${command.workflow_command_id ?? '—'} (${command.workflow_status ?? '—'})`), h('small', null, ` · delivery ${command.delivery_command_id ?? '—'} (${command.delivery_status ?? '—'})`)),
-      h('td', null, results.length === 0 ? '—' : ...results.map((result) => h('p', { key: result.github_comment_id }, h('code', null, `comment:${result.github_comment_id}`), h('small', null, ` · ${result.result} / ${result.validation_status}`), result.validation_reason ? h('small', null, ` · ${result.validation_reason}`) : null))),
+      h('td', null, resultEvidence),
     )
   })
   const mergeRows = status.merge_cycles.map((cycle) => {
