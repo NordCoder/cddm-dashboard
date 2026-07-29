@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-const commandSelect = `SELECT id,project_id,issue_number,plan_id,plan_hash,context_hash,prompt_hash,prompt_text,action,target_role,lane_key,expected_head,binding_id,binding_version,worker_id,worker_session_id,presence_token,target_kind,target_ref,status,created_at,expires_at,claimed_at,claim_deadline_at,claim_id,claim_request_id,terminal_at,outcome_reason,outcome_evidence FROM delivery_commands`
+const commandSelect = `SELECT id,project_id,issue_number,plan_id,plan_hash,context_hash,prompt_hash,prompt_text,action,target_role,lane_key,expected_head,binding_id,binding_version,worker_id,worker_session_id,presence_token,target_kind,target_ref,authority_kind,authority_ref,status,created_at,expires_at,claimed_at,claim_deadline_at,claim_id,claim_request_id,terminal_at,outcome_reason,outcome_evidence FROM delivery_commands`
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanCommand(row rowScanner, command *Command) error {
 	var created, expires, claimed, deadline, terminal string
-	if err := row.Scan(&command.ID, &command.ProjectID, &command.IssueNumber, &command.PlanID, &command.PlanHash, &command.ContextHash, &command.PromptHash, &command.Prompt, &command.Action, &command.TargetRole, &command.LaneKey, &command.ExpectedHead, &command.BindingID, &command.BindingVersion, &command.WorkerID, &command.WorkerSessionID, &command.PresenceToken, &command.TargetKind, &command.TargetRef, &command.Status, &created, &expires, &claimed, &deadline, &command.ClaimID, &command.ClaimRequestID, &terminal, &command.OutcomeReason, &command.OutcomeEvidence); err != nil {
+	if err := row.Scan(&command.ID, &command.ProjectID, &command.IssueNumber, &command.PlanID, &command.PlanHash, &command.ContextHash, &command.PromptHash, &command.Prompt, &command.Action, &command.TargetRole, &command.LaneKey, &command.ExpectedHead, &command.BindingID, &command.BindingVersion, &command.WorkerID, &command.WorkerSessionID, &command.PresenceToken, &command.TargetKind, &command.TargetRef, &command.AuthorityKind, &command.AuthorityRef, &command.Status, &created, &expires, &claimed, &deadline, &command.ClaimID, &command.ClaimRequestID, &terminal, &command.OutcomeReason, &command.OutcomeEvidence); err != nil {
 		return err
 	}
 	var err error
