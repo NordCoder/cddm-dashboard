@@ -66,9 +66,64 @@ A Work Unit exposes independent logical bindings:
 3. Select the live target for the required role.
 4. Choose **Bind** or **Rebind**.
 
-The UI never accepts a free-text ChatGPT URL. The extension remembers the exact activated tab for the browser session and revalidates the same tab ID and URL. Closing, navigating, restarting, conflicting extension sessions, or presence timeout makes the binding unavailable until freshness is proved again.
+The UI never accepts a free-text ChatGPT conversation URL. The extension remembers the exact activated tab for the browser session and revalidates the same tab ID and URL. Closing, navigating, restarting, conflicting extension sessions, or presence timeout makes the binding unavailable until freshness is proved again.
 
 QA uses `manual_fresh_binding`. Keep QA unbound until the current route requires fresh QA, then open and bind a new QA conversation. After an accepted terminal QA result, the exact binding/version captured by the delivery command is retired. A newer replacement version is not retired.
+
+## Automatic role-session provisioning
+
+M11 adds a separate provisioning path for the continuous profile. It does not replace the existing manual binding flow and it does not create or deliver a normal Workflow Command.
+
+Configure the exact ChatGPT Project page in the Project autonomy profile when repository-scoped chats are required. An empty `chatgpt_project_url` creates a global ChatGPT conversation. A configured value must be an exact credential-free `https://chatgpt.com/...` Project page URL without query, fragment or conversation suffix.
+
+The durable lifecycle is:
+
+```text
+active M10 lane lease
+→ pending provisioning request
+→ extension claim
+→ exact inactive ChatGPT creation tab
+→ surface_ready
+→ exact ordered Library attachments
+→ bootstrap-only send
+→ exact global/Project conversation URL
+→ live managed worker registration
+→ atomic current-Head validation + role binding + provisioned
+```
+
+The fixed `cddm-dashboard-resources/v2.0` bootstrap profiles are:
+
+```text
+Lead:        01-lead-trigger.md + gpt-gh-connector-guidelines.md
+Implementor: 02-implementor-trigger.md + gpt-gh-connector-guidelines.md
+QA:          03-qa-trigger.md + gpt-gh-connector-guidelines.md
+```
+
+Each Library filename is NFC-normalized and matched as a complete filename. Missing, partial or duplicate matches fail before send. After every selection, the content script verifies the exact selected attachment chip and finally verifies ordered chip evidence against the frozen backend profile.
+
+Bootstrap contains initialization only and instructs the worker to wait for a normal Workflow Command. It is not assignment authority.
+
+The extension persists these bootstrap phases:
+
+```text
+not_started → send_reserved → sent → target_observed → provisioned
+```
+
+`send_reserved` is written before the click. A service-worker restart in that phase becomes terminal `uncertain`; it never replays the bootstrap. After `sent`, restart recovery may only observe the conversation URL, re-register the exact target and retry backend finalization.
+
+Session policy:
+
+- a healthy Project Lead conversation may be reused without another bootstrap;
+- every Implementor Intent receives a fresh conversation;
+- every QA Intent receives a fresh conversation and remains exact-Head bound;
+- successful fresh-role rotation supersedes prior same-scope provisioning evidence and disables its old binding atomically;
+- tab closure, Project-scope drift, stale Head, changed lease or binding-version conflict fails closed.
+
+The backend finalization transaction revalidates the current provisioning request, active lease, claimed Intent, synchronized Issue/PR, exact Candidate Head, Project URL, live worker target, attachment evidence and expected binding version. Only that transaction may set `status=provisioned`.
+
+Operator reads expose queue status, completion reason, attachment evidence, observed ChatGPT URL and bound binding ID/version. No ChatGPT response content is stored.
+
+The ChatGPT DOM and Library UI are external surfaces. Repository tests prove the fail-closed matching and restart behavior, but a disposable live smoke is still required after ChatGPT UI changes or before integrating the stacked M11 chain.
 
 ## Reviewed delivery
 
@@ -113,6 +168,6 @@ Historical `/plans/:planID` screens never perform current workflow actions. Manu
 
 ## Worker completion
 
-The extension does not inspect the ChatGPT response. The worker publishes one GitHub Issue comment containing at most one `cddm-worker-result/v1` marker with the originating `command_id`. Dashboard synchronization validates and correlates that marker, verifies consequential GitHub facts, and derives the next route.
+The extension does not inspect the ChatGPT response. The worker publishes one GitHub Issue comment containing at most one version-compatible worker-result marker with the originating `command_id`. Dashboard synchronization validates and correlates that marker, verifies consequential GitHub facts, and derives the next route.
 
 See [Dashboard worker loop](worker-loop.md) and [Controlled pilot guide](pilot-guide.md).
