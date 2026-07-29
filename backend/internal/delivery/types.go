@@ -19,6 +19,11 @@ const (
 	StatusInvalidated = "invalidated"
 )
 
+const (
+	AuthorityPlanningRoute    = "planning_route"
+	AuthorityAutonomousIntent = "autonomous_intent"
+)
+
 type BindingSnapshot struct {
 	LaneKey         string
 	BindingID       string
@@ -99,6 +104,8 @@ type Command struct {
 	PresenceToken   string     `json:"-"`
 	TargetKind      string     `json:"target_kind"`
 	TargetRef       string     `json:"target_ref"`
+	AuthorityKind   string     `json:"authority_kind"`
+	AuthorityRef    string     `json:"authority_ref,omitempty"`
 	Status          string     `json:"status"`
 	CreatedAt       time.Time  `json:"created_at"`
 	ExpiresAt       time.Time  `json:"expires_at"`
@@ -116,11 +123,13 @@ type ClaimRequest struct {
 	WorkerSessionID string `json:"worker_session_id"`
 	ClaimRequestID  string `json:"claim_request_id"`
 }
+
 type Execution struct {
 	Command Command `json:"command"`
 	ClaimID string  `json:"claim_id"`
 	Prompt  string  `json:"prompt"`
 }
+
 type Completion struct {
 	CommandID string `json:"command_id,omitempty"`
 	ClaimID   string `json:"claim_id"`

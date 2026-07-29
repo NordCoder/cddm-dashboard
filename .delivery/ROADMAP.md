@@ -56,13 +56,18 @@ M11 is implemented as a stacked Candidate chain on the exact M10-C3 Candidate. I
 
 M11 ends with a verified exact ChatGPT session registered and bound to the intended role lane. It does not materialize Workflow Commands, deliver the normal assignment prompt or merge code.
 
-## Planned autonomous execution
+## Active — M12 Continuous Autopilot
 
-1. **M12 — Continuous Autopilot**
-   - automatic command materialization;
-   - Lead merge cycle and read-back;
-   - operations UI, pause/stop and circuit breakers;
-   - restart, duplicate, stale-Head and multi-Issue soak verification.
+M12 is stacked on the exact M11-C3 Candidate and remains unmergeable until the complete M9–M11 dependency chain is independently approved and integrated.
+
+| Change | Outcome | State |
+| --- | --- | --- |
+| #82 | Claimed Intent → deterministic v2 Prompt Plan → immutable Workflow Command → existing Browser Delivery/result lifecycle | Draft PR #99 — implementation verification |
+| #83 | Serialized Lead merge command, exact `merged` read-back and one next-Wave planning Intent | Backlog — depends on #82 |
+| #84 | Autopilot operator controls, status projection and fail-closed circuit breakers | Backlog — depends on #83 |
+| #85 | Restart, duplicate, stale-Head and multi-Issue continuous-loop soak verification | Backlog — depends on #84 |
+
+M12 preserves direct Dashboard merge as disabled. Lead performs merge through a command-bound worker session; Dashboard independently reads back consequential GitHub facts.
 
 ## Current worker-loop outcome
 
@@ -77,7 +82,7 @@ GitHub facts
 → Dashboard derives the next route
 ```
 
-The local/private v1 build remains pilot-ready when the diagnostic endpoint reports `pilot_ready`. M9–M11 additions remain inert unless the exact continuous profile is configured and their stacked Changes are present.
+The local/private v1 build remains pilot-ready when the diagnostic endpoint reports `pilot_ready`. M9–M12 additions remain inert unless the exact continuous profile is configured and their stacked Changes are present.
 
 ## Durable boundaries
 

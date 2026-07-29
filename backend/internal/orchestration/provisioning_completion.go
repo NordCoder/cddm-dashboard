@@ -166,12 +166,15 @@ func randomProvisionToken() string {
 }
 
 func sameProvisionIdentity(left, right ProvisionRequest) bool {
+	bindingVersionMatches := left.ExpectedBindingVersion == right.ExpectedBindingVersion
+	if left.Status == ProvisionProvisioned && left.BoundBindingVersion == right.ExpectedBindingVersion {
+		bindingVersionMatches = true
+	}
 	return left.ID == right.ID && left.ProjectID == right.ProjectID && left.IntentID == right.IntentID &&
 		left.LaneLeaseID == right.LaneLeaseID && left.LaneKey == right.LaneKey && left.IssueNumber == right.IssueNumber &&
 		left.Role == right.Role && left.ExpectedHead == right.ExpectedHead && left.AttachmentProfile == right.AttachmentProfile &&
 		equalProvisionStrings(left.Attachments, right.Attachments) && left.BootstrapText == right.BootstrapText &&
-		left.SessionPolicy == right.SessionPolicy && left.ChatGPTProjectURL == right.ChatGPTProjectURL &&
-		left.ExpectedBindingVersion == right.ExpectedBindingVersion
+		left.SessionPolicy == right.SessionPolicy && left.ChatGPTProjectURL == right.ChatGPTProjectURL && bindingVersionMatches
 }
 
 func validProvisionOutcome(value string) bool {
