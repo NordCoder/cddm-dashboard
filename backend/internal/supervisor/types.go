@@ -50,21 +50,18 @@ type CISummary struct {
 }
 
 type PullRequest struct {
-	GitHubID       int64      `json:"github_id"`
-	Number         int        `json:"number"`
-	Title          string     `json:"title"`
-	State          string     `json:"state"`
-	Draft          bool       `json:"draft"`
-	MergeableState string     `json:"mergeable_state,omitempty"`
-	BaseRef        string     `json:"base_ref"`
-	HeadRef        string     `json:"head_ref"`
-	HeadSHA        string     `json:"head_sha"`
-	Merged         bool       `json:"merged"`
-	MergeCommitSHA string     `json:"merge_commit_sha,omitempty"`
-	MergedAt       *time.Time `json:"merged_at,omitempty"`
-	URL            string     `json:"url"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	CI             CISummary  `json:"ci"`
+	GitHubID       int64     `json:"github_id"`
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	State          string    `json:"state"`
+	Draft          bool      `json:"draft"`
+	MergeableState string    `json:"mergeable_state,omitempty"`
+	BaseRef        string    `json:"base_ref"`
+	HeadRef        string    `json:"head_ref"`
+	HeadSHA        string    `json:"head_sha"`
+	URL            string    `json:"url"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	CI             CISummary `json:"ci"`
 }
 
 type Issue struct {
