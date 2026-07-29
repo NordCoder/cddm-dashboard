@@ -67,7 +67,7 @@ func TestAutopilotMaterializesOneCommandAndCompletesExactLease(t *testing.T) {
 	if _, err := bindings.Register(ctx, browserbinding.RegisterInput{
 		WorkerID: "autopilot-worker", SessionID: "autopilot-session", ProtocolVersion: "m12-c1",
 		Capabilities: []string{"managed_exact_tab", "library_bootstrap"},
-		Observation: browserbinding.Observation{Target: &target},
+		Observation:  browserbinding.Observation{Target: &target},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +89,9 @@ func TestAutopilotMaterializesOneCommandAndCompletesExactLease(t *testing.T) {
 	plan := planning.GenerationResult{
 		Status: planning.StatusFallback, PlanID: 41, CreatedAt: time.Now().UTC(),
 		Context: planning.PromptContext{
-			Version: planning.PromptContextVersion,
-			Repository: planning.RepositoryIdentity{ProjectID: project.ID, Owner: "NordCoder", Repository: "app", WorkflowMode: "pull_request"},
-			Issue: planning.IssueIdentity{Number: 101, Title: "Candidate", Lifecycle: "implementation"},
+			Version:     planning.PromptContextVersion,
+			Repository:  planning.RepositoryIdentity{ProjectID: project.ID, Owner: "NordCoder", Repository: "app", WorkflowMode: "pull_request"},
+			Issue:       planning.IssueIdentity{Number: 101, Title: "Candidate", Lifecycle: "implementation"},
 			CurrentHead: testHead, ContextHash: "autopilot-context",
 			Route: workflow.Route{Action: "dispatch", TargetRole: "implementor", LaneKey: canonicalLane, ExpectedHead: testHead},
 		},
