@@ -78,9 +78,8 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initialize session provisioning: %w", err)
 	}
-	materializer := orchestration.NewMaterializer(orchestrationStore)
+	actionMaterializer := orchestration.NewMaterializer(orchestrationStore)
 	workerResultService := workerloop.NewService(workerStore)
-	workerResultService.SetResultMaterializer(materializer)
 	workerStateService := workerloop.NewStateService(store, workerStore)
 	qaBindingRetirer := workerloop.NewQABindingRetirer(db)
 	syncService := supervisor.NewService(store, client, cfg.GitHubSyncTimeout, cfg.GitHubMaxSyncConcurrency)
@@ -139,7 +138,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initialize Autopilot: %w", err)
 	}
-	materializer.SetCommandResultReconciler(autopilot)
+	workerResultService.SetResultMaterializer(orchestration.NewResultMaterializationPipeline(autopilot, actionMaterializer))
 	if err := deliveryService.Reconcile(startupContext); err != nil {
 		return fmt.Errorf("reconcile browser and workflow commands: %w", err)
 	}
