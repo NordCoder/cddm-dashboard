@@ -12,7 +12,7 @@ const base = {
     max_active_work_units: 3, max_parallel_implementors: 2, max_parallel_qa: 1, chatgpt_project_url: 'https://chatgpt.com/g/g-project/app', updated_at: timestamp,
   },
   control: { project_id: 1, revision: 4, last_action: 'resume', updated_at: timestamp },
-  queue: [], active_leases: [], provisioning: [], commands: [], circuit_breakers: [], warnings: [], merge_cycles: [],
+  intents: [], queue: [], leases: [], active_leases: [], provisioning: [], commands: [], results: [], circuit_breakers: [], warnings: [], merge_cycles: [],
   counts: { pending_intents: 0, blocked_intents: 0, claimed_intents: 0, active_leases: 0, pending_provisioning: 0, managed_sessions: 0, active_commands: 0, active_circuit_breakers: 0, ambiguous_records: 0 },
   lead_busy: false, next_action: 'No automatic work is queued.', generated_at: timestamp,
 }
@@ -21,7 +21,7 @@ test('parses Autopilot operations projection', () => {
   const parsed = parseAutopilotStatus(base)
   assert.equal(parsed.control.revision, 4)
   assert.equal(parsed.profile.autonomy_state, 'enabled')
-  assert.deepEqual(parsed.merge_cycles, [])
+  assert.deepEqual(parsed.results, [])
 })
 
 test('accepts the exact disabled manual profile without inventing a Control Issue', () => {
