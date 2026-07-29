@@ -68,9 +68,7 @@ CREATE TABLE workflow_intents (
     status TEXT NOT NULL CHECK (status IN ('pending','blocked','claimed','completed','superseded','rejected','ambiguous')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE (project_id, source_command_id, action_id),
-    FOREIGN KEY (project_id, source_result_comment_id)
-        REFERENCES workflow_results(project_id, github_comment_id) ON DELETE CASCADE
+    UNIQUE (project_id, source_command_id, action_id)
 );
 
 CREATE INDEX workflow_intents_status_idx
