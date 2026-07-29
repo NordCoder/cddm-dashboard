@@ -1,12 +1,3 @@
-ALTER TABLE github_pull_requests
-    ADD COLUMN merged INTEGER NOT NULL DEFAULT 0 CHECK (merged IN (0, 1));
-
-ALTER TABLE github_pull_requests
-    ADD COLUMN merge_commit_sha TEXT NOT NULL DEFAULT '';
-
-ALTER TABLE github_pull_requests
-    ADD COLUMN merged_at TEXT NOT NULL DEFAULT '';
-
 ALTER TABLE workflow_wave_issues
     ADD COLUMN status TEXT NOT NULL DEFAULT 'planned'
         CHECK (status IN ('planned','active','done','blocked','superseded'));
