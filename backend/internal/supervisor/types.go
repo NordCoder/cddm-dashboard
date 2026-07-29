@@ -65,7 +65,7 @@ type PullRequest struct {
 }
 
 type MergeFacts struct {
-	Repository    string
+	Repository   string
 	IssueNumber  int
 	IssueState   string
 	IssueLabels  []string
