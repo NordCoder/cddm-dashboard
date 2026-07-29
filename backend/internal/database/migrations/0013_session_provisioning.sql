@@ -16,7 +16,7 @@ CREATE TABLE session_provision_requests (
     session_policy TEXT NOT NULL CHECK (session_policy IN ('persistent_project_lead','fresh_per_intent')),
     chatgpt_project_url TEXT NOT NULL DEFAULT '',
     expected_binding_version INTEGER NOT NULL DEFAULT 0 CHECK (expected_binding_version >= 0),
-    status TEXT NOT NULL CHECK (status IN ('pending','claimed','provisioned','safe_failed','uncertain','superseded')),
+    status TEXT NOT NULL CHECK (status IN ('pending','claimed','surface_ready','provisioned','safe_failed','uncertain','superseded')),
     claim_id TEXT NOT NULL DEFAULT '',
     claim_owner TEXT NOT NULL DEFAULT '',
     claim_token TEXT NOT NULL DEFAULT '',
