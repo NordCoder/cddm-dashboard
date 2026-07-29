@@ -92,7 +92,7 @@ func (c *Client) Snapshot(ctx context.Context, owner, repository string) (superv
 		return supervisor.RepositorySnapshot{}, fmt.Errorf("owner and repository are required")
 	}
 
-	issues, err := c.listIssues(ctx, owner, repository)
+	issues, err := c.listRecentIssues(ctx, owner, repository)
 	if err != nil {
 		return supervisor.RepositorySnapshot{}, err
 	}

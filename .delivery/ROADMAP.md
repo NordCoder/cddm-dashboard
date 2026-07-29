@@ -62,8 +62,8 @@ M12 is stacked on the exact M11-C3 Candidate and remains unmergeable until the c
 
 | Change | Outcome | State |
 | --- | --- | --- |
-| #82 | Claimed Intent → deterministic v2 Prompt Plan → immutable Workflow Command → existing Browser Delivery/result lifecycle | Draft PR #99 — implementation verification |
-| #83 | Serialized Lead merge command, exact `merged` read-back and one next-Wave planning Intent | Backlog — depends on #82 |
+| #82 | Claimed Intent → deterministic v2 Prompt Plan → immutable Workflow Command → existing Browser Delivery/result lifecycle | Draft PR #99 — QA pending |
+| #83 | Serialized Lead merge command, exact `merged` read-back and one next-Wave planning Intent | Stacked draft PR #100 — QA pending |
 | #84 | Autopilot operator controls, status projection and fail-closed circuit breakers | Backlog — depends on #83 |
 | #85 | Restart, duplicate, stale-Head and multi-Issue continuous-loop soak verification | Backlog — depends on #84 |
 

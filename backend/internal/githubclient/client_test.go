@@ -95,8 +95,13 @@ func TestSnapshotPaginatesAndBuildsNormalizedIssueState(t *testing.T) {
 	mu.Lock()
 	joined := strings.Join(requestedPages, "\n")
 	mu.Unlock()
-	if !strings.Contains(joined, "/issues?state=open&per_page=100&page=2") {
-		t.Fatalf("second issue page was not requested:\n%s", joined)
+	for _, expected := range []string{
+		"/issues?state=open&per_page=100&page=2",
+		"/issues?state=closed&sort=updated&direction=desc&per_page=100&page=2",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected Issue page %q was not requested:\n%s", expected, joined)
+		}
 	}
 }
 

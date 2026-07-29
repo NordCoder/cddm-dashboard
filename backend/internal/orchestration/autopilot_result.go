@@ -19,6 +19,16 @@ func (e *AutopilotEngine) ReconcileCommandResult(ctx context.Context, command wo
 	if err != nil {
 		return err
 	}
+	intent, err := e.store.Intent(ctx, value.IntentID)
+	if err != nil {
+		return err
+	}
+	// M12-C1 owns only dispatch/correction completion. Typed merge and
+	// next-Wave results are owned by MergeAutopilot, including their blocked and
+	// ambiguous terminal states.
+	if intent.ActionType != ActionDispatch && intent.ActionType != ActionCorrect {
+		return nil
+	}
 	if value.Status == AutonomousMaterializationCompleted {
 		return nil
 	}
@@ -28,9 +38,6 @@ func (e *AutopilotEngine) ReconcileCommandResult(ctx context.Context, command wo
 	if result.ValidationStatus != workerloop.ValidationAccepted {
 		_, err := e.store.db.ExecContext(ctx, `UPDATE autonomous_command_materializations SET status='ambiguous',reason_code=?,updated_at=? WHERE id=? AND status='materialized'`, result.ValidationReason, stamp(e.now()), value.ID)
 		return err
-	}
-	if payload.Role == "lead" && payload.Result == "merged" {
-		return nil
 	}
 	lease, err := e.scheduler.Lease(ctx, value.ProjectID, value.LeaseID)
 	if err != nil {

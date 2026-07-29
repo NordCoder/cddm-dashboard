@@ -18,8 +18,8 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 15 {
-		t.Fatalf("user_version = %d, want 15", version)
+	if version != 16 {
+		t.Fatalf("user_version = %d, want 16", version)
 	}
 
 	for _, table := range []string{
@@ -28,7 +28,7 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 		"browser_workers", "browser_lane_bindings", "delivery_commands",
 		"workflow_commands", "workflow_results", "workflow_delivery_links", "project_execution_profiles",
 		"workflow_intents", "workflow_waves", "workflow_wave_issues", "workflow_materializations", "workflow_lane_leases",
-		"session_provision_requests", "autonomous_command_materializations",
+		"session_provision_requests", "autonomous_command_materializations", "merge_cycle_readbacks",
 	} {
 		var name string
 		if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
@@ -57,6 +57,18 @@ func TestOpenCreatesDatabaseAndAppliesMigrations(t *testing.T) {
 			t.Fatalf("read delivery_commands.%s: %v", column, err)
 		}
 	}
+	for _, column := range []string{"status", "merge_commit_sha", "completed_at"} {
+		var name string
+		if err := db.QueryRow(`SELECT name FROM pragma_table_info('workflow_wave_issues') WHERE name = ?`, column).Scan(&name); err != nil {
+			t.Fatalf("read workflow_wave_issues.%s: %v", column, err)
+		}
+	}
+	for _, column := range []string{"expected_base_ref", "reported_merge_commit", "observed_merge_commit", "verified_at"} {
+		var name string
+		if err := db.QueryRow(`SELECT name FROM pragma_table_info('merge_cycle_readbacks') WHERE name = ?`, column).Scan(&name); err != nil {
+			t.Fatalf("read merge_cycle_readbacks.%s: %v", column, err)
+		}
+	}
 }
 
 func TestOpenIsIdempotent(t *testing.T) {
@@ -78,7 +90,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	if err := second.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 15 {
-		t.Fatalf("migration count = %d, want 15", count)
+	if count != 16 {
+		t.Fatalf("migration count = %d, want 16", count)
 	}
 }

@@ -64,6 +64,20 @@ type PullRequest struct {
 	CI             CISummary `json:"ci"`
 }
 
+type MergeFacts struct {
+	Repository   string
+	IssueNumber  int
+	IssueState   string
+	IssueLabels  []string
+	PRNumber     int
+	PRState      string
+	Merged       bool
+	ApprovedHead string
+	BaseRef      string
+	MergeCommit  string
+	MergedAt     *time.Time
+}
+
 type Issue struct {
 	GitHubID     int64         `json:"github_id"`
 	Number       int           `json:"number"`

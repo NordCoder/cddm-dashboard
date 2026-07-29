@@ -140,8 +140,10 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 				return dispatchRoute(project, state, "lead", "lead_continue", "Lead requested another bounded Lead turn")
 			case "correct":
 				return dispatchRoute(project, state, "implementor", "lead_correction", "Lead bounded a correction for the existing Change")
+			case "actions_ready":
+				return dispatchRoute(project, state, "lead", "lead_actions_materialized", "Lead action batch was accepted and materialized; continue the serialized Lead lane when another Lead Intent is scheduled")
 			case "ready_to_merge":
-				return mergeGateRoute(state)
+				return mergeGateRoute(project, state)
 			}
 		} else if latest.ResumeRole != "" && oneOf(latest.Decision, "continue", "correct", "resume") {
 			if !leadResumeRoleAllowed(latest.ResumeRole) {
@@ -153,19 +155,20 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 	return manualLeadRoute(project, state, "unhandled_terminal_result", "terminal result is preserved but has no safe automatic route")
 }
 
-func mergeGateRoute(state WorkUnitState) Route {
+func mergeGateRoute(project ProjectIdentity, state WorkUnitState) Route {
 	guards := append(guardsForHead(state.CurrentHead), "ci_success", "qa_approved_current_head", "candidate_mergeable", "no_active_blocker", "manual_merge_authority")
+	leadLane := laneKey(project, state.Identity.IssueNumber, "lead")
 	if state.Candidate.Current == nil || state.CurrentHead == "" {
-		return Route{Action: "manual_attention", TargetRole: "lead", ReasonCode: "merge_gate_missing_candidate", Reason: "Lead requested merge review without one current Candidate", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
+		return Route{Action: "manual_attention", TargetRole: "lead", LaneKey: leadLane, ReasonCode: "merge_gate_missing_candidate", Reason: "Lead requested merge review without one current Candidate", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
 	}
 	if !ciSucceeded(state.CI) || state.QAApprovedHead != state.CurrentHead || state.ActiveBlocker != nil {
-		return Route{Action: "manual_attention", TargetRole: "lead", ReasonCode: "merge_gate_incomplete", Reason: "Lead requested merge review but exact-Candidate CI, fresh QA or blocker gates are incomplete", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
+		return Route{Action: "manual_attention", TargetRole: "lead", LaneKey: leadLane, ReasonCode: "merge_gate_incomplete", Reason: "Lead requested merge review but exact-Candidate CI, fresh QA or blocker gates are incomplete", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
 	}
 	mergeable := normalizeToken(state.Candidate.Current.MergeableState)
 	if mergeable != "clean" && mergeable != "mergeable" && mergeable != "unstable" {
-		return Route{Action: "manual_attention", TargetRole: "lead", ReasonCode: "merge_gate_not_mergeable", Reason: "current primary PR is not known mergeable", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
+		return Route{Action: "manual_attention", TargetRole: "lead", LaneKey: leadLane, ReasonCode: "merge_gate_not_mergeable", Reason: "current primary PR is not known mergeable", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
 	}
-	return Route{Action: "merge_gate", TargetRole: "lead", ReasonCode: "ready_to_merge_verification", Reason: "all observable merge gates are satisfied; merge still requires explicit Lead authority and expected-Head protection", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
+	return Route{Action: "merge_gate", TargetRole: "lead", LaneKey: leadLane, ReasonCode: "ready_to_merge_verification", Reason: "all observable merge gates are satisfied; merge still requires explicit Lead authority and expected-Head protection", ExpectedHead: state.CurrentHead, Guards: guards, Warnings: state.Warnings}
 }
 
 func dispatchRoute(project ProjectIdentity, state WorkUnitState, role, code, reason string) Route {
