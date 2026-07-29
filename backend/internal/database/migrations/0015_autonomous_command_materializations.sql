@@ -12,6 +12,7 @@ CREATE TABLE autonomous_command_materializations (
     provision_request_id TEXT NOT NULL,
     scheduler_lane_key TEXT NOT NULL,
     delivery_lane_key TEXT NOT NULL DEFAULT '',
+    plan_id INTEGER NOT NULL DEFAULT 0 CHECK (plan_id >= 0),
     status TEXT NOT NULL CHECK (status IN ('pending','materialized','completed','blocked','superseded','ambiguous')),
     reason_code TEXT NOT NULL DEFAULT '',
     workflow_command_id TEXT NOT NULL DEFAULT '',
