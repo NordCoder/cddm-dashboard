@@ -33,7 +33,6 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 	if err != nil {
 		return AutopilotStatus{}, err
 	}
-
 	intents, err := s.store.ListIntents(ctx, projectID, "")
 	if err != nil {
 		return AutopilotStatus{}, err
@@ -54,6 +53,10 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 	if err != nil {
 		return AutopilotStatus{}, err
 	}
+	results, err := s.listResults(ctx, projectID)
+	if err != nil {
+		return AutopilotStatus{}, err
+	}
 	warnings, err := s.listWarnings(ctx, projectID)
 	if err != nil {
 		return AutopilotStatus{}, err
@@ -64,17 +67,20 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 	}
 
 	activeLanes := make(map[string]bool)
-	activeLeases := make([]Lease, 0)
+	allLeases := make([]LeaseProjection, 0, len(leases))
+	activeLeases := make([]LeaseProjection, 0)
 	intentByID := make(map[string]Intent, len(intents))
 	for _, intent := range intents {
 		intentByID[intent.ID] = intent
 	}
 	leadBusy := false
 	for _, lease := range leases {
+		projected := projectLease(lease)
+		allLeases = append(allLeases, projected)
 		if lease.Status != LeaseActive {
 			continue
 		}
-		activeLeases = append(activeLeases, lease)
+		activeLeases = append(activeLeases, projected)
 		activeLanes[lease.LaneKey] = true
 		if intentByID[lease.IntentID].Role == "lead" {
 			leadBusy = true
@@ -116,18 +122,18 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 		queue = append(queue, AutopilotQueueItem{Intent: intent, WaitingReason: waitingReason(intent, profile, projectBreaker, breakerLanes, activeLanes)})
 	}
 	for _, request := range provisioning {
-		if request.Status == "pending" || request.Status == "claimed" || request.Status == "surface_ready" {
+		if request.Status == ProvisionPending || request.Status == ProvisionClaimed || request.Status == ProvisionSurfaceReady {
 			counts.PendingProvisioning++
 		}
-		if request.Status == "provisioned" {
+		if request.Status == ProvisionProvisioned {
 			counts.ManagedSessions++
 		}
 	}
 	for _, command := range commands {
-		if command.Status == "pending" || command.Status == "materialized" || command.WorkflowStatus == "created" || command.WorkflowStatus == "delivery_pending" || command.WorkflowStatus == "awaiting_result" {
+		if command.Status == AutonomousMaterializationPending || command.Status == AutonomousMaterializationMaterialized || command.WorkflowStatus == "created" || command.WorkflowStatus == "delivery_pending" || command.WorkflowStatus == "awaiting_result" {
 			counts.ActiveCommands++
 		}
-		if command.Status == "ambiguous" || command.WorkflowStatus == "ambiguous" || command.DeliveryStatus == "uncertain" {
+		if command.Status == AutonomousMaterializationAmbiguous || command.WorkflowStatus == "ambiguous" || command.DeliveryStatus == "uncertain" {
 			counts.AmbiguousRecords++
 		}
 	}
@@ -140,13 +146,21 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 
 	status := AutopilotStatus{
 		ProjectID: projectID, Repository: owner + "/" + repository, SyncStatus: syncStatus, SyncError: syncError,
-		Profile: profile, Control: control, ActiveWave: activeWave, Queue: queue, ActiveLeases: activeLeases,
-		Provisioning: provisioning, Commands: commands, CircuitBreakers: breakers, Warnings: warnings,
-		MergeCycles: mergeCycles, Counts: counts, ProjectHoldReason: projectHoldReason, LeadBusy: leadBusy,
-		GeneratedAt: s.store.now().UTC(),
+		Profile: profile, Control: control, ActiveWave: activeWave, Intents: intents, Queue: queue,
+		Leases: allLeases, ActiveLeases: activeLeases, Provisioning: provisioning, Commands: commands, Results: results,
+		CircuitBreakers: breakers, Warnings: warnings, MergeCycles: mergeCycles, Counts: counts,
+		ProjectHoldReason: projectHoldReason, LeadBusy: leadBusy, GeneratedAt: s.store.now().UTC(),
 	}
 	status.NextAction = nextAutopilotAction(status)
 	return status, nil
+}
+
+func projectLease(value Lease) LeaseProjection {
+	return LeaseProjection{
+		ID: value.ID, ProjectID: value.ProjectID, LaneKey: value.LaneKey, IntentID: value.IntentID,
+		ClaimID: value.ClaimID, LeaseOwner: value.LeaseOwner, Status: value.Status,
+		AcquiredAt: value.AcquiredAt, ExpiresAt: value.ExpiresAt, ReleasedAt: value.ReleasedAt,
+	}
 }
 
 func (s *OperationsService) activeWave(ctx context.Context, projectID int64) (*Wave, error) {
@@ -260,7 +274,11 @@ func (s *OperationsService) listBreakers(ctx context.Context, projectID int64) (
 }
 
 func (s *OperationsService) listProvisioning(ctx context.Context, projectID int64) ([]ProvisioningProjection, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id,intent_id,lane_key,issue_number,role,expected_head,status,completion_reason,worker_id,tab_id,observed_chatgpt_url,bound_binding_id,bound_binding_version,created_at,updated_at FROM session_provision_requests WHERE project_id=? ORDER BY created_at DESC,id`, projectID)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT p.id,p.project_id,p.intent_id,p.lane_lease_id,p.lane_key,p.issue_number,p.role,p.expected_head,p.status,p.completion_reason,p.worker_id,COALESCE(d.worker_session_id,''),p.tab_id,p.observed_chatgpt_url,p.bound_binding_id,p.bound_binding_version,p.created_at,p.updated_at
+		FROM session_provision_requests p
+		LEFT JOIN autonomous_command_materializations m ON m.project_id=p.project_id AND m.provision_request_id=p.id
+		LEFT JOIN delivery_commands d ON d.id=m.delivery_command_id
+		WHERE p.project_id=? ORDER BY p.created_at DESC,p.id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +287,7 @@ func (s *OperationsService) listProvisioning(ctx context.Context, projectID int6
 	for rows.Next() {
 		var value ProvisioningProjection
 		var created, updated string
-		if err := rows.Scan(&value.ID, &value.IntentID, &value.LaneKey, &value.IssueNumber, &value.Role, &value.ExpectedHead, &value.Status, &value.CompletionReason, &value.WorkerID, &value.TabID, &value.ObservedChatGPTURL, &value.BoundBindingID, &value.BoundBindingVersion, &created, &updated); err != nil {
+		if err := rows.Scan(&value.ID, &value.ProjectID, &value.IntentID, &value.LeaseID, &value.LaneKey, &value.IssueNumber, &value.Role, &value.ExpectedHead, &value.Status, &value.CompletionReason, &value.WorkerID, &value.WorkerSessionID, &value.TabID, &value.ObservedChatGPTURL, &value.BoundBindingID, &value.BoundBindingVersion, &created, &updated); err != nil {
 			return nil, err
 		}
 		var parseErr error
@@ -285,7 +303,13 @@ func (s *OperationsService) listProvisioning(ctx context.Context, projectID int6
 }
 
 func (s *OperationsService) listCommands(ctx context.Context, projectID int64) ([]CommandProjection, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT m.id,m.intent_id,m.lease_id,m.scheduler_lane_key,m.status,m.reason_code,m.workflow_command_id,COALESCE(w.status,''),m.delivery_command_id,COALESCE(d.status,''),m.context_hash,m.prompt_hash,m.updated_at FROM autonomous_command_materializations m LEFT JOIN workflow_commands w ON w.id=m.workflow_command_id LEFT JOIN delivery_commands d ON d.id=m.delivery_command_id WHERE m.project_id=? ORDER BY m.created_at DESC,m.id`, projectID)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT m.project_id,m.id,m.intent_id,m.lease_id,m.provision_request_id,m.scheduler_lane_key,i.issue_number,i.role,COALESCE(p.expected_head,i.expected_head,''),m.status,m.reason_code,m.workflow_command_id,COALESCE(w.status,''),m.delivery_command_id,COALESCE(d.status,''),COALESCE(p.worker_id,''),COALESCE(d.worker_session_id,''),COALESCE(p.tab_id,0),COALESCE(d.binding_id,p.bound_binding_id,''),COALESCE(d.binding_version,p.bound_binding_version,0),COALESCE(p.observed_chatgpt_url,''),m.context_hash,m.prompt_hash,m.updated_at
+		FROM autonomous_command_materializations m
+		JOIN workflow_intents i ON i.project_id=m.project_id AND i.id=m.intent_id
+		LEFT JOIN session_provision_requests p ON p.project_id=m.project_id AND p.id=m.provision_request_id
+		LEFT JOIN workflow_commands w ON w.id=m.workflow_command_id
+		LEFT JOIN delivery_commands d ON d.id=m.delivery_command_id
+		WHERE m.project_id=? ORDER BY m.created_at DESC,m.id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +318,7 @@ func (s *OperationsService) listCommands(ctx context.Context, projectID int64) (
 	for rows.Next() {
 		var value CommandProjection
 		var updated string
-		if err := rows.Scan(&value.MaterializationID, &value.IntentID, &value.LeaseID, &value.LaneKey, &value.Status, &value.ReasonCode, &value.WorkflowCommandID, &value.WorkflowStatus, &value.DeliveryCommandID, &value.DeliveryStatus, &value.ContextHash, &value.PromptHash, &updated); err != nil {
+		if err := rows.Scan(&value.ProjectID, &value.MaterializationID, &value.IntentID, &value.LeaseID, &value.ProvisionRequestID, &value.LaneKey, &value.IssueNumber, &value.Role, &value.ExpectedHead, &value.Status, &value.ReasonCode, &value.WorkflowCommandID, &value.WorkflowStatus, &value.DeliveryCommandID, &value.DeliveryStatus, &value.WorkerID, &value.WorkerSessionID, &value.TabID, &value.BindingID, &value.BindingVersion, &value.ObservedChatGPTURL, &value.ContextHash, &value.PromptHash, &updated); err != nil {
 			return nil, err
 		}
 		parsed, err := time.Parse(time.RFC3339Nano, updated)
@@ -302,6 +326,35 @@ func (s *OperationsService) listCommands(ctx context.Context, projectID int64) (
 			return nil, err
 		}
 		value.UpdatedAt = parsed
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s *OperationsService) listResults(ctx context.Context, projectID int64) ([]ResultProjection, error) {
+	rows, err := s.store.db.QueryContext(ctx, `SELECT r.project_id,r.github_comment_id,r.issue_number,r.asserted_command_id,r.role,r.result,r.payload_hash,r.validation_status,r.validation_reason,r.accepted_at,r.observed_at
+		FROM workflow_results r
+		JOIN autonomous_command_materializations m ON m.project_id=r.project_id AND m.workflow_command_id=r.asserted_command_id
+		WHERE r.project_id=? ORDER BY r.github_comment_id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]ResultProjection, 0)
+	for rows.Next() {
+		var value ResultProjection
+		var accepted, observed string
+		if err := rows.Scan(&value.ProjectID, &value.GitHubCommentID, &value.IssueNumber, &value.CommandID, &value.Role, &value.Result, &value.PayloadHash, &value.ValidationStatus, &value.ValidationReason, &accepted, &observed); err != nil {
+			return nil, err
+		}
+		var parseErr error
+		value.AcceptedAt, parseErr = optionalTime(accepted)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if value.ObservedAt, parseErr = time.Parse(time.RFC3339Nano, observed); parseErr != nil {
+			return nil, parseErr
+		}
 		values = append(values, value)
 	}
 	return values, rows.Err()
@@ -332,7 +385,7 @@ func (s *OperationsService) listWarnings(ctx context.Context, projectID int64) (
 }
 
 func (s *OperationsService) listMergeCycles(ctx context.Context, projectID int64) ([]MergeCycleProjection, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id,intent_id,issue_number,pr_number,approved_head,observed_merge_commit,status,reason_code,updated_at FROM merge_cycle_readbacks WHERE project_id=? ORDER BY created_at DESC,id`, projectID)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT id,project_id,intent_id,issue_number,pr_number,approved_head,observed_merge_commit,status,reason_code,updated_at FROM merge_cycle_readbacks WHERE project_id=? ORDER BY created_at DESC,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +394,7 @@ func (s *OperationsService) listMergeCycles(ctx context.Context, projectID int64
 	for rows.Next() {
 		var value MergeCycleProjection
 		var updated string
-		if err := rows.Scan(&value.ID, &value.IntentID, &value.IssueNumber, &value.PRNumber, &value.ApprovedHead, &value.ObservedMergeCommit, &value.Status, &value.ReasonCode, &updated); err != nil {
+		if err := rows.Scan(&value.ID, &value.ProjectID, &value.IntentID, &value.IssueNumber, &value.PRNumber, &value.ApprovedHead, &value.ObservedMergeCommit, &value.Status, &value.ReasonCode, &updated); err != nil {
 			return nil, err
 		}
 		parsed, err := time.Parse(time.RFC3339Nano, updated)
