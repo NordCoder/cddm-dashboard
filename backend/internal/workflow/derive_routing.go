@@ -140,6 +140,8 @@ func deriveRoute(project ProjectIdentity, workflowMode, issueState string, state
 				return dispatchRoute(project, state, "lead", "lead_continue", "Lead requested another bounded Lead turn")
 			case "correct":
 				return dispatchRoute(project, state, "implementor", "lead_correction", "Lead bounded a correction for the existing Change")
+			case "actions_ready":
+				return dispatchRoute(project, state, "lead", "lead_actions_materialized", "Lead action batch was accepted and materialized; continue the serialized Lead lane when another Lead Intent is scheduled")
 			case "ready_to_merge":
 				return mergeGateRoute(project, state)
 			}
