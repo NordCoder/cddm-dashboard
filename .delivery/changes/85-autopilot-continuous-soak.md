@@ -39,3 +39,5 @@ Verify the complete M9–M12 durable loop under restart, duplicate, stale-identi
 - Runtime CLI and configuration validation;
 - exact Candidate Head read-back;
 - fresh independent QA before merge.
+
+Final publication evidence is recorded in Issue #85 and PR #102, not embedded as mutable workflow identifiers in this contract.
