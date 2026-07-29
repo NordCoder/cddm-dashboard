@@ -50,6 +50,7 @@ export class BackendClient {
   complete(commandId, payload) { return this.request(`/api/browser/deliveries/${encodeURIComponent(commandId)}/complete`, payload, true); }
   claimProvision(payload) { return this.request("/api/browser/provisioning/claim-next", payload, true); }
   completeProvision(requestId, payload) { return this.request(`/api/browser/provisioning/${encodeURIComponent(requestId)}/complete`, payload, true); }
+  finalizeProvision(requestId, payload) { return this.request(`/api/browser/provisioning/${encodeURIComponent(requestId)}/finalize`, payload, true); }
 }
 
 export function completionPayload(commandId, claimId, outcome, reason) {
@@ -68,4 +69,16 @@ export function provisioningCompletionPayload(request, outcome, input = {}) {
   if (input.target) payload.target = input.target;
   if (Array.isArray(input.attachmentEvidence)) payload.attachment_evidence = input.attachmentEvidence;
   return payload;
+}
+
+export function provisioningFinalizePayload(request, record) {
+  return {
+    claim_owner: request.claim_owner,
+    claim_token: request.claim_token,
+    worker_id: record.worker_id,
+    tab_id: record.tab_id,
+    target: record.target,
+    observed_chatgpt_url: record.observed_chatgpt_url,
+    attachment_evidence: [...(record.attachment_evidence || [])],
+  };
 }

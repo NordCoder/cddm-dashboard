@@ -13,9 +13,10 @@ import (
 )
 
 type provisioningHandler struct {
-	legacy  http.Handler
-	store   *orchestration.Store
-	service *orchestration.ProvisioningService
+	legacy    http.Handler
+	store     *orchestration.Store
+	service   *orchestration.ProvisioningService
+	finalizer *orchestration.ProvisioningFinalizer
 }
 
 type provisionEnqueueRequest struct {
@@ -41,8 +42,22 @@ type provisionCompleteRequest struct {
 	AttachmentEvidence []string                  `json:"attachment_evidence,omitempty"`
 }
 
+type provisionFinalizeRequest struct {
+	ClaimOwner         string                   `json:"claim_owner"`
+	ClaimToken         string                   `json:"claim_token"`
+	WorkerID           string                   `json:"worker_id"`
+	TabID              int                      `json:"tab_id"`
+	Target             browserbinding.TargetRef `json:"target"`
+	ObservedChatGPTURL string                   `json:"observed_chatgpt_url"`
+	AttachmentEvidence []string                 `json:"attachment_evidence"`
+}
+
 func WithProvisioning(legacy http.Handler, store *orchestration.Store, service *orchestration.ProvisioningService) http.Handler {
 	return &provisioningHandler{legacy: legacy, store: store, service: service}
+}
+
+func WithProvisioningAndFinalizer(legacy http.Handler, store *orchestration.Store, service *orchestration.ProvisioningService, finalizer *orchestration.ProvisioningFinalizer) http.Handler {
+	return &provisioningHandler{legacy: legacy, store: store, service: service, finalizer: finalizer}
 }
 
 func (h *provisioningHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +97,11 @@ func (h *provisioningHandler) handleBrowser(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 	parts := strings.Split(path, "/")
-	if len(parts) == 2 && parts[0] != "" && parts[1] == "complete" {
+	if len(parts) != 2 || parts[0] == "" {
+		return false
+	}
+	switch parts[1] {
+	case "complete":
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w, http.MethodPost)
 			return true
@@ -102,8 +121,33 @@ func (h *provisioningHandler) handleBrowser(w http.ResponseWriter, r *http.Reque
 		}
 		writeJSON(w, http.StatusOK, value)
 		return true
+	case "finalize":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return true
+		}
+		if h.finalizer == nil {
+			writeError(w, http.StatusNotImplemented, fmt.Errorf("provisioning finalize is unavailable"))
+			return true
+		}
+		var request provisionFinalizeRequest
+		if err := decodeJSON(r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return true
+		}
+		value, err := h.finalizer.Finalize(r.Context(), orchestration.FinalizeProvisioningInput{
+			RequestID: parts[0], ClaimOwner: request.ClaimOwner, ClaimToken: request.ClaimToken,
+			WorkerID: request.WorkerID, TabID: request.TabID, Target: request.Target,
+			ObservedChatGPTURL: request.ObservedChatGPTURL, AttachmentEvidence: request.AttachmentEvidence,
+		})
+		if h.writeError(w, err) {
+			return true
+		}
+		writeJSON(w, http.StatusOK, value)
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func (h *provisioningHandler) handleProject(w http.ResponseWriter, r *http.Request) bool {
@@ -197,9 +241,9 @@ func (h *provisioningHandler) writeError(w http.ResponseWriter, err error) bool 
 		return false
 	}
 	switch {
-	case errors.Is(err, orchestration.ErrNotFound):
+	case errors.Is(err, orchestration.ErrNotFound), errors.Is(err, browserbinding.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)
-	case errors.Is(err, orchestration.ErrConflict):
+	case errors.Is(err, orchestration.ErrConflict), errors.Is(err, browserbinding.ErrConflict):
 		writeError(w, http.StatusConflict, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)

@@ -81,22 +81,13 @@ func TestProvisioningLifecycleIsLeaseBoundRestartSafeAndAttachmentExact(t *testi
 	}
 	if _, err := restarted.Complete(context.Background(), orchestration.ProvisionCompletionInput{
 		RequestID: request.ID, ClaimOwner: "extension", ClaimToken: recovered.ClaimToken,
-		Outcome: orchestration.ProvisionProvisioned, AttachmentEvidence: []string{"gpt-gh-connector-guidelines.md"},
+		Outcome: orchestration.ProvisionProvisioned, AttachmentEvidence: wantAttachments,
 	}); err == nil {
-		t.Fatal("provisioned accepted incomplete attachment evidence")
+		t.Fatal("generic completion accepted provisioned state without atomic binding finalization")
 	}
-	completed, err := restarted.Complete(context.Background(), orchestration.ProvisionCompletionInput{
-		RequestID: request.ID, ClaimOwner: "extension", ClaimToken: recovered.ClaimToken,
-		Outcome: orchestration.ProvisionProvisioned, AttachmentEvidence: wantAttachments,
-	})
-	if err != nil || completed.Status != orchestration.ProvisionProvisioned || completed.CompletedAt == nil {
-		t.Fatalf("provisioned = %+v err=%v", completed, err)
-	}
-	if _, err := restarted.Complete(context.Background(), orchestration.ProvisionCompletionInput{
-		RequestID: request.ID, ClaimOwner: "extension", ClaimToken: recovered.ClaimToken,
-		Outcome: orchestration.ProvisionProvisioned, AttachmentEvidence: wantAttachments,
-	}); !errors.Is(err, orchestration.ErrConflict) {
-		t.Fatalf("terminal replay error = %v", err)
+	stored, err := restarted.Get(context.Background(), request.ID)
+	if err != nil || stored.Status != orchestration.ProvisionSurfaceReady || stored.CompletedAt != nil {
+		t.Fatalf("surface changed after rejected generic completion: %+v err=%v", stored, err)
 	}
 }
 

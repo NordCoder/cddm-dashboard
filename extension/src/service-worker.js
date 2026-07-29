@@ -1,10 +1,22 @@
-import { BackendClient, BackendHTTPError, provisioningCompletionPayload } from "./api.js";
-import { ChromeTargetAdapter, SurfaceCreationError } from "./adapter.js";
-import { ExecutionCoordinator, PreSendError } from "./executor.js";
-import { ClaimLedger } from "./ledger.js";
 import {
-  BACKEND_ORIGIN_KEY, WORKER_ID_KEY, backendPermissionOrigin, isOpaqueIdentifier, normalizeBackendOrigin,
-  randomId, safeDiagnostic, sameTarget
+  BackendClient,
+  BackendHTTPError,
+  provisioningCompletionPayload,
+  provisioningFinalizePayload,
+} from "./api.js";
+import { ChromeTargetAdapter, SurfaceCreationError } from "./adapter.js";
+import { AmbiguousSendError, ExecutionCoordinator, PreSendError } from "./executor.js";
+import { ClaimLedger } from "./ledger.js";
+import { ManagedSessionBootstrapper } from "./session-bootstrap.js";
+import {
+  BACKEND_ORIGIN_KEY,
+  WORKER_ID_KEY,
+  backendPermissionOrigin,
+  isOpaqueIdentifier,
+  normalizeBackendOrigin,
+  randomId,
+  safeDiagnostic,
+  sameTarget,
 } from "./protocol.js";
 
 const SESSION_ID = randomId();
@@ -12,17 +24,23 @@ const HEARTBEAT_ALARM = "cddm-heartbeat";
 const POLL_ALARM = "cddm-claim-poll";
 const STATUS_KEY = "extension_status";
 const MANAGED_WORKERS_KEY = "managed_chat_workers";
+const BOOTSTRAP_PHASES = new Set(["not_started", "send_reserved", "sent", "target_observed", "provisioned"]);
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 export const POLL_INTERVAL_MS = 5_000;
 export const ALARM_FALLBACK_DELAY_MS = 30_000;
 
-function managedSessionID(runtimeSessionID, workerID) {
-  return `${runtimeSessionID}.${workerID.slice(0, 24)}`;
+function managedSessionID(workerID) {
+  return `managed.${workerID}`;
+}
+
+function exactStrings(left, right) {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function validTarget(value) {
   return value?.kind === "chatgpt_conversation" && value.origin === "https://chatgpt.com"
-    && typeof value.path === "string" && value.path.startsWith("/c/");
+    && typeof value.path === "string" && /^\/c\/[^/]+$/.test(value.path);
 }
 
 function validManagedRecord(value) {
@@ -30,6 +48,46 @@ function validManagedRecord(value) {
     && isOpaqueIdentifier(value.request_id) && Number.isInteger(value.tab_id) && value.tab_id > 0
     && (!value.target || validTarget(value.target)) && typeof value.claim_owner === "string"
     && typeof value.claim_token === "string" && typeof value.chatgpt_project_url === "string";
+}
+
+function normalizeManagedRecord(value) {
+  const phase = BOOTSTRAP_PHASES.has(value.bootstrap_phase)
+    ? value.bootstrap_phase
+    : value.provision_status === "provisioned" ? "provisioned" : "not_started";
+  return {
+    ...value,
+    bootstrap_phase: phase,
+    attachment_evidence: Array.isArray(value.attachment_evidence) ? [...value.attachment_evidence] : [],
+    attachments: Array.isArray(value.attachments) ? [...value.attachments] : [],
+    bootstrap_text: typeof value.bootstrap_text === "string" ? value.bootstrap_text : "",
+    session_policy: typeof value.session_policy === "string" ? value.session_policy : value.role === "lead" ? "persistent_project_lead" : "fresh_per_intent",
+    observed_chatgpt_url: typeof value.observed_chatgpt_url === "string" ? value.observed_chatgpt_url : "",
+    pending_surface_completion: Boolean(value.pending_surface_completion),
+  };
+}
+
+function requestFromRecord(record) {
+  return {
+    request_id: record.request_id,
+    project_id: record.project_id,
+    intent_id: record.intent_id,
+    lane_key: record.lane_key,
+    issue_number: record.issue_number,
+    role: record.role,
+    expected_head: record.expected_head || "",
+    attachments: [...(record.attachments || [])],
+    bootstrap_text: record.bootstrap_text || "",
+    session_policy: record.session_policy || "",
+    chatgpt_project_url: record.chatgpt_project_url || "",
+    status: record.provision_status,
+    claim_owner: record.claim_owner,
+    claim_token: record.claim_token,
+  };
+}
+
+function sameSessionScope(left, right) {
+  if (left.project_id !== right.project_id || left.role !== right.role) return false;
+  return left.role === "lead" || left.issue_number === right.issue_number;
 }
 
 export class RuntimeScheduler {
@@ -88,6 +146,7 @@ export class ExtensionRuntime {
     this.chrome = chromeApi;
     this.storage = dependencies.storage || chromeApi.storage.local;
     this.adapter = dependencies.adapter || new ChromeTargetAdapter(chromeApi);
+    this.bootstrapper = dependencies.bootstrapper || new ManagedSessionBootstrapper(chromeApi);
     this.ledger = dependencies.ledger || new ClaimLedger(this.storage);
     this.clientFactory = dependencies.clientFactory || ((origin) => new BackendClient(origin));
     this.sessionId = dependencies.sessionId || SESSION_ID;
@@ -130,11 +189,13 @@ export class ExtensionRuntime {
     const stored = (await this.storage.get(MANAGED_WORKERS_KEY))[MANAGED_WORKERS_KEY];
     const values = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
     this.managedWorkers.clear();
-    for (const [workerID, record] of Object.entries(values)) {
-      if (!validManagedRecord(record) || record.worker_id !== workerID) continue;
+    for (const [workerID, value] of Object.entries(values)) {
+      if (!validManagedRecord(value) || value.worker_id !== workerID) continue;
+      const record = normalizeManagedRecord(value);
       this.managedWorkers.set(workerID, record);
       this.adapter.reserveManagedTab?.(record.tab_id);
     }
+    await this.saveManagedWorkers();
   }
 
   async saveManagedWorkers() {
@@ -146,6 +207,23 @@ export class ExtensionRuntime {
       if (record.request_id === requestID) return record;
     }
     return null;
+  }
+
+  applyRequest(record, request) {
+    record.request_id = request.request_id;
+    record.claim_owner = request.claim_owner;
+    record.claim_token = request.claim_token;
+    record.project_id = request.project_id;
+    record.intent_id = request.intent_id;
+    record.issue_number = request.issue_number;
+    record.role = request.role;
+    record.lane_key = request.lane_key;
+    record.expected_head = request.expected_head || "";
+    record.chatgpt_project_url = request.chatgpt_project_url || "";
+    record.attachments = [...(request.attachments || [])];
+    record.bootstrap_text = request.bootstrap_text || "";
+    record.session_policy = request.session_policy || "";
+    record.provision_status = request.status;
   }
 
   async config() {
@@ -176,8 +254,8 @@ export class ExtensionRuntime {
     return {
       worker_id: this.workerId,
       worker_session_id: this.sessionId,
-      protocol_version: "m11-c2",
-      capabilities: ["chatgpt_conversation", "exact_prompt_send", "session_provisioning"],
+      protocol_version: "m11-c3",
+      capabilities: ["chatgpt_conversation", "exact_prompt_send", "session_provisioning", "library_bootstrap"],
       observation: { target },
     };
   }
@@ -185,9 +263,9 @@ export class ExtensionRuntime {
   managedPayload(record, target) {
     return {
       worker_id: record.worker_id,
-      worker_session_id: managedSessionID(this.sessionId, record.worker_id),
-      protocol_version: "m11-c2-managed",
-      capabilities: ["chatgpt_conversation", "exact_prompt_send", "managed_exact_tab", "session_provision_surface"],
+      worker_session_id: managedSessionID(record.worker_id),
+      protocol_version: "m11-c3-managed",
+      capabilities: ["chatgpt_conversation", "exact_prompt_send", "managed_exact_tab", "library_bootstrap"],
       observation: { target },
     };
   }
@@ -322,9 +400,7 @@ export class ExtensionRuntime {
       tabId: record.tab_id,
       target: observation.target || undefined,
     }));
-    record.claim_owner = completed.claim_owner;
-    record.claim_token = completed.claim_token;
-    record.provision_status = completed.status;
+    this.applyRequest(record, completed);
     if (completed.target) record.target = completed.target;
     record.pending_surface_completion = false;
     await this.saveManagedWorkers();
@@ -334,6 +410,15 @@ export class ExtensionRuntime {
   async terminalSurfaceFailure(request, outcome, reason, tabId = 0) {
     if (tabId > 0) await this.adapter.closeManagedTab?.(tabId);
     return this.backend.completeProvision(request.request_id, provisioningCompletionPayload(request, outcome, { reason }));
+  }
+
+  async retireRecord(record, outcome, reason) {
+    const request = requestFromRecord(record);
+    try { await this.terminalSurfaceFailure(request, outcome, reason, record.tab_id); } catch { return false; }
+    this.registeredManaged.delete(record.worker_id);
+    this.managedWorkers.delete(record.worker_id);
+    await this.saveManagedWorkers();
+    return true;
   }
 
   async createManagedSurface(request) {
@@ -346,7 +431,7 @@ export class ExtensionRuntime {
       throw error;
     }
     const workerID = randomId();
-    const record = {
+    const record = normalizeManagedRecord({
       worker_id: workerID,
       request_id: request.request_id,
       claim_owner: request.claim_owner,
@@ -360,10 +445,16 @@ export class ExtensionRuntime {
       lane_key: request.lane_key,
       expected_head: request.expected_head || "",
       chatgpt_project_url: request.chatgpt_project_url || "",
+      attachments: [...(request.attachments || [])],
+      bootstrap_text: request.bootstrap_text || "",
+      session_policy: request.session_policy || "",
       provision_status: "claimed",
       pending_surface_completion: true,
+      bootstrap_phase: "not_started",
+      attachment_evidence: [],
+      observed_chatgpt_url: "",
       created_at: Date.now(),
-    };
+    });
     this.managedWorkers.set(workerID, record);
     await this.saveManagedWorkers();
     try {
@@ -374,20 +465,120 @@ export class ExtensionRuntime {
     return record;
   }
 
-  async retireUnavailableSurface(record) {
-    if (record.provision_status !== "claimed" && record.provision_status !== "surface_ready") return false;
-    const request = {
-      request_id: record.request_id,
-      claim_owner: record.claim_owner,
-      claim_token: record.claim_token,
-    };
-    try {
-      await this.terminalSurfaceFailure(request, "safe_failed", "managed_creation_tab_unavailable", record.tab_id);
-    } catch { return false; }
-    this.registeredManaged.delete(record.worker_id);
-    this.managedWorkers.delete(record.worker_id);
+  async findReusableLead(request) {
+    if (request.session_policy !== "persistent_project_lead" || request.role !== "lead") return null;
+    for (const record of this.managedWorkers.values()) {
+      if (record.provision_status !== "provisioned" || record.role !== "lead" || record.project_id !== request.project_id
+        || record.chatgpt_project_url !== (request.chatgpt_project_url || "") || !record.target
+        || !exactStrings(record.attachment_evidence, request.attachments)) continue;
+      try {
+        const observation = await this.heartbeatManaged(record);
+        if (observation.available && sameTarget(observation.target, record.target)) return record;
+      } catch { /* an unhealthy Lead session is replaced with a fresh surface */ }
+    }
+    return null;
+  }
+
+  async reuseLeadSurface(request, record) {
+    this.applyRequest(record, request);
+    record.provision_status = "claimed";
+    record.pending_surface_completion = true;
+    record.bootstrap_phase = "target_observed";
     await this.saveManagedWorkers();
-    return true;
+    await this.completeSurfaceReady(request, record);
+    return record;
+  }
+
+  canBootstrap() {
+    return Boolean(this.bootstrapper && this.chrome.tabs?.get && this.chrome.tabs?.sendMessage);
+  }
+
+  async finalizeRecord(request, record) {
+    const observation = await this.heartbeatManaged(record);
+    if (!observation.available || !observation.target || !sameTarget(observation.target, record.target)) {
+      await this.retireRecord(record, "uncertain", "managed_target_unavailable_before_finalize");
+      return;
+    }
+    let finalized;
+    try {
+      finalized = await this.backend.finalizeProvision(request.request_id, provisioningFinalizePayload(request, record));
+    } catch (error) {
+      if (error instanceof BackendHTTPError && error.status === 409) {
+        await this.retireRecord(record, "superseded", "provisioning_finalize_conflict");
+        return;
+      }
+      throw error;
+    }
+    this.applyRequest(record, finalized);
+    record.provision_status = "provisioned";
+    record.bootstrap_phase = "provisioned";
+    record.target = finalized.target || record.target;
+    record.observed_chatgpt_url = finalized.observed_chatgpt_url || record.observed_chatgpt_url;
+    record.attachment_evidence = [...(finalized.attachment_evidence || record.attachment_evidence || [])];
+    record.bound_binding_id = finalized.bound_binding_id || "";
+    record.bound_binding_version = finalized.bound_binding_version || 0;
+    await this.saveManagedWorkers();
+    await this.retireSupersededLocal(record);
+  }
+
+  async advanceManagedProvisioning(request, record) {
+    this.applyRequest(record, request);
+    if (request.status === "claimed") {
+      if (record.pending_surface_completion) await this.completeSurfaceReady(request, record);
+      return;
+    }
+    if (request.status !== "surface_ready") return;
+    record.provision_status = "surface_ready";
+    record.pending_surface_completion = false;
+
+    if (record.bootstrap_phase === "send_reserved") {
+      await this.retireRecord(record, "uncertain", "runtime_restart_during_bootstrap_send");
+      return;
+    }
+    if (record.bootstrap_phase === "not_started") {
+      if (!this.canBootstrap()) return;
+      record.bootstrap_phase = "send_reserved";
+      await this.saveManagedWorkers();
+      let result;
+      try {
+        result = await this.bootstrapper.send(record.tab_id, request);
+      } catch (error) {
+        if (error instanceof PreSendError) {
+          await this.retireRecord(record, "safe_failed", error.message || "bootstrap_safe_failure");
+          return;
+        }
+        await this.retireRecord(record, "uncertain", error?.message || "bootstrap_send_outcome_unknown");
+        return;
+      }
+      record.bootstrap_phase = "sent";
+      record.attachment_evidence = [...result.attachmentEvidence];
+      await this.saveManagedWorkers();
+    }
+    if (record.bootstrap_phase === "sent") {
+      let observed;
+      try {
+        observed = await this.bootstrapper.waitForConversation(record.tab_id, record.chatgpt_project_url);
+      } catch (error) {
+        await this.retireRecord(record, "uncertain", error?.message || "conversation_url_unobserved_after_bootstrap");
+        return;
+      }
+      record.target = observed.target;
+      record.observed_chatgpt_url = observed.observedURL;
+      record.bootstrap_phase = "target_observed";
+      await this.saveManagedWorkers();
+      await this.heartbeatManaged(record);
+    }
+    if (record.bootstrap_phase === "target_observed") await this.finalizeRecord(request, record);
+  }
+
+  async retireSupersededLocal(current) {
+    for (const other of [...this.managedWorkers.values()]) {
+      if (other.worker_id === current.worker_id || other.provision_status !== "provisioned" || !sameSessionScope(other, current)) continue;
+      this.registeredManaged.delete(other.worker_id);
+      this.managedWorkers.delete(other.worker_id);
+      await this.adapter.closeManagedTab?.(other.tab_id);
+    }
+    await this.saveManagedWorkers();
   }
 
   async reconcileManagedProvisioning() {
@@ -395,16 +586,19 @@ export class ExtensionRuntime {
       if (record.provision_status !== "claimed" && record.provision_status !== "surface_ready") continue;
       const observation = await this.managedObservation(record);
       if (!observation.available) {
-        await this.retireUnavailableSurface(record);
+        const uncertain = record.bootstrap_phase !== "not_started";
+        await this.retireRecord(record, uncertain ? "uncertain" : "safe_failed", "managed_creation_tab_unavailable");
         continue;
       }
-      if (!record.pending_surface_completion) continue;
-      const request = {
-        request_id: record.request_id,
-        claim_owner: record.claim_owner,
-        claim_token: record.claim_token,
-      };
-      try { await this.completeSurfaceReady(request, record); } catch { /* later provisioning tick retries exact local tab */ }
+      const request = requestFromRecord(record);
+      try {
+        if (record.pending_surface_completion) await this.completeSurfaceReady(request, record);
+        if (record.provision_status === "surface_ready") await this.advanceManagedProvisioning(requestFromRecord(record), record);
+      } catch (error) {
+        if (error instanceof BackendHTTPError && error.status === 409) {
+          await this.retireRecord(record, "superseded", "provisioning_state_conflict");
+        }
+      }
     }
   }
 
@@ -421,14 +615,18 @@ export class ExtensionRuntime {
       if (!request) return;
       const existing = this.managedByRequest(request.request_id);
       if (existing) {
-        existing.claim_owner = request.claim_owner;
-        existing.claim_token = request.claim_token;
-        if (request.status === "claimed") existing.pending_surface_completion = true;
+        this.applyRequest(existing, request);
         await this.saveManagedWorkers();
-        if (existing.pending_surface_completion) await this.completeSurfaceReady(request, existing);
+        await this.advanceManagedProvisioning(request, existing);
         return;
       }
-      if (request.status === "claimed") await this.createManagedSurface(request);
+      if (request.status !== "claimed") return;
+      const reusableLead = await this.findReusableLead(request);
+      if (reusableLead) {
+        await this.reuseLeadSurface(request, reusableLead);
+        return;
+      }
+      await this.createManagedSurface(request);
     } catch (error) {
       await this.status(error instanceof BackendHTTPError && error.status === 409 ? "provisioning_conflict" : "provisioning_unavailable");
     } finally {
@@ -455,7 +653,7 @@ export class ExtensionRuntime {
         const adapter = this.adapter.exactTab(record.tab_id, record.target);
         const managedTarget = await adapter.currentTarget();
         if (!managedTarget) continue;
-        await this.pollIdentity({ workerId: record.worker_id, sessionId: managedSessionID(this.sessionId, record.worker_id) }, managedTarget, adapter);
+        await this.pollIdentity({ workerId: record.worker_id, sessionId: managedSessionID(record.worker_id) }, managedTarget, adapter);
       }
     } catch {
       this.presenceCurrent = false;
