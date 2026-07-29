@@ -112,6 +112,10 @@ func run() error {
 		},
 		FallbackEnabled: cfg.PromptFallbackEnabled,
 	})
+	typedPlanning, err := orchestration.NewTypedPlanningAdapter(orchestrationStore, store, planningService)
+	if err != nil {
+		return fmt.Errorf("initialize typed planning adapter: %w", err)
+	}
 	commandEngine := workerloop.NewCommandEngine(workerStore, resources)
 	continuousCommandEngine := workerloop.NewCommandEngine(workerStore, continuousResources)
 	deliveryPlanning := workerloop.NewDeliveryPlanningAdapter(planningService, commandEngine)
@@ -139,7 +143,7 @@ func run() error {
 		return fmt.Errorf("initialize Autopilot: %w", err)
 	}
 	mergeAutopilot, err := orchestration.NewMergeAutopilotEngine(
-		orchestrationStore, scheduler, provisioningService, planningService,
+		orchestrationStore, scheduler, provisioningService, typedPlanning,
 		continuousDeliveryService, baseBindingResolver, store, client,
 	)
 	if err != nil {
