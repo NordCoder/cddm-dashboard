@@ -32,7 +32,7 @@ M9 defines the authority and protocol required before Dashboard may operate a co
 
 M9 deliberately does not execute typed Lead actions. Active v1 commands retain their original resource and result-protocol identity.
 
-## Active — M10 Durable Orchestration
+## M10 — Durable Orchestration
 
 M10 is stacked on the exact M9-C2 Candidate and remains unmergeable until the M9 dependency chain is independently approved and integrated.
 
@@ -44,14 +44,21 @@ M10 is stacked on the exact M9-C2 Candidate and remains unmergeable until the M9
 
 M10 ends at a durable scheduler decision. It does not create ChatGPT sessions, attach Library files, create Workflow Commands, deliver browser prompts or merge code.
 
+## Active — M11 Browser Session Provisioning
+
+M11 is stacked on the exact M10-C3 Candidate and remains unmergeable until the M9/M10 dependency chain is independently approved and integrated.
+
+| Change | Outcome | State |
+| --- | --- | --- |
+| #76 | Durable session-provision queue, exact lease-bound enqueue and extension claim/complete API | Implementation |
+| #77 | Extension service-worker provisioning and managed exact-tab workers without an open Dashboard page | Backlog — depends on #76 |
+| #78 | Exact Library resolution, bootstrap, session policy and role binding | Backlog — depends on #77 |
+
+M11 ends with a verified exact ChatGPT session registered and bound to the intended role lane. It does not materialize Workflow Commands, deliver the normal assignment prompt or merge code.
+
 ## Planned autonomous execution
 
-1. **M11 — Browser Session Provisioning**
-   - durable session-provision queue;
-   - exact Library attachment resolution;
-   - persistent Lead and fresh Implementor/QA policies;
-   - operation without an open Dashboard page while Chrome and the extension remain available.
-2. **M12 — Continuous Autopilot**
+1. **M12 — Continuous Autopilot**
    - automatic command materialization;
    - Lead merge cycle and read-back;
    - operations UI, pause/stop and circuit breakers;
@@ -70,7 +77,7 @@ GitHub facts
 → Dashboard derives the next route
 ```
 
-The local/private v1 build remains pilot-ready when the diagnostic endpoint reports `pilot_ready`. M9/M10 additions remain inert unless the exact continuous profile is configured and the later materialization/scheduler Changes are present.
+The local/private v1 build remains pilot-ready when the diagnostic endpoint reports `pilot_ready`. M9–M11 additions remain inert unless the exact continuous profile is configured and their stacked Changes are present.
 
 ## Durable boundaries
 
