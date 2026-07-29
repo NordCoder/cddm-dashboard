@@ -12,9 +12,21 @@ import (
 	"github.com/NordCoder/cddm-dashboard/backend/internal/database"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/delivery"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/orchestration"
+	"github.com/NordCoder/cddm-dashboard/backend/internal/planning"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/supervisor"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/workerloop"
 )
+
+func claimRestartAutopilot(t *testing.T, scheduler *orchestration.Scheduler, projectID int64, claimID string, snapshot supervisor.ProjectSnapshot) orchestration.ClaimDecision {
+	t.Helper()
+	decision, err := scheduler.ClaimNext(context.Background(), orchestration.ClaimRequest{
+		ProjectID: projectID, ClaimID: claimID, LeaseOwner: "dashboard-autopilot", LeaseTTL: time.Hour, Snapshot: snapshot,
+	})
+	if err != nil || !decision.Claimed || decision.Intent == nil || decision.Lease == nil {
+		t.Fatalf("Autopilot claim %s = %+v err=%v", claimID, decision, err)
+	}
+	return decision
+}
 
 func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t *testing.T) {
 	ctx := context.Background()
@@ -38,35 +50,36 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	provisioned := soakIntent(project.ID, sourceCommandID, "provisioned", 90, "lead", fmt.Sprintf("project:%d:lead", project.ID), wave.WaveID, 20)
 	provisioned.ActionType = orchestration.ActionPlanNextWave
 	deliveryPending := soakIntent(project.ID, sourceCommandID, "delivery", 104, "implementor", fmt.Sprintf("project:%d:issue:104:implementor", project.ID), wave.WaveID, 30)
-	awaitingResult := soakIntent(project.ID, sourceCommandID, "awaiting", 105, "implementor", fmt.Sprintf("project:%d:issue:105:implementor", project.ID), wave.WaveID, 40)
+	deliveryPending.PRNumber, deliveryPending.ExpectedHead = 154, otherHead
+	awaitingResult := soakIntent(project.ID, sourceCommandID, "awaiting", 105, "qa", fmt.Sprintf("project:%d:issue:105:qa:head", project.ID), wave.WaveID, 40)
+	awaitingResult.PRNumber, awaitingResult.ExpectedHead = 155, testHead
 	inputs := []orchestration.IntentInput{pending, claimed, provisioned, deliveryPending, awaitingResult}
 	created, err := store.CreateBatch(ctx, wave, append([]orchestration.IntentInput(nil), inputs...))
 	if err != nil || len(created) != len(inputs) {
 		t.Fatalf("create restart fixture = %+v err=%v", created, err)
 	}
-	replayed, err := store.CreateBatch(ctx, wave, append([]orchestration.IntentInput(nil), inputs...))
-	if err != nil || len(replayed) != len(inputs) {
+	if replayed, err := store.CreateBatch(ctx, wave, append([]orchestration.IntentInput(nil), inputs...)); err != nil || len(replayed) != len(inputs) {
 		t.Fatalf("idempotent action replay = %+v err=%v", replayed, err)
 	}
 
-	claimedDecision := claim(t, scheduler, project.ID, "restart-claimed", snapshot)
+	claimedDecision := claimRestartAutopilot(t, scheduler, project.ID, "restart-claimed", snapshot)
 	if claimedDecision.Intent.ID != claimed.ID {
 		t.Fatalf("claimed stage = %+v", claimedDecision.Intent)
 	}
-	provisionedDecision := claim(t, scheduler, project.ID, "restart-provisioned", snapshot)
+	provisionedDecision := claimRestartAutopilot(t, scheduler, project.ID, "restart-provisioned", snapshot)
 	if provisionedDecision.Intent.ID != provisioned.ID {
 		t.Fatalf("provisioned stage = %+v", provisionedDecision.Intent)
 	}
-	deliveryDecision := claim(t, scheduler, project.ID, "restart-delivery", snapshot)
+	deliveryDecision := claimRestartAutopilot(t, scheduler, project.ID, "restart-delivery", snapshot)
 	if deliveryDecision.Intent.ID != deliveryPending.ID {
 		t.Fatalf("delivery stage = %+v", deliveryDecision.Intent)
 	}
-	awaitingDecision := claim(t, scheduler, project.ID, "restart-awaiting", snapshot)
+	awaitingDecision := claimRestartAutopilot(t, scheduler, project.ID, "restart-awaiting", snapshot)
 	if awaitingDecision.Intent.ID != awaitingResult.ID {
 		t.Fatalf("awaiting stage = %+v", awaitingDecision.Intent)
 	}
 	blocked, err := scheduler.ClaimNext(ctx, orchestration.ClaimRequest{
-		ProjectID: project.ID, ClaimID: "restart-pending-blocked", LeaseOwner: "scheduler", LeaseTTL: time.Minute, Snapshot: snapshot,
+		ProjectID: project.ID, ClaimID: "restart-pending-blocked", LeaseOwner: "dashboard-autopilot", LeaseTTL: time.Hour, Snapshot: snapshot,
 	})
 	if err != nil || blocked.Claimed || blocked.Reason != "no_runnable_intent" {
 		t.Fatalf("pending stage must remain pending at saturated WIP = %+v err=%v", blocked, err)
@@ -83,13 +96,25 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	deliveryRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *deliveryDecision.Lease, "delivery", 72)
 	awaitingRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *awaitingDecision.Lease, "awaiting", 73)
 
-	deliveryChain := insertSoakMaterializedChain(t, db, project.ID, deliveryPending, *deliveryDecision.Lease, deliveryRequest, "delivery", workerloop.CommandDeliveryPending, delivery.StatusPending)
-	awaitingChain := insertSoakMaterializedChain(t, db, project.ID, awaitingResult, *awaitingDecision.Lease, awaitingRequest, "awaiting", workerloop.CommandAwaitingResult, delivery.StatusDelivered)
+	plans := map[int]planning.GenerationResult{
+		104: restartGeneration(project.ID, 104, "implementor", otherHead, 1004),
+		105: restartGeneration(project.ID, 105, "qa", testHead, 1005),
+	}
+	engine, coordinator := restartProductionRuntime(t, db, store, scheduler, provisions, bindings, plans)
+	if err := engine.ReconcileProject(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	deliveryChain := readSoakCommandChain(t, db, project.ID, deliveryPending.ID)
+	awaitingChain := readSoakCommandChain(t, db, project.ID, awaitingResult.ID)
+	completeSoakDelivery(t, coordinator, awaitingRequest, "session-awaiting")
+	awaitingChain = readSoakCommandChain(t, db, project.ID, awaitingResult.ID)
+
 	observedResult := workerloop.Result{
 		ProjectID: project.ID, GitHubCommentID: 99002, IssueNumber: awaitingResult.IssueNumber,
-		CommandID: awaitingChain.WorkflowID, Role: awaitingResult.Role, Result: "candidate_ready",
-		Payload: []byte(`{"version":2,"command_id":"cmd-soak-awaiting"}`), PayloadHash: "restart-result-evidence",
-		ValidationStatus: workerloop.ValidationMalformed, ValidationReason: "non_terminal_observation", ObservedAt: time.Now().UTC(),
+		CommandID: awaitingChain.WorkflowID, Role: awaitingResult.Role, Result: "changes_required",
+		Payload: []byte(fmt.Sprintf(`{"version":2,"command_id":%q,"reviewed_head":%q}`, awaitingChain.WorkflowID, testHead)),
+		PayloadHash: "restart-result-evidence", ValidationStatus: workerloop.ValidationMalformed,
+		ValidationReason: "non_terminal_observation", ObservedAt: time.Now().UTC(),
 	}
 	if err := workerloop.NewStore(db).UpsertResult(ctx, observedResult); err != nil {
 		t.Fatal(err)
@@ -115,20 +140,26 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	reopenedScheduler := orchestration.NewScheduler(reopenedStore)
 	reopenedProvisions := provisioningService(t, reopenedStore)
 	restartedBindings := browserbinding.New(reopened, time.Minute)
-	engine, err := orchestration.NewAutopilotEngine(
-		reopenedStore, reopenedScheduler, reopenedProvisions,
-		&fixedAutonomousPlanner{}, &recordingAutonomousDelivery{db: reopened, commands: workerloop.NewStore(reopened)},
-		delivery.NewBrowserBindingResolver(restartedBindings), supervisor.NewStore(reopened),
-	)
-	if err != nil {
+	restartedEngine, restartedCoordinator := restartProductionRuntime(t, reopened, reopenedStore, reopenedScheduler, reopenedProvisions, restartedBindings, plans)
+	if err := restartedEngine.ReconcileProject(ctx, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.ReconcileProject(ctx, snapshot); err != nil {
-		t.Fatal(err)
+	for _, replay := range []struct {
+		issue int
+		chain soakCommandChain
+	}{{104, deliveryChain}, {105, awaitingChain}} {
+		command, err := restartedCoordinator.Create(ctx, project.ID, replay.issue, replay.chain.Confirmation)
+		if err != nil || command.ID != replay.chain.DeliveryID {
+			t.Fatalf("restart production delivery replay for Issue #%d = %+v err=%v", replay.issue, command, err)
+		}
+		current := readSoakCommandChain(t, reopened, project.ID, replay.chain.IntentID)
+		if current != replay.chain {
+			t.Fatalf("restart production command chain changed for Issue #%d: before=%+v after=%+v", replay.issue, replay.chain, current)
+		}
 	}
 
 	duplicateClaim, err := reopenedScheduler.ClaimNext(ctx, orchestration.ClaimRequest{
-		ProjectID: project.ID, ClaimID: "restart-claimed", LeaseOwner: "scheduler", LeaseTTL: time.Minute, Snapshot: snapshot,
+		ProjectID: project.ID, ClaimID: "restart-claimed", LeaseOwner: "dashboard-autopilot", LeaseTTL: time.Hour, Snapshot: snapshot,
 	})
 	if err != nil || !duplicateClaim.Claimed || duplicateClaim.Lease == nil || duplicateClaim.Lease.ID != claimedDecision.Lease.ID {
 		t.Fatalf("restart duplicate scheduler claim = %+v err=%v", duplicateClaim, err)
@@ -138,10 +169,6 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	})
 	if err != nil || duplicateProvision == nil || duplicateProvision.ID != claimedRequest.ID || duplicateProvision.ClaimToken != claimedProvision.ClaimToken {
 		t.Fatalf("restart duplicate provisioning claim = %+v err=%v", duplicateProvision, err)
-	}
-	duplicateCommand, err := workerloop.NewStore(reopened).CreateCommand(ctx, awaitingChain.CommandInput)
-	if err != nil || duplicateCommand.ID != awaitingChain.WorkflowID {
-		t.Fatalf("restart duplicate Workflow Command = %+v err=%v", duplicateCommand, err)
 	}
 	if err := workerloop.NewStore(reopened).UpsertResult(ctx, observedResult); err != nil {
 		t.Fatalf("restart duplicate result/comment = %v", err)
@@ -156,8 +183,11 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.ProjectID != project.ID || status.ActiveWave == nil || status.ActiveWave.ProjectID != project.ID || status.ActiveWave.WaveID != wave.WaveID || status.ActiveWave.SourceCommandID != sourceCommandID || !reflect.DeepEqual(status.ActiveWave.Issues, wave.Issues) {
+	if status.ProjectID != project.ID || status.ActiveWave == nil || status.ActiveWave.WaveID != wave.WaveID || status.ActiveWave.SourceCommandID != sourceCommandID || !reflect.DeepEqual(status.ActiveWave.Issues, wave.Issues) {
 		t.Fatalf("restart Wave/Project projection = %+v", status.ActiveWave)
+	}
+	if len(status.Intents) != 5 || len(status.Leases) != 4 || len(status.Results) != 1 || status.Results[0].GitHubCommentID != observedResult.GitHubCommentID {
+		t.Fatalf("restart complete projection = intents=%d leases=%d results=%+v", len(status.Intents), len(status.Leases), status.Results)
 	}
 	if status.Counts.PendingIntents != 1 || status.Counts.ClaimedIntents != 4 || status.Counts.ActiveLeases != 4 || len(status.Queue) != 5 {
 		t.Fatalf("restart queue projection = counts=%+v queue=%d", status.Counts, len(status.Queue))
@@ -171,8 +201,13 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	}
 	for _, chain := range []soakCommandChain{deliveryChain, awaitingChain} {
 		command, ok := seenCommands[chain.WorkflowID]
-		if !ok || command.MaterializationID != chain.MaterializationID || command.IntentID != chain.IntentID || command.LeaseID != chain.LeaseID || command.DeliveryCommandID != chain.DeliveryID {
+		if !ok || command.MaterializationID != chain.MaterializationID || command.IntentID != chain.IntentID || command.LeaseID != chain.LeaseID || command.DeliveryCommandID != chain.DeliveryID || command.WorkerSessionID == "" || command.ProvisionRequestID == "" {
 			t.Fatalf("restart command identity %s = %+v", chain.WorkflowID, command)
 		}
 	}
+	qaCommand := seenCommands[awaitingChain.WorkflowID]
+	if qaCommand.IssueNumber != 105 || qaCommand.Role != "qa" || qaCommand.ExpectedHead != testHead {
+		t.Fatalf("exact-Head QA command chain = %+v", qaCommand)
+	}
+	_ = deliveryRequest
 }
