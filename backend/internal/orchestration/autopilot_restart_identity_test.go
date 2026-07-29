@@ -79,7 +79,7 @@ func TestContinuousAutopilotRestartRecoveryPreservesExactDurableIdentityGraph(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	provisionedRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *provisionedDecision.Lease, "provisioned", 71)
+	finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *provisionedDecision.Lease, "provisioned", 71)
 	deliveryRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *deliveryDecision.Lease, "delivery", 72)
 	awaitingRequest := finalizeSoakProvision(t, provisions, finalizer, bindings, project.ID, *awaitingDecision.Lease, "awaiting", 73)
 
