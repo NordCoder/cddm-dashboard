@@ -83,15 +83,18 @@ func (s *ProvisioningFinalizer) Finalize(ctx context.Context, input FinalizeProv
 	if err := requireCurrentGitHubFacts(ctx, tx, request.ProjectID, intent); err != nil {
 		return ProvisionRequest{}, err
 	}
-	bindingID, bindingVersion, err := finalizeBindingTx(ctx, tx, request, input.WorkerID, target, s.now().UTC())
+	now := s.now().UTC()
+	bindingID, bindingVersion, err := finalizeBindingTx(ctx, tx, request, input.WorkerID, target, now)
 	if err != nil {
+		return ProvisionRequest{}, err
+	}
+	if err := retireSupersededProvisioningTx(ctx, tx, request, bindingID, now); err != nil {
 		return ProvisionRequest{}, err
 	}
 	evidenceJSON, err := json.Marshal(input.AttachmentEvidence)
 	if err != nil {
 		return ProvisionRequest{}, err
 	}
-	now := s.now().UTC()
 	result, err := tx.ExecContext(ctx, `UPDATE session_provision_requests SET
 		status='provisioned',target_kind=?,target_origin=?,target_path=?,observed_chatgpt_url=?,
 		bound_binding_id=?,bound_binding_version=?,attachment_evidence_json=?,completion_reason='exact_session_bound',
@@ -109,14 +112,7 @@ func (s *ProvisioningFinalizer) Finalize(ctx context.Context, input FinalizeProv
 	if err := tx.Commit(); err != nil {
 		return ProvisionRequest{}, err
 	}
-	finalized, err := s.storeProvision(ctx, request.ID)
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	finalized.ObservedChatGPTURL = observedURL
-	finalized.BoundBindingID = bindingID
-	finalized.BoundBindingVersion = bindingVersion
-	return finalized, nil
+	return s.storeProvision(ctx, request.ID)
 }
 
 func (s *ProvisioningFinalizer) storeProvision(ctx context.Context, requestID string) (ProvisionRequest, error) {
@@ -232,6 +228,54 @@ func finalizeBindingTx(ctx context.Context, tx *sql.Tx, request ProvisionRequest
 		return "", 0, ErrConflict
 	}
 	return bindingID, version, nil
+}
+
+func retireSupersededProvisioningTx(ctx context.Context, tx *sql.Tx, current ProvisionRequest, currentBindingID string, now time.Time) error {
+	query := `SELECT id,bound_binding_id FROM session_provision_requests
+		WHERE project_id=? AND id<>? AND status='provisioned' AND role=?`
+	args := []any{current.ProjectID, current.ID, current.Role}
+	if current.Role != "lead" {
+		query += ` AND issue_number=?`
+		args = append(args, current.IssueNumber)
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("list superseded provisioned sessions: %w", err)
+	}
+	type priorSession struct {
+		requestID string
+		bindingID string
+	}
+	prior := make([]priorSession, 0)
+	for rows.Next() {
+		var value priorSession
+		if err := rows.Scan(&value.requestID, &value.bindingID); err != nil {
+			rows.Close()
+			return err
+		}
+		prior = append(prior, value)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, value := range prior {
+		if value.bindingID != "" && value.bindingID != currentBindingID {
+			if _, err := tx.ExecContext(ctx, `UPDATE browser_lane_bindings SET
+				enabled=0,binding_version=binding_version+1,updated_at=?
+				WHERE binding_id=? AND enabled=1`, stamp(now), value.bindingID); err != nil {
+				return fmt.Errorf("disable superseded role binding: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE session_provision_requests SET
+			status='superseded',completion_reason='replaced_by_current_session',updated_at=?
+			WHERE id=? AND status='provisioned'`, stamp(now), value.requestID); err != nil {
+			return fmt.Errorf("supersede prior role session: %w", err)
+		}
+	}
+	return nil
 }
 
 func requireProvisionTargetFree(ctx context.Context, tx *sql.Tx, projectID int64, laneKey, workerID string, target browserbinding.TargetRef) error {
