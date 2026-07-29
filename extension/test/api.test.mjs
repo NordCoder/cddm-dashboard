@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BackendClient, provisioningCompletionPayload } from "../src/api.js";
+import {
+  BackendClient,
+  provisioningCompletionPayload,
+  provisioningFinalizePayload,
+} from "../src/api.js";
 
 test("retries a transport failure with the same delivery claim request body", async () => {
   const requests = [];
@@ -29,7 +33,7 @@ test("bounds a hung backend request and retries the same logical operation", asy
   assert.equal(attempts, 2);
 });
 
-test("claims and completes durable provisioning requests through bounded endpoints", async () => {
+test("claims, completes, and atomically finalizes durable provisioning requests", async () => {
   const calls = [];
   const request = {
     request_id: "provision-one",
@@ -44,8 +48,16 @@ test("claims and completes durable provisioning requests through bounded endpoin
   const claimed = await client.claimProvision({ claim_request_id: "claim-one", claim_owner: "extension-worker", claim_ttl_seconds: 120 });
   assert.deepEqual(claimed, request);
   const target = { kind: "chatgpt_conversation", origin: "https://chatgpt.com", path: "/c/one" };
-  const payload = provisioningCompletionPayload(request, "surface_ready", { workerId: "managed-worker", tabId: 77, target });
-  await client.completeProvision(request.request_id, payload);
+  const completion = provisioningCompletionPayload(request, "surface_ready", { workerId: "managed-worker", tabId: 77, target });
+  await client.completeProvision(request.request_id, completion);
+  const finalize = provisioningFinalizePayload(request, {
+    worker_id: "managed-worker",
+    tab_id: 77,
+    target,
+    observed_chatgpt_url: "https://chatgpt.com/c/one",
+    attachment_evidence: ["03-qa-trigger.md", "gpt-gh-connector-guidelines.md"],
+  });
+  await client.finalizeProvision(request.request_id, finalize);
 
   assert.equal(calls[0].url, "http://localhost:8080/api/browser/provisioning/claim-next");
   assert.deepEqual(calls[0].body, { claim_request_id: "claim-one", claim_owner: "extension-worker", claim_ttl_seconds: 120 });
@@ -59,18 +71,28 @@ test("claims and completes durable provisioning requests through bounded endpoin
     tab_id: 77,
     target,
   });
+  assert.equal(calls[2].url, "http://localhost:8080/api/browser/provisioning/provision-one/finalize");
+  assert.deepEqual(calls[2].body, {
+    claim_owner: "extension-worker",
+    claim_token: "claim-token",
+    worker_id: "managed-worker",
+    tab_id: 77,
+    target,
+    observed_chatgpt_url: "https://chatgpt.com/c/one",
+    attachment_evidence: ["03-qa-trigger.md", "gpt-gh-connector-guidelines.md"],
+  });
 });
 
-test("provisioning completion diagnostics remain bounded and attachment evidence is explicit", () => {
+test("terminal completion diagnostics remain bounded and attachment evidence is explicit", () => {
   const request = { claim_owner: "extension", claim_token: "token" };
-  assert.deepEqual(provisioningCompletionPayload(request, "provisioned", {
-    reason: "exact attachments verified!",
+  assert.deepEqual(provisioningCompletionPayload(request, "uncertain", {
+    reason: "exact attachments could not be confirmed!",
     attachmentEvidence: ["03-qa-trigger.md", "gpt-gh-connector-guidelines.md"],
   }), {
     claim_owner: "extension",
     claim_token: "token",
-    outcome: "provisioned",
-    reason: "exact_attachments_verified_",
+    outcome: "uncertain",
+    reason: "exact_attachments_could_not_be_confirmed_",
     attachment_evidence: ["03-qa-trigger.md", "gpt-gh-connector-guidelines.md"],
   });
 });
