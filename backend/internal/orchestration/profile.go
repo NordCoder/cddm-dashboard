@@ -33,7 +33,7 @@ func (s *Store) ProjectProfile(ctx context.Context, projectID int64) (ProjectPro
 		project_id,resource_profile,methodology,result_protocol,delivery_mode,qa_session_mode,auto_merge,updated_at,
 		autonomy_mode,autonomy_state,control_issue_number,max_active_work_units,max_parallel_implementors,max_parallel_qa,
 		chatgpt_project_url
-	) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO NOTHING`,
+	) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO NOTHING`,
 		projectID, ManualResourceProfile, ManualMethodology, ManualResultProtocol, deliveryModeReviewed, qaModeManualFresh,
 		now, AutonomyModeManual, AutonomyStateDisabled, 0, 3, 3, 3, "")
 	if err != nil {
