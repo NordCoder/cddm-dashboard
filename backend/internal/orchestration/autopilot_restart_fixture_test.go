@@ -83,7 +83,7 @@ func finalizeSoakProvision(t *testing.T, service *orchestration.ProvisioningServ
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finalized.Status != orchestration.ProvisionProvisioned || finalized.BoundBindingID == "" || finalized.BoundBindingVersion <= 0 || finalized.Target == nil {
+	if finalized.Status != orchestration.ProvisionProvisioned || finalized.WorkerSessionID != sessionID || finalized.BoundBindingID == "" || finalized.BoundBindingVersion <= 0 || finalized.Target == nil {
 		t.Fatalf("finalized %s provisioning = %+v", stage, finalized)
 	}
 	return finalized
