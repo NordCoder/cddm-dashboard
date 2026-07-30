@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/NordCoder/cddm-dashboard/backend/internal/browserbinding"
 	"github.com/NordCoder/cddm-dashboard/backend/internal/orchestration"
@@ -35,7 +36,7 @@ func TestOperationsProjectionExposesClaimedAndStandaloneProvisionedEvidence(t *t
 	}
 
 	provisions := provisioningService(t, store)
-	bindings := browserbinding.New(db, 0)
+	bindings := browserbinding.New(db, time.Minute)
 	finalizer, err := orchestration.NewProvisioningFinalizer(store, bindings)
 	if err != nil {
 		t.Fatal(err)
