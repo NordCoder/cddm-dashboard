@@ -12,7 +12,7 @@ import (
 
 func TestOperationsProjectionExposesClaimedAndStandaloneProvisionedEvidence(t *testing.T) {
 	ctx := context.Background()
-	db, project, store, scheduler, snapshot, sourceCommandID := schedulerFixture(t, ":memory:", 3, 3, 3)
+	db, project, store, scheduler, _, sourceCommandID := schedulerFixture(t, ":memory:", 3, 3, 3)
 	if _, err := store.UpdateProjectProfile(ctx, orchestration.ProjectProfileInput{
 		ProjectID: project.ID, AutonomyMode: orchestration.AutonomyModeContinuous,
 		AutonomyState: orchestration.AutonomyStateEnabled, ControlIssueNumber: 90,
@@ -21,6 +21,7 @@ func TestOperationsProjectionExposesClaimedAndStandaloneProvisionedEvidence(t *t
 	}); err != nil {
 		t.Fatal(err)
 	}
+	snapshot := persistRestartSoakSnapshot(t, db, project)
 
 	claimedInput := schedulerIntent(project.ID, sourceCommandID, "stage-claimed", orchestration.ActionDispatch, 101, "implementor", 10, fmt.Sprintf("project:%d:issue:101:implementor", project.ID))
 	provisionedInput := schedulerIntent(project.ID, sourceCommandID, "stage-provisioned", orchestration.ActionDispatch, 102, "implementor", 20, fmt.Sprintf("project:%d:issue:102:implementor", project.ID))
