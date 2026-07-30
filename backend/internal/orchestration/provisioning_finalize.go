@@ -39,7 +39,8 @@ func (s *ProvisioningFinalizer) Finalize(ctx context.Context, input FinalizeProv
 	if err != nil {
 		return ProvisionRequest{}, err
 	}
-	if err := s.bindings.RequireFreshTarget(input.WorkerID, target); err != nil {
+	workerSessionID, err := s.bindings.RequireFreshTargetSession(input.WorkerID, target)
+	if err != nil {
 		return ProvisionRequest{}, ErrConflict
 	}
 
@@ -96,11 +97,11 @@ func (s *ProvisioningFinalizer) Finalize(ctx context.Context, input FinalizeProv
 		return ProvisionRequest{}, err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE session_provision_requests SET
-		status='provisioned',target_kind=?,target_origin=?,target_path=?,observed_chatgpt_url=?,
+		status='provisioned',worker_session_id=?,target_kind=?,target_origin=?,target_path=?,observed_chatgpt_url=?,
 		bound_binding_id=?,bound_binding_version=?,attachment_evidence_json=?,completion_reason='exact_session_bound',
 		updated_at=?,completed_at=?
 		WHERE id=? AND status='surface_ready' AND claim_owner=? AND claim_token=? AND worker_id=? AND tab_id=?`,
-		target.Kind, target.Origin, target.Path, observedURL, bindingID, bindingVersion, string(evidenceJSON),
+		workerSessionID, target.Kind, target.Origin, target.Path, observedURL, bindingID, bindingVersion, string(evidenceJSON),
 		stamp(now), stamp(now), request.ID, input.ClaimOwner, input.ClaimToken, input.WorkerID, input.TabID)
 	if err != nil {
 		return ProvisionRequest{}, fmt.Errorf("finalize session provision request: %w", err)
