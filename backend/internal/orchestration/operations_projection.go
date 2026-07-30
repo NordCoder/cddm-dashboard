@@ -274,10 +274,8 @@ func (s *OperationsService) listBreakers(ctx context.Context, projectID int64) (
 }
 
 func (s *OperationsService) listProvisioning(ctx context.Context, projectID int64) ([]ProvisioningProjection, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT p.id,p.project_id,p.intent_id,p.lane_lease_id,p.lane_key,p.issue_number,p.role,p.expected_head,p.status,p.completion_reason,p.worker_id,COALESCE(d.worker_session_id,''),p.tab_id,p.observed_chatgpt_url,p.bound_binding_id,p.bound_binding_version,p.created_at,p.updated_at
+	rows, err := s.store.db.QueryContext(ctx, `SELECT p.id,p.project_id,p.intent_id,p.lane_lease_id,p.lane_key,p.issue_number,p.role,p.expected_head,p.status,p.completion_reason,p.worker_id,p.worker_session_id,p.tab_id,p.observed_chatgpt_url,p.bound_binding_id,p.bound_binding_version,p.created_at,p.updated_at
 		FROM session_provision_requests p
-		LEFT JOIN autonomous_command_materializations m ON m.project_id=p.project_id AND m.provision_request_id=p.id
-		LEFT JOIN delivery_commands d ON d.id=m.delivery_command_id
 		WHERE p.project_id=? ORDER BY p.created_at DESC,p.id`, projectID)
 	if err != nil {
 		return nil, err
