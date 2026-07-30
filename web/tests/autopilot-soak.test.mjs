@@ -88,6 +88,30 @@ test('requires every authoritative top-level collection', () => {
   }
 })
 
+test('rejects every conflicting active lease mirror field', () => {
+  const mutations = {
+    project_id: 10,
+    intent_id: 'intent-qa',
+    lane_key: 'project:9:issue:999:implementor',
+    claim_id: 'claim-other',
+    lease_owner: 'other-owner',
+    acquired_at: '2026-07-29T18:00:00Z',
+    expires_at: '2026-07-29T19:00:00Z',
+    released_at: '2026-07-29T20:00:00Z',
+  }
+  for (const [field, replacement] of Object.entries(mutations)) {
+    const value = projection()
+    value.active_leases[0][field] = replacement
+    assert.throws(() => parseAutopilotStatus(value), new RegExp(`active_leases\\[0\\]\\.${field}`))
+  }
+})
+
+test('rejects provisioned request without durable managed session identity', () => {
+  const value = projection()
+  delete value.provisioning[0].worker_session_id
+  assert.throws(() => parseAutopilotStatus(value), /provisioning\[0\]\.worker_session_id/)
+})
+
 test('rejects orphaned provisioning Intent and lease identities', () => {
   const missingIntent = projection()
   missingIntent.provisioning[0].intent_id = 'intent-missing'
