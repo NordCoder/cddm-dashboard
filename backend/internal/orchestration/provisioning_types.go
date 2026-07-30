@@ -42,6 +42,7 @@ type ProvisionRequest struct {
 	ClaimToken             string                    `json:"claim_token,omitempty"`
 	ClaimExpiresAt         *time.Time                `json:"claim_expires_at,omitempty"`
 	WorkerID               string                    `json:"worker_id,omitempty"`
+	WorkerSessionID        string                    `json:"worker_session_id,omitempty"`
 	TabID                  int                       `json:"tab_id,omitempty"`
 	Target                 *browserbinding.TargetRef `json:"target,omitempty"`
 	ObservedChatGPTURL     string                    `json:"observed_chatgpt_url,omitempty"`
