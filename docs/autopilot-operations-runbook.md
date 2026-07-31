@@ -11,7 +11,7 @@ Operate and diagnose the continuous Dashboard loop without creating new product 
 3. Confirm the latest GitHub synchronization is completed and healthy.
 4. Inspect the active Wave, all durable Intents and leases, circuit breakers, ambiguous records and stale-Head warnings.
 5. Enable Autopilot with the current operator revision.
-6. Observe one evidence row for every Intent, including lease-only `claimed`, standalone `provisioned`, command and merge stages.
+6. Observe one evidence row for every Intent, including lease-only `claimed`, standalone `provisioned`, pending materialization, command and merge stages.
 
 ## Controls
 
@@ -34,14 +34,25 @@ Before recovery, breaker resolution, delivery retry decisions or cleanup, record
 | Worker result | GitHub result-comment ID, Workflow Command ID, Issue, role, result, payload hash, validation status/reason and accepted/observed timestamps |
 | Merge read-back | Merge-cycle ID, referenced merge Intent, Issue, PR, approved Head, status and observed merge commit |
 
-The lease token is a transition credential and is intentionally absent from the operator projection. Record the lease ID and claim ID instead. `active_leases` is an exact filtered mirror: every authoritative active lease must appear exactly once, no non-active lease may appear, every non-secret field must match the authoritative record in `leases`, and the active count must agree. The queue must likewise contain each pending, blocked, claimed or ambiguous Intent exactly once and no terminal Intent. A `provisioned` record must carry its own durable managed session ID even when no materialization or delivery command exists. Every queue, lease, provisioning, command, result and merge record must resolve to the exact durable parent identities shown in the same response. If any authoritative collection, parent record, required member or cross-link is absent, duplicated or incompatible, treat the projection as malformed, keep work paused and investigate rather than substituting a default.
+The lease token is a transition credential and is intentionally absent from the operator projection. Record the lease ID and claim ID instead. `active_leases` is an exact filtered mirror: every authoritative active lease must appear exactly once, no non-active lease may appear, every non-secret field must match the authoritative record in `leases`, and the active count must agree. The queue must likewise contain each pending, blocked, claimed or ambiguous Intent exactly once and no terminal Intent. A `provisioned` record must carry its own durable managed session ID even when no materialization or delivery command exists. A pending materialization before delivery creation must continue exposing that same provisioning-owned worker/session/tab/binding chain. Every queue, lease, provisioning, command, result and merge record must resolve to the exact durable parent identities shown in the same response.
+
+All displayed derived state is part of the same fail-closed read model. Pending, blocked and claimed Intent counts, provisioning and managed-session counts, active command and breaker counts, Lead-busy state and Project hold reason must agree with the authoritative arrays in the response. The ambiguous count may include additional durable evidence not expanded into rows, but it must never be smaller than the ambiguous Intents, commands and results that are shown. If any collection, parent record, required member, derived value or cross-link is absent, duplicated or incompatible, treat the projection as malformed, keep work paused and investigate rather than substituting a default.
+
+## Provisioning commit interpretation
+
+The managed session is process-local presence evidence until provisioning commits it durably. Finalization holds the exact browser-session snapshot stable through the entire SQL transaction and releases it only after commit or rollback.
+
+- Do not treat a pre-transaction session lookup as durable proof.
+- If a second session or conflicting target appears before finalization acquires the exact-session lock, finalization must fail with conflict.
+- Registration and heartbeat for the same worker may resume after commit; the committed provisioning record remains bound to the session ID proven under the lock.
+- A failed transaction must not leave a binding, session ID or provisioned status behind.
 
 ## Upgrade interpretation
 
 Migration 18 introduces durable provisioning-owned session identity.
 
-- A version-17 provisioned request linked to a materialized delivery is backfilled from that exact delivery's managed session ID.
-- A version-17 standalone provisioned request has no durable source from which to recover the session identity. The migration preserves its evidence but changes it to terminal `uncertain` with reason `missing_durable_session_identity_after_upgrade`.
+- A version-17 provisioned request linked to a materialized delivery is backfilled only when Project, worker, binding ID and binding version all match that exact delivery.
+- A version-17 standalone or identity-conflicting provisioned request has no trustworthy durable source from which to recover the session identity. The migration preserves its evidence but changes it to terminal `uncertain` with reason `missing_durable_session_identity_after_upgrade`.
 - Do not manually relabel such a quarantined record as `provisioned`, infer a session from a live tab, or reuse the old binding. Resolve it through the normal bounded recovery path.
 
 ## Circuit-breaker recovery
@@ -64,6 +75,7 @@ Acknowledgement records operator awareness but does not unblock work. Resolve on
 - `claimed`: the evidence row ends at the durable lease until provisioning begins; claim, owner and timestamps remain visible.
 - `surface_ready`: bootstrap phase decides recovery. `send_reserved` is terminal uncertain and is never resent automatically.
 - `provisioned`: the evidence row includes the provisioning-owned worker/session/tab/binding chain even before materialization exists.
+- pending materialization: keep the same provisioning-owned session and binding visible even though Workflow Command or delivery identity may not exist yet.
 - `target_observed`: retry finalization against the same tab, target and attachment evidence; do not resend bootstrap.
 - `delivery_pending` or `awaiting_result`: retain the same Intent, lease, provisioning request, managed session, binding, materialization, Workflow Command and delivery identities.
 - `ambiguous` or `uncertain`: preserve all evidence and trip the narrowest valid circuit breaker or operator recovery path.
@@ -77,19 +89,20 @@ Use a temporary Issue, temporary branch, disposable ChatGPT conversation and a d
 3. Start with Autopilot paused and zero active breaker in the test lane.
 4. Resume and verify the `claimed` row contains the exact Intent, lane, lease, claim, owner, acquisition and expiry fields before provisioning exists.
 5. Complete provisioning and verify the same row adds the durable worker session, tab and binding without requiring a command.
-6. Before bootstrap, restart the extension and verify the same provisioning request, worker, session, tab and binding are reused.
-7. In a separate disposable attempt, interrupt after send reservation and verify terminal `uncertain` with no resend.
-8. Verify target observation and finalization retain the exact Project conversation, tab, binding ID and binding version.
-9. Deliver one assignment and verify its materialization ID, provisioning request ID, Workflow Command ID/status, delivery command ID/status, expected Head, context hash and prompt hash.
-10. Restart during assignment delivery and verify the same ledger identity reports uncertain rather than sending again.
-11. Publish one valid correlated result comment, synchronize GitHub and verify its comment ID, command ID, Issue, role and validation state against the original chain.
-12. Repeat the same comment, action, claim and command identities; verify no duplicate command, lease, route or result record.
-13. Introduce a stale Head in a separate disposable Intent; verify supersede/block without retargeting.
-14. Trip a lane breaker, verify unrelated lanes continue, acknowledge it, and verify the lane remains blocked until the complete recovery row is rechecked.
-15. For a merge attempt, record merge-cycle ID, referenced Intent, Issue, PR, approved Head and observed merge commit; reject any mismatched read-back.
-16. Stop Autopilot and verify only safe pre-send pending records are superseded while durable evidence remains visible.
-17. Delete or close disposable GitHub and ChatGPT artifacts only after the final projection still shows the same correlated identities and all uncertain work is resolved.
+6. Create a pending materialization without delivering it and verify the command column retains the same worker/session/tab/binding evidence while Workflow Command and delivery IDs remain absent.
+7. Before bootstrap, restart the extension and verify the same provisioning request, worker, session, tab and binding are reused.
+8. In a separate disposable attempt, interrupt after send reservation and verify terminal `uncertain` with no resend.
+9. Verify target observation and finalization retain the exact Project conversation, tab, binding ID and binding version.
+10. Deliver one assignment and verify its materialization ID, provisioning request ID, Workflow Command ID/status, delivery command ID/status, expected Head, context hash and prompt hash.
+11. Restart during assignment delivery and verify the same ledger identity reports uncertain rather than sending again.
+12. Publish one valid correlated result comment, synchronize GitHub and verify its comment ID, command ID, Issue, role and validation state against the original chain.
+13. Repeat the same comment, action, claim and command identities; verify no duplicate command, lease, route or result record.
+14. Introduce a stale Head in a separate disposable Intent; verify supersede/block without retargeting.
+15. Trip a lane breaker, verify unrelated lanes continue, acknowledge it, and verify the lane remains blocked until the complete recovery row is rechecked.
+16. For a merge attempt, record merge-cycle ID, referenced Intent, Issue, PR, approved Head and observed merge commit; reject any mismatched read-back.
+17. Stop Autopilot and verify only safe pre-send pending records are superseded while durable evidence remains visible.
+18. Delete or close disposable GitHub and ChatGPT artifacts only after the final projection still shows the same correlated identities and all uncertain work is resolved.
 
 ## Escalation
 
-Stop and require owner review when GitHub facts conflict, the exact ChatGPT Project cannot be proven, attachment evidence drifts, a browser send is uncertain, result comments conflict, the projection omits an authoritative collection or identity, any derived collection is incomplete or duplicated, any projected record is orphaned or conflicts with its authoritative mirror, an upgraded provisioning record lacks recoverable session identity, or merge read-back does not match the approved Head. Never infer success from ChatGPT response content.
+Stop and require owner review when GitHub facts conflict, the exact ChatGPT Project cannot be proven, attachment evidence drifts, a browser send is uncertain, result comments conflict, the projection omits an authoritative collection or identity, any derived collection or metric is incomplete or duplicated, Lead/hold state conflicts with authoritative records, any projected record is orphaned or conflicts with its authoritative mirror, a pending materialization loses its provisioning-owned session evidence, an upgraded provisioning record lacks recoverable session identity, or merge read-back does not match the approved Head. Never infer success from ChatGPT response content.
