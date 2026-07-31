@@ -14,7 +14,7 @@ const base = {
   control: { project_id: 1, revision: 4, last_action: 'resume', updated_at: timestamp },
   intents: [], queue: [], leases: [], active_leases: [], provisioning: [], commands: [], results: [], circuit_breakers: [], warnings: [], merge_cycles: [],
   counts: { pending_intents: 0, blocked_intents: 0, claimed_intents: 0, active_leases: 0, pending_provisioning: 0, managed_sessions: 0, active_commands: 0, active_circuit_breakers: 0, ambiguous_records: 0 },
-  lead_busy: false, next_action: 'No automatic work is queued.', generated_at: timestamp,
+  lead_busy: false, next_action: 'No automatic work is queued. The persistent Lead may plan the next bounded Wave.', generated_at: timestamp,
 }
 
 test('parses Autopilot operations projection', () => {
@@ -31,6 +31,7 @@ test('accepts the exact disabled manual profile without inventing a Control Issu
     resource_version: 'cddm-dashboard-resources/v1.0', methodology_version: 'cddm-minimal/v2.0', result_protocol: 'cddm-worker-result/v1',
     delivery_mode: 'reviewed', autonomy_mode: 'manual_owner_dispatch', autonomy_state: 'disabled', control_issue_number: 0, chatgpt_project_url: '',
   }
+  manual.next_action = 'Enable Autopilot after verifying the continuous profile and GitHub synchronization.'
   const parsed = parseAutopilotStatus(manual)
   assert.equal(parsed.profile.control_issue_number, 0)
 })
