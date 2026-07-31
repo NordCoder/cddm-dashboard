@@ -31,7 +31,7 @@ function projection() {
       pending_provisioning: 0, managed_sessions: 0, active_commands: 0,
       active_circuit_breakers: 0, ambiguous_records: 0,
     },
-    lead_busy: false, next_action: 'Observe current durable work.', generated_at: timestamp,
+    lead_busy: false, next_action: 'Observe current durable work; do not replay or retarget active commands.', generated_at: timestamp,
   }
 }
 
@@ -135,4 +135,70 @@ test('rejects a Project hold reason that is absent from blocked Project evidence
   value.queue.unshift({ intent: { ...hold }, waiting_reason: 'owner_required' })
   value.counts.blocked_intents = 1
   assert.throws(() => parseAutopilotStatus(value), /project_hold_reason/)
+})
+
+test('accepts the first non-empty Project hold reason after a blank blocked record', () => {
+  const value = projection()
+  const blank = {
+    ...value.intents[0], intent_id: 'intent-hold-blank', source_result_comment_id: 4,
+    source_command_id: 'source-hold-blank', action_id: 'action-hold-blank', action_type: 'hold', status: 'blocked', priority: 1,
+  }
+  const owner = {
+    ...value.intents[0], intent_id: 'intent-hold-owner', source_result_comment_id: 5,
+    source_command_id: 'source-hold-owner', action_id: 'action-hold-owner', action_type: 'hold', status: 'blocked', reason_code: 'owner_required', priority: 2,
+  }
+  for (const item of [blank, owner]) {
+    delete item.issue_number
+    delete item.role
+    delete item.lane_key
+  }
+  delete blank.reason_code
+  value.intents.unshift(blank, owner)
+  value.queue.unshift(
+    { intent: { ...blank }, waiting_reason: 'blocked' },
+    { intent: { ...owner }, waiting_reason: 'owner_required' },
+  )
+  value.counts.blocked_intents = 2
+  value.project_hold_reason = 'owner_required'
+  value.next_action = 'Resolve the Project hold or owner-required condition.'
+  assert.doesNotThrow(() => parseAutopilotStatus(value))
+})
+
+test('rejects queue guidance that disagrees with control and lane state', () => {
+  const value = projection()
+  value.queue[0].waiting_reason = 'ready'
+  assert.throws(() => parseAutopilotStatus(value), /queue\[0\]\.waiting_reason/)
+})
+
+test('rejects next_action that disagrees with authoritative current work', () => {
+  const value = projection()
+  value.next_action = 'No automatic work is queued. The persistent Lead may plan the next bounded Wave.'
+  assert.throws(() => parseAutopilotStatus(value), /next_action/)
+})
+
+test('rejects two active leases occupying the same scheduler lane', () => {
+  const value = projection()
+  const secondIntent = {
+    ...value.intents[0], intent_id: 'intent-two', source_result_comment_id: 6,
+    source_command_id: 'source-two', action_id: 'action-two', issue_number: 102,
+  }
+  const secondLease = {
+    ...value.leases[0], lease_id: 'lease-two', intent_id: secondIntent.intent_id, claim_id: 'claim-two',
+  }
+  value.intents.push(secondIntent)
+  value.queue.push({ intent: { ...secondIntent }, waiting_reason: 'active lane lease' })
+  value.leases.push(secondLease)
+  value.active_leases.push({ ...secondLease })
+  value.counts.claimed_intents = 2
+  value.counts.active_leases = 2
+  assert.throws(() => parseAutopilotStatus(value), /active_leases\[1\]\.lane_key/)
+})
+
+test('rejects duplicate Issue identities inside the active Wave', () => {
+  const value = projection()
+  value.active_wave = {
+    project_id: 1, wave_id: 'wave-one', control_issue_number: 90, source_command_id: 'source-wave',
+    status: 'active', issues: [101, 101], created_at: timestamp, updated_at: timestamp,
+  }
+  assert.throws(() => parseAutopilotStatus(value), /active_wave\.issues\[1\]/)
 })
