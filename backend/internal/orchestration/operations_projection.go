@@ -67,6 +67,7 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 	}
 
 	activeLanes := make(map[string]bool)
+	activeIntentIDs := make(map[string]bool)
 	allLeases := make([]LeaseProjection, 0, len(leases))
 	activeLeases := make([]LeaseProjection, 0)
 	intentByID := make(map[string]Intent, len(intents))
@@ -80,10 +81,26 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 		if lease.Status != LeaseActive {
 			continue
 		}
+		intent, ok := intentByID[lease.IntentID]
+		if !ok || intent.Status != IntentClaimed || intent.LaneKey != lease.LaneKey {
+			return AutopilotStatus{}, fmt.Errorf("active lease %q conflicts with its authoritative Intent", lease.ID)
+		}
+		if activeLanes[lease.LaneKey] {
+			return AutopilotStatus{}, fmt.Errorf("multiple active leases occupy lane %q", lease.LaneKey)
+		}
+		if activeIntentIDs[lease.IntentID] {
+			return AutopilotStatus{}, fmt.Errorf("multiple active leases reference Intent %q", lease.IntentID)
+		}
 		activeLeases = append(activeLeases, projected)
 		activeLanes[lease.LaneKey] = true
-		if intentByID[lease.IntentID].Role == "lead" {
+		activeIntentIDs[lease.IntentID] = true
+		if intent.Role == "lead" {
 			leadBusy = true
+		}
+	}
+	for _, intent := range intents {
+		if (intent.Status == IntentClaimed) != activeIntentIDs[intent.ID] {
+			return AutopilotStatus{}, fmt.Errorf("claimed Intent %q does not have exactly one active lease", intent.ID)
 		}
 	}
 	projectBreaker := false
