@@ -74,4 +74,25 @@ func TestOperationsProjectionExposesClaimedAndStandaloneProvisionedEvidence(t *t
 	if request.ID != finalized.ID || request.LeaseID != provisioned.Lease.ID || request.WorkerID != finalized.WorkerID || request.WorkerSessionID != finalized.WorkerSessionID || request.TabID != finalized.TabID || request.BoundBindingID != finalized.BoundBindingID || request.BoundBindingVersion != finalized.BoundBindingVersion || request.Status != orchestration.ProvisionProvisioned {
 		t.Fatalf("standalone provisioned evidence = %+v, finalized=%+v", request, finalized)
 	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(ctx, `INSERT INTO autonomous_command_materializations(
+		id,project_id,intent_id,lease_id,provision_request_id,scheduler_lane_key,status,created_at,updated_at
+	) VALUES(?,?,?,?,?,?,'pending',?,?)`,
+		"materialization-pending-stage", project.ID, provisionedInput.ID, provisioned.Lease.ID,
+		finalized.ID, provisionedInput.LaneKey, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err = orchestration.NewOperationsService(store).Status(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Commands) != 1 {
+		t.Fatalf("pending command projection = %+v", status.Commands)
+	}
+	command := status.Commands[0]
+	if command.Status != orchestration.AutonomousMaterializationPending || command.DeliveryCommandID != "" || command.WorkerSessionID != finalized.WorkerSessionID || command.WorkerID != finalized.WorkerID || command.BindingID != finalized.BoundBindingID || command.BindingVersion != finalized.BoundBindingVersion {
+		t.Fatalf("pending materialization lost provisioning-owned session evidence: %+v, finalized=%+v", command, finalized)
+	}
 }
