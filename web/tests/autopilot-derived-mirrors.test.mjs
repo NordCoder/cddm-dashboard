@@ -78,3 +78,61 @@ test('rejects multiple provisioning records for one authoritative Intent', () =>
   ]
   assert.throws(() => parseAutopilotStatus(value), /provisioning\[1\]\.intent_id.*one provisioning record per Intent/)
 })
+
+test('rejects every derived metric that disagrees with authoritative arrays', () => {
+  const replacements = {
+    pending_intents: 1,
+    blocked_intents: 1,
+    claimed_intents: 0,
+    pending_provisioning: 1,
+    managed_sessions: 1,
+    active_commands: 1,
+    active_circuit_breakers: 1,
+  }
+  for (const [field, replacement] of Object.entries(replacements)) {
+    const value = projection()
+    value.counts[field] = replacement
+    assert.throws(() => parseAutopilotStatus(value), new RegExp(`counts\\.${field}`))
+  }
+})
+
+test('rejects an ambiguous count below the represented evidence', () => {
+  const value = projection()
+  const ambiguous = {
+    ...value.intents[0],
+    intent_id: 'intent-ambiguous', source_result_comment_id: 2, source_command_id: 'source-two', action_id: 'action-two',
+    issue_number: 102, lane_key: 'project:1:issue:102:implementor', status: 'ambiguous',
+  }
+  value.intents.push(ambiguous)
+  value.queue.push({ intent: { ...ambiguous }, waiting_reason: 'ambiguous evidence requires operator recovery' })
+  value.counts.ambiguous_records = 0
+  assert.throws(() => parseAutopilotStatus(value), /counts\.ambiguous_records/)
+})
+
+test('rejects lead_busy that disagrees with the active Lead lease', () => {
+  const value = projection()
+  value.intents[0].role = 'lead'
+  value.intents[0].lane_key = 'project:1:lead'
+  value.queue[0].intent.role = 'lead'
+  value.queue[0].intent.lane_key = 'project:1:lead'
+  value.leases[0].lane_key = 'project:1:lead'
+  value.active_leases[0].lane_key = 'project:1:lead'
+  value.lead_busy = false
+  assert.throws(() => parseAutopilotStatus(value), /lead_busy/)
+})
+
+test('rejects a Project hold reason that is absent from blocked Project evidence', () => {
+  const value = projection()
+  const hold = {
+    ...value.intents[0],
+    intent_id: 'intent-hold', source_result_comment_id: 3, source_command_id: 'source-hold', action_id: 'action-hold',
+    action_type: 'hold', status: 'blocked', reason_code: 'owner_required', priority: 1,
+  }
+  delete hold.issue_number
+  delete hold.role
+  delete hold.lane_key
+  value.intents.unshift(hold)
+  value.queue.unshift({ intent: { ...hold }, waiting_reason: 'owner_required' })
+  value.counts.blocked_intents = 1
+  assert.throws(() => parseAutopilotStatus(value), /project_hold_reason/)
+})
