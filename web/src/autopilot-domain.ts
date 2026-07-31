@@ -332,11 +332,22 @@ function validateIdentityGraph(status: AutopilotStatus): void {
     same(intent.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     same(intent.repository, status.repository, `${path}.repository`, 'top-level repository identity')
   })
+
+  const queueIntentIDs = new Set<string>()
   status.queue.forEach((entry, index) => {
     const path = `$.queue[${index}].intent`
+    if (queueIntentIDs.has(entry.intent.intent_id)) throw new ValidationError(`${path}.intent_id`, 'unique queued Intent identity')
+    queueIntentIDs.add(entry.intent.intent_id)
     const intent = intentByID.get(entry.intent.intent_id)
     if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
     compareIntent(entry.intent, intent, path)
+  })
+  const queuedStatuses = new Set(['pending', 'blocked', 'claimed', 'ambiguous'])
+  status.intents.forEach((intent) => {
+    const shouldBeQueued = queuedStatuses.has(intent.status)
+    if (queueIntentIDs.has(intent.intent_id) !== shouldBeQueued) {
+      throw new ValidationError('$.queue', `exact queue membership for Intent ${intent.intent_id}`)
+    }
   })
 
   const leaseByID = new Map<string, AutopilotLease>()
@@ -349,19 +360,31 @@ function validateIdentityGraph(status: AutopilotStatus): void {
     if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
     same(lease.lane_key, intent.lane_key, `${path}.lane_key`, 'lane identity matching referenced Intent')
   })
+  const activeLeaseIDs = new Set<string>()
   status.active_leases.forEach((active, index) => {
     const path = `$.active_leases[${index}]`
+    if (activeLeaseIDs.has(active.lease_id)) throw new ValidationError(`${path}.lease_id`, 'unique active lease identity')
+    activeLeaseIDs.add(active.lease_id)
     const lease = leaseByID.get(active.lease_id)
     if (!lease) throw new ValidationError(`${path}.lease_id`, 'lease identity present in durable leases')
     compareLease(active, lease, path)
     same(active.status, 'active', `${path}.status`, 'active lease status')
   })
+  status.leases.forEach((lease) => {
+    if ((lease.status === 'active') !== activeLeaseIDs.has(lease.lease_id)) {
+      throw new ValidationError('$.active_leases', `complete active lease mirror for ${lease.lease_id}`)
+    }
+  })
+  same(status.counts.active_leases, activeLeaseIDs.size, '$.counts.active_leases', 'active lease count matching exact active mirror')
 
   const provisionByID = new Map<string, AutopilotProvisioning>()
+  const provisionIntentIDs = new Set<string>()
   status.provisioning.forEach((request, index) => {
     const path = `$.provisioning[${index}]`
     if (provisionByID.has(request.id)) throw new ValidationError(`${path}.id`, 'unique provisioning identity')
+    if (provisionIntentIDs.has(request.intent_id)) throw new ValidationError(`${path}.intent_id`, 'one provisioning record per Intent')
     provisionByID.set(request.id, request)
+    provisionIntentIDs.add(request.intent_id)
     same(request.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(request.intent_id)
     if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
@@ -376,8 +399,11 @@ function validateIdentityGraph(status: AutopilotStatus): void {
   })
 
   const commandByWorkflowID = new Map<string, AutopilotCommand>()
+  const commandIntentIDs = new Set<string>()
   status.commands.forEach((command, index) => {
     const path = `$.commands[${index}]`
+    if (commandIntentIDs.has(command.intent_id)) throw new ValidationError(`${path}.intent_id`, 'one command materialization per Intent')
+    commandIntentIDs.add(command.intent_id)
     same(command.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(command.intent_id)
     if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
@@ -414,8 +440,12 @@ function validateIdentityGraph(status: AutopilotStatus): void {
     same(result.role, command.role, `${path}.role`, 'role matching Workflow Command')
   })
   status.circuit_breakers.forEach((breaker, index) => same(breaker.project_id, status.project_id, `$.circuit_breakers[${index}].project_id`, 'top-level project identity'))
+
+  const mergeIntentIDs = new Set<string>()
   status.merge_cycles.forEach((cycle, index) => {
     const path = `$.merge_cycles[${index}]`
+    if (mergeIntentIDs.has(cycle.intent_id)) throw new ValidationError(`${path}.intent_id`, 'one merge read-back per Intent')
+    mergeIntentIDs.add(cycle.intent_id)
     same(cycle.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(cycle.intent_id)
     if (!intent) throw new ValidationError(`${path}.intent_id`, 'Intent identity present in authoritative intents')
