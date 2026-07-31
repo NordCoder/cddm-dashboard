@@ -142,7 +142,11 @@ func (s *OperationsService) Status(ctx context.Context, projectID int64) (Autopi
 			counts.ActiveCircuitBreakers++
 		}
 	}
-	counts.AmbiguousRecords += countAmbiguousResults(ctx, s.store.db, projectID)
+	ambiguousResults, err := countAmbiguousResults(ctx, s.store.db, projectID)
+	if err != nil {
+		return AutopilotStatus{}, err
+	}
+	counts.AmbiguousRecords += ambiguousResults
 
 	status := AutopilotStatus{
 		ProjectID: projectID, Repository: owner + "/" + repository, SyncStatus: syncStatus, SyncError: syncError,
@@ -301,12 +305,12 @@ func (s *OperationsService) listProvisioning(ctx context.Context, projectID int6
 }
 
 func (s *OperationsService) listCommands(ctx context.Context, projectID int64) ([]CommandProjection, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT m.project_id,m.id,m.intent_id,m.lease_id,m.provision_request_id,m.scheduler_lane_key,i.issue_number,i.role,COALESCE(p.expected_head,i.expected_head,''),m.status,m.reason_code,m.workflow_command_id,COALESCE(w.status,''),m.delivery_command_id,COALESCE(d.status,''),COALESCE(p.worker_id,''),CASE WHEN d.id IS NULL THEN COALESCE(p.worker_session_id,'') ELSE d.worker_session_id END,COALESCE(p.tab_id,0),COALESCE(d.binding_id,p.bound_binding_id,''),COALESCE(d.binding_version,p.bound_binding_version,0),COALESCE(p.observed_chatgpt_url,''),m.context_hash,m.prompt_hash,m.updated_at
+	rows, err := s.store.db.QueryContext(ctx, `SELECT m.project_id,m.id,m.intent_id,m.lease_id,m.provision_request_id,m.scheduler_lane_key,i.issue_number,i.role,COALESCE(p.expected_head,i.expected_head,''),m.status,m.reason_code,m.workflow_command_id,COALESCE(w.status,''),m.delivery_command_id,COALESCE(d.status,''),CASE WHEN d.id IS NULL THEN COALESCE(p.worker_id,'') ELSE d.worker_id END,CASE WHEN d.id IS NULL THEN COALESCE(p.worker_session_id,'') ELSE d.worker_session_id END,COALESCE(p.tab_id,0),COALESCE(d.binding_id,p.bound_binding_id,''),COALESCE(d.binding_version,p.bound_binding_version,0),COALESCE(p.observed_chatgpt_url,''),m.context_hash,m.prompt_hash,m.updated_at
 		FROM autonomous_command_materializations m
 		JOIN workflow_intents i ON i.project_id=m.project_id AND i.id=m.intent_id
 		LEFT JOIN session_provision_requests p ON p.project_id=m.project_id AND p.id=m.provision_request_id
-		LEFT JOIN workflow_commands w ON w.id=m.workflow_command_id
-		LEFT JOIN delivery_commands d ON d.id=m.delivery_command_id
+		LEFT JOIN workflow_commands w ON w.project_id=m.project_id AND w.id=m.workflow_command_id
+		LEFT JOIN delivery_commands d ON d.project_id=m.project_id AND d.id=m.delivery_command_id
 		WHERE m.project_id=? ORDER BY m.created_at DESC,m.id`, projectID)
 	if err != nil {
 		return nil, err
@@ -318,6 +322,12 @@ func (s *OperationsService) listCommands(ctx context.Context, projectID int64) (
 		var updated string
 		if err := rows.Scan(&value.ProjectID, &value.MaterializationID, &value.IntentID, &value.LeaseID, &value.ProvisionRequestID, &value.LaneKey, &value.IssueNumber, &value.Role, &value.ExpectedHead, &value.Status, &value.ReasonCode, &value.WorkflowCommandID, &value.WorkflowStatus, &value.DeliveryCommandID, &value.DeliveryStatus, &value.WorkerID, &value.WorkerSessionID, &value.TabID, &value.BindingID, &value.BindingVersion, &value.ObservedChatGPTURL, &value.ContextHash, &value.PromptHash, &updated); err != nil {
 			return nil, err
+		}
+		if value.WorkflowCommandID != "" && value.WorkflowStatus == "" {
+			return nil, fmt.Errorf("workflow command %q for materialization %q is missing from project %d", value.WorkflowCommandID, value.MaterializationID, projectID)
+		}
+		if value.DeliveryCommandID != "" && value.DeliveryStatus == "" {
+			return nil, fmt.Errorf("delivery command %q for materialization %q is missing from project %d", value.DeliveryCommandID, value.MaterializationID, projectID)
 		}
 		parsed, err := time.Parse(time.RFC3339Nano, updated)
 		if err != nil {
@@ -405,12 +415,12 @@ func (s *OperationsService) listMergeCycles(ctx context.Context, projectID int64
 	return values, rows.Err()
 }
 
-func countAmbiguousResults(ctx context.Context, db *sql.DB, projectID int64) int {
+func countAmbiguousResults(ctx context.Context, db *sql.DB, projectID int64) (int, error) {
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_results WHERE project_id=? AND validation_status='ambiguous'`, projectID).Scan(&count); err != nil {
-		return 0
+		return 0, fmt.Errorf("count ambiguous workflow results: %w", err)
 	}
-	return count
+	return count, nil
 }
 
 func optionalTime(value string) (*time.Time, error) {
