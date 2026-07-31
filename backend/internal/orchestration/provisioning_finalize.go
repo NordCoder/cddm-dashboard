@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -39,80 +38,20 @@ func (s *ProvisioningFinalizer) Finalize(ctx context.Context, input FinalizeProv
 	if err != nil {
 		return ProvisionRequest{}, err
 	}
-	if err := s.bindings.RequireFreshTarget(input.WorkerID, target); err != nil {
-		return ProvisionRequest{}, ErrConflict
-	}
 
-	tx, err := s.store.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	defer tx.Rollback()
-	request, err := scanProvision(tx.QueryRowContext(ctx, provisionSelect+` WHERE id=?`, input.RequestID))
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	if request.Status != ProvisionSurfaceReady || request.ClaimOwner != input.ClaimOwner || request.ClaimToken != input.ClaimToken || request.WorkerID != input.WorkerID || request.TabID != input.TabID {
+	var requestID string
+	err = s.bindings.WithFreshTargetSession(input.WorkerID, target, func(workerSessionID string) error {
+		var commitErr error
+		requestID, commitErr = s.finalizeProvisioningWithSession(ctx, input, target, workerSessionID)
+		return commitErr
+	})
+	if errors.Is(err, browserbinding.ErrConflict) {
 		return ProvisionRequest{}, ErrConflict
 	}
-	if !equalProvisionStrings(request.Attachments, input.AttachmentEvidence) {
-		return ProvisionRequest{}, fmt.Errorf("attachment evidence must exactly match the frozen profile")
-	}
-	observedURL, err := validateObservedConversation(input.ObservedChatGPTURL, request.ChatGPTProjectURL, target)
 	if err != nil {
 		return ProvisionRequest{}, err
 	}
-	lease, err := leaseTx(ctx, tx, request.ProjectID, request.LaneLeaseID)
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	intent, err := scanIntent(tx.QueryRowContext(ctx, intentSelect+` WHERE id=? AND project_id=?`, request.IntentID, request.ProjectID))
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	if lease.Status != LeaseActive || lease.IntentID != intent.ID || lease.LaneKey != request.LaneKey || intent.Status != IntentClaimed || intent.LaneKey != request.LaneKey || intent.IssueNumber != request.IssueNumber || intent.Role != request.Role || provisionExpectedHead(intent) != request.ExpectedHead {
-		return ProvisionRequest{}, ErrConflict
-	}
-	profile, err := projectProfileTx(ctx, tx, request.ProjectID)
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	if profile.AutonomyMode != AutonomyModeContinuous || profile.AutonomyState != AutonomyStateEnabled || profile.ChatGPTProjectURL != request.ChatGPTProjectURL {
-		return ProvisionRequest{}, ErrConflict
-	}
-	if err := requireCurrentGitHubFacts(ctx, tx, request.ProjectID, intent); err != nil {
-		return ProvisionRequest{}, err
-	}
-	now := s.now().UTC()
-	bindingID, bindingVersion, err := finalizeBindingTx(ctx, tx, request, input.WorkerID, target, now)
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	if err := retireSupersededProvisioningTx(ctx, tx, request, bindingID, now); err != nil {
-		return ProvisionRequest{}, err
-	}
-	evidenceJSON, err := json.Marshal(input.AttachmentEvidence)
-	if err != nil {
-		return ProvisionRequest{}, err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE session_provision_requests SET
-		status='provisioned',target_kind=?,target_origin=?,target_path=?,observed_chatgpt_url=?,
-		bound_binding_id=?,bound_binding_version=?,attachment_evidence_json=?,completion_reason='exact_session_bound',
-		updated_at=?,completed_at=?
-		WHERE id=? AND status='surface_ready' AND claim_owner=? AND claim_token=? AND worker_id=? AND tab_id=?`,
-		target.Kind, target.Origin, target.Path, observedURL, bindingID, bindingVersion, string(evidenceJSON),
-		stamp(now), stamp(now), request.ID, input.ClaimOwner, input.ClaimToken, input.WorkerID, input.TabID)
-	if err != nil {
-		return ProvisionRequest{}, fmt.Errorf("finalize session provision request: %w", err)
-	}
-	count, _ := result.RowsAffected()
-	if count != 1 {
-		return ProvisionRequest{}, ErrConflict
-	}
-	if err := tx.Commit(); err != nil {
-		return ProvisionRequest{}, err
-	}
-	return s.storeProvision(ctx, request.ID)
+	return s.storeProvision(ctx, requestID)
 }
 
 func (s *ProvisioningFinalizer) storeProvision(ctx context.Context, requestID string) (ProvisionRequest, error) {

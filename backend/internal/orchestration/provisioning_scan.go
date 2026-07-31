@@ -11,7 +11,7 @@ import (
 
 const provisionSelect = `SELECT id,project_id,intent_id,lane_lease_id,lane_key,issue_number,role,expected_head,
 	attachment_profile,attachments_json,bootstrap_text,session_policy,chatgpt_project_url,expected_binding_version,status,
-	claim_id,claim_owner,claim_token,claim_expires_at,worker_id,tab_id,target_kind,target_origin,target_path,
+	claim_id,claim_owner,claim_token,claim_expires_at,worker_id,worker_session_id,tab_id,target_kind,target_origin,target_path,
 	observed_chatgpt_url,bound_binding_id,bound_binding_version,completion_reason,attachment_evidence_json,
 	created_at,updated_at,completed_at FROM session_provision_requests`
 
@@ -23,7 +23,7 @@ func scanProvision(row rowScanner) (ProvisionRequest, error) {
 		&value.IssueNumber, &value.Role, &value.ExpectedHead, &value.AttachmentProfile, &attachmentsJSON,
 		&value.BootstrapText, &value.SessionPolicy, &value.ChatGPTProjectURL, &value.ExpectedBindingVersion,
 		&value.Status, &value.ClaimID, &value.ClaimOwner, &value.ClaimToken, &claimExpires, &value.WorkerID,
-		&value.TabID, &targetKind, &targetOrigin, &targetPath, &value.ObservedChatGPTURL,
+		&value.WorkerSessionID, &value.TabID, &targetKind, &targetOrigin, &targetPath, &value.ObservedChatGPTURL,
 		&value.BoundBindingID, &value.BoundBindingVersion, &value.CompletionReason, &evidenceJSON,
 		&created, &updated, &completed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

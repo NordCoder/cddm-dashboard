@@ -74,9 +74,26 @@ type AutopilotQueueItem struct {
 	WaitingReason string `json:"waiting_reason,omitempty"`
 }
 
+// LeaseProjection intentionally excludes the lease token. Operators need the
+// durable identity and state, but the bearer credential is not evidence.
+type LeaseProjection struct {
+	ID         string     `json:"lease_id"`
+	ProjectID  int64      `json:"project_id"`
+	LaneKey    string     `json:"lane_key"`
+	IntentID   string     `json:"intent_id"`
+	ClaimID    string     `json:"claim_id"`
+	LeaseOwner string     `json:"lease_owner"`
+	Status     string     `json:"status"`
+	AcquiredAt time.Time  `json:"acquired_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	ReleasedAt *time.Time `json:"released_at,omitempty"`
+}
+
 type ProvisioningProjection struct {
 	ID                  string    `json:"id"`
+	ProjectID           int64     `json:"project_id"`
 	IntentID            string    `json:"intent_id"`
+	LeaseID             string    `json:"lease_id"`
 	LaneKey             string    `json:"lane_key"`
 	IssueNumber         int       `json:"issue_number"`
 	Role                string    `json:"role"`
@@ -84,6 +101,7 @@ type ProvisioningProjection struct {
 	Status              string    `json:"status"`
 	CompletionReason    string    `json:"completion_reason,omitempty"`
 	WorkerID            string    `json:"worker_id,omitempty"`
+	WorkerSessionID     string    `json:"worker_session_id,omitempty"`
 	TabID               int       `json:"tab_id,omitempty"`
 	ObservedChatGPTURL  string    `json:"observed_chatgpt_url,omitempty"`
 	BoundBindingID      string    `json:"bound_binding_id,omitempty"`
@@ -93,19 +111,44 @@ type ProvisioningProjection struct {
 }
 
 type CommandProjection struct {
-	MaterializationID string    `json:"materialization_id"`
-	IntentID          string    `json:"intent_id"`
-	LeaseID           string    `json:"lease_id"`
-	LaneKey           string    `json:"lane_key"`
-	Status            string    `json:"status"`
-	ReasonCode        string    `json:"reason_code,omitempty"`
-	WorkflowCommandID string    `json:"workflow_command_id,omitempty"`
-	WorkflowStatus    string    `json:"workflow_status,omitempty"`
-	DeliveryCommandID string    `json:"delivery_command_id,omitempty"`
-	DeliveryStatus    string    `json:"delivery_status,omitempty"`
-	ContextHash       string    `json:"context_hash,omitempty"`
-	PromptHash        string    `json:"prompt_hash,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ProjectID          int64     `json:"project_id"`
+	MaterializationID  string    `json:"materialization_id"`
+	IntentID           string    `json:"intent_id"`
+	LeaseID            string    `json:"lease_id"`
+	ProvisionRequestID string    `json:"provision_request_id"`
+	LaneKey            string    `json:"lane_key"`
+	IssueNumber        int       `json:"issue_number"`
+	Role               string    `json:"role"`
+	ExpectedHead       string    `json:"expected_head,omitempty"`
+	Status             string    `json:"status"`
+	ReasonCode         string    `json:"reason_code,omitempty"`
+	WorkflowCommandID  string    `json:"workflow_command_id,omitempty"`
+	WorkflowStatus     string    `json:"workflow_status,omitempty"`
+	DeliveryCommandID  string    `json:"delivery_command_id,omitempty"`
+	DeliveryStatus     string    `json:"delivery_status,omitempty"`
+	WorkerID           string    `json:"worker_id,omitempty"`
+	WorkerSessionID    string    `json:"worker_session_id,omitempty"`
+	TabID              int       `json:"tab_id,omitempty"`
+	BindingID          string    `json:"binding_id,omitempty"`
+	BindingVersion     int64     `json:"binding_version,omitempty"`
+	ObservedChatGPTURL string    `json:"observed_chatgpt_url,omitempty"`
+	ContextHash        string    `json:"context_hash,omitempty"`
+	PromptHash         string    `json:"prompt_hash,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type ResultProjection struct {
+	ProjectID        int64      `json:"project_id"`
+	GitHubCommentID  int64      `json:"github_comment_id"`
+	IssueNumber      int        `json:"issue_number"`
+	CommandID        string     `json:"command_id"`
+	Role             string     `json:"role"`
+	Result           string     `json:"result"`
+	PayloadHash      string     `json:"payload_hash"`
+	ValidationStatus string     `json:"validation_status"`
+	ValidationReason string     `json:"validation_reason,omitempty"`
+	AcceptedAt       *time.Time `json:"accepted_at,omitempty"`
+	ObservedAt       time.Time  `json:"observed_at"`
 }
 
 type AutopilotWarning struct {
@@ -120,6 +163,7 @@ type AutopilotWarning struct {
 
 type MergeCycleProjection struct {
 	ID                  string    `json:"id"`
+	ProjectID           int64     `json:"project_id"`
 	IntentID            string    `json:"intent_id"`
 	IssueNumber         int       `json:"issue_number"`
 	PRNumber            int       `json:"pr_number"`
@@ -150,10 +194,13 @@ type AutopilotStatus struct {
 	Profile           ProjectProfile           `json:"profile"`
 	Control           AutopilotControl         `json:"control"`
 	ActiveWave        *Wave                    `json:"active_wave,omitempty"`
+	Intents           []Intent                 `json:"intents"`
 	Queue             []AutopilotQueueItem     `json:"queue"`
-	ActiveLeases      []Lease                  `json:"active_leases"`
+	Leases            []LeaseProjection        `json:"leases"`
+	ActiveLeases      []LeaseProjection        `json:"active_leases"`
 	Provisioning      []ProvisioningProjection `json:"provisioning"`
 	Commands          []CommandProjection      `json:"commands"`
+	Results           []ResultProjection       `json:"results"`
 	CircuitBreakers   []CircuitBreaker         `json:"circuit_breakers"`
 	Warnings          []AutopilotWarning       `json:"warnings"`
 	MergeCycles       []MergeCycleProjection   `json:"merge_cycles"`
