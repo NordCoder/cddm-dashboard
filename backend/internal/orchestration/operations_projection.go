@@ -301,7 +301,7 @@ func (s *OperationsService) listProvisioning(ctx context.Context, projectID int6
 }
 
 func (s *OperationsService) listCommands(ctx context.Context, projectID int64) ([]CommandProjection, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT m.project_id,m.id,m.intent_id,m.lease_id,m.provision_request_id,m.scheduler_lane_key,i.issue_number,i.role,COALESCE(p.expected_head,i.expected_head,''),m.status,m.reason_code,m.workflow_command_id,COALESCE(w.status,''),m.delivery_command_id,COALESCE(d.status,''),COALESCE(p.worker_id,''),COALESCE(d.worker_session_id,''),COALESCE(p.tab_id,0),COALESCE(d.binding_id,p.bound_binding_id,''),COALESCE(d.binding_version,p.bound_binding_version,0),COALESCE(p.observed_chatgpt_url,''),m.context_hash,m.prompt_hash,m.updated_at
+	rows, err := s.store.db.QueryContext(ctx, `SELECT m.project_id,m.id,m.intent_id,m.lease_id,m.provision_request_id,m.scheduler_lane_key,i.issue_number,i.role,COALESCE(p.expected_head,i.expected_head,''),m.status,m.reason_code,m.workflow_command_id,COALESCE(w.status,''),m.delivery_command_id,COALESCE(d.status,''),COALESCE(p.worker_id,''),CASE WHEN d.id IS NULL THEN COALESCE(p.worker_session_id,'') ELSE d.worker_session_id END,COALESCE(p.tab_id,0),COALESCE(d.binding_id,p.bound_binding_id,''),COALESCE(d.binding_version,p.bound_binding_version,0),COALESCE(p.observed_chatgpt_url,''),m.context_hash,m.prompt_hash,m.updated_at
 		FROM autonomous_command_materializations m
 		JOIN workflow_intents i ON i.project_id=m.project_id AND i.id=m.intent_id
 		LEFT JOIN session_provision_requests p ON p.project_id=m.project_id AND p.id=m.provision_request_id
