@@ -3,7 +3,8 @@ ADD COLUMN worker_session_id TEXT NOT NULL DEFAULT ''
 CHECK (length(worker_session_id) <= 200);
 
 -- Version 17 could already contain provisioned requests. Preserve their exact
--- managed-session identity whenever a materialized delivery provides one.
+-- managed-session identity only when the linked delivery agrees with the
+-- provisioning-owned Project, worker and binding identity.
 UPDATE session_provision_requests
 SET worker_session_id = COALESCE((
     SELECT d.worker_session_id
@@ -11,6 +12,10 @@ SET worker_session_id = COALESCE((
     JOIN delivery_commands d ON d.id = m.delivery_command_id
     WHERE m.project_id = session_provision_requests.project_id
       AND m.provision_request_id = session_provision_requests.id
+      AND d.project_id = session_provision_requests.project_id
+      AND d.worker_id = session_provision_requests.worker_id
+      AND d.binding_id = session_provision_requests.bound_binding_id
+      AND d.binding_version = session_provision_requests.bound_binding_version
       AND d.worker_session_id <> ''
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT 1
@@ -18,9 +23,9 @@ SET worker_session_id = COALESCE((
 WHERE status = 'provisioned'
   AND worker_session_id = '';
 
--- A standalone version-17 provisioning record has no durable session source to
--- backfill. It must not remain reusable as a healthy managed session after the
--- upgrade; preserve the evidence and fail closed as an uncertain terminal.
+-- A standalone or identity-conflicting version-17 provisioning record has no
+-- trustworthy durable session source. Preserve its evidence but quarantine it
+-- as an uncertain terminal rather than treating it as a reusable session.
 UPDATE session_provision_requests
 SET status = 'uncertain',
     completion_reason = CASE
