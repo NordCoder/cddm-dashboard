@@ -314,6 +314,26 @@ function compareLease(actual: AutopilotLease, expected: AutopilotLease, path: st
   same(actual.released_at, expected.released_at, `${path}.released_at`, 'release time matching durable lease')
   same(actual.status, expected.status, `${path}.status`, 'status matching durable lease')
 }
+function derivedWaitingReason(intent: AutopilotIntent, status: AutopilotStatus, projectBreaker: boolean, breakerLanes: Set<string>, activeLanes: Set<string>): string {
+  if (intent.status === 'blocked') return intent.reason_code || 'blocked'
+  if (intent.status === 'ambiguous') return 'ambiguous evidence requires operator recovery'
+  if (intent.status === 'claimed') return 'active lane lease'
+  if (status.profile.autonomy_state !== 'enabled') return `autonomy_${status.profile.autonomy_state}`
+  if (projectBreaker) return 'project circuit breaker'
+  if (breakerLanes.has(intent.lane_key ?? '')) return 'lane circuit breaker'
+  if (activeLanes.has(intent.lane_key ?? '')) return 'lane busy'
+  return 'ready'
+}
+function derivedNextAction(status: AutopilotStatus): string {
+  if (status.counts.active_circuit_breakers > 0) return 'Resolve active circuit breakers before new automatic work.'
+  if (status.profile.autonomy_state === 'disabled' || status.profile.autonomy_state === 'stopped') return 'Enable Autopilot after verifying the continuous profile and GitHub synchronization.'
+  if (status.profile.autonomy_state === 'paused') return 'Resume Autopilot when the current durable work may continue.'
+  if (status.project_hold_reason) return 'Resolve the Project hold or owner-required condition.'
+  if (status.counts.active_leases > 0 || status.counts.active_commands > 0 || status.counts.pending_provisioning > 0) return 'Observe current durable work; do not replay or retarget active commands.'
+  if (status.counts.pending_intents > 0) return 'The scheduler may claim the next eligible Intent.'
+  if (status.active_wave) return 'Complete or verify the active Wave before planning another Wave.'
+  return 'No automatic work is queued. The persistent Lead may plan the next bounded Wave.'
+}
 
 function validateIdentityGraph(status: AutopilotStatus): void {
   same(status.profile.project_id, status.project_id, '$.profile.project_id', 'top-level project identity')
@@ -322,6 +342,11 @@ function validateIdentityGraph(status: AutopilotStatus): void {
   if (status.active_wave) {
     same(status.active_wave.project_id, status.project_id, '$.active_wave.project_id', 'top-level project identity')
     same(status.active_wave.control_issue_number, status.profile.control_issue_number, '$.active_wave.control_issue_number', 'profile Control Issue identity')
+    const issueNumbers = new Set<number>()
+    status.active_wave.issues.forEach((issue, index) => {
+      if (issueNumbers.has(issue)) throw new ValidationError(`$.active_wave.issues[${index}]`, 'unique Issue identity within active Wave')
+      issueNumbers.add(issue)
+    })
   }
 
   const intentByID = new Map<string, AutopilotIntent>()
@@ -345,9 +370,7 @@ function validateIdentityGraph(status: AutopilotStatus): void {
   const queuedStatuses = new Set(['pending', 'blocked', 'claimed', 'ambiguous'])
   status.intents.forEach((intent) => {
     const shouldBeQueued = queuedStatuses.has(intent.status)
-    if (queueIntentIDs.has(intent.intent_id) !== shouldBeQueued) {
-      throw new ValidationError('$.queue', `exact queue membership for Intent ${intent.intent_id}`)
-    }
+    if (queueIntentIDs.has(intent.intent_id) !== shouldBeQueued) throw new ValidationError('$.queue', `exact queue membership for Intent ${intent.intent_id}`)
   })
 
   const leaseByID = new Map<string, AutopilotLease>()
@@ -361,19 +384,23 @@ function validateIdentityGraph(status: AutopilotStatus): void {
     same(lease.lane_key, intent.lane_key, `${path}.lane_key`, 'lane identity matching referenced Intent')
   })
   const activeLeaseIDs = new Set<string>()
+  const activeLaneKeys = new Set<string>()
+  const activeIntentIDs = new Set<string>()
   status.active_leases.forEach((active, index) => {
     const path = `$.active_leases[${index}]`
     if (activeLeaseIDs.has(active.lease_id)) throw new ValidationError(`${path}.lease_id`, 'unique active lease identity')
+    if (activeLaneKeys.has(active.lane_key)) throw new ValidationError(`${path}.lane_key`, 'one active lease per scheduler lane')
+    if (activeIntentIDs.has(active.intent_id)) throw new ValidationError(`${path}.intent_id`, 'one active lease per Intent')
     activeLeaseIDs.add(active.lease_id)
+    activeLaneKeys.add(active.lane_key)
+    activeIntentIDs.add(active.intent_id)
     const lease = leaseByID.get(active.lease_id)
     if (!lease) throw new ValidationError(`${path}.lease_id`, 'lease identity present in durable leases')
     compareLease(active, lease, path)
     same(active.status, 'active', `${path}.status`, 'active lease status')
   })
   status.leases.forEach((lease) => {
-    if ((lease.status === 'active') !== activeLeaseIDs.has(lease.lease_id)) {
-      throw new ValidationError('$.active_leases', `complete active lease mirror for ${lease.lease_id}`)
-    }
+    if ((lease.status === 'active') !== activeLeaseIDs.has(lease.lease_id)) throw new ValidationError('$.active_leases', `complete active lease mirror for ${lease.lease_id}`)
   })
   same(status.counts.active_leases, activeLeaseIDs.size, '$.counts.active_leases', 'active lease count matching exact active mirror')
 
@@ -400,9 +427,12 @@ function validateIdentityGraph(status: AutopilotStatus): void {
 
   const commandByWorkflowID = new Map<string, AutopilotCommand>()
   const commandIntentIDs = new Set<string>()
+  const materializationIDs = new Set<string>()
   status.commands.forEach((command, index) => {
     const path = `$.commands[${index}]`
+    if (materializationIDs.has(command.materialization_id)) throw new ValidationError(`${path}.materialization_id`, 'unique materialization identity')
     if (commandIntentIDs.has(command.intent_id)) throw new ValidationError(`${path}.intent_id`, 'one command materialization per Intent')
+    materializationIDs.add(command.materialization_id)
     commandIntentIDs.add(command.intent_id)
     same(command.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(command.intent_id)
@@ -431,20 +461,40 @@ function validateIdentityGraph(status: AutopilotStatus): void {
       commandByWorkflowID.set(command.workflow_command_id, command)
     }
   })
+
+  const resultCommentIDs = new Set<number>()
   status.results.forEach((result, index) => {
     const path = `$.results[${index}]`
+    if (resultCommentIDs.has(result.github_comment_id)) throw new ValidationError(`${path}.github_comment_id`, 'unique result-comment identity')
+    resultCommentIDs.add(result.github_comment_id)
     same(result.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const command = commandByWorkflowID.get(result.command_id)
     if (!command) throw new ValidationError(`${path}.command_id`, 'Workflow Command identity present in projected commands')
     same(result.issue_number, command.issue_number, `${path}.issue_number`, 'Issue identity matching Workflow Command')
     same(result.role, command.role, `${path}.role`, 'role matching Workflow Command')
   })
-  status.circuit_breakers.forEach((breaker, index) => same(breaker.project_id, status.project_id, `$.circuit_breakers[${index}].project_id`, 'top-level project identity'))
+
+  const breakerIDs = new Set<string>()
+  let projectBreaker = false
+  const breakerLanes = new Set<string>()
+  status.circuit_breakers.forEach((breaker, index) => {
+    const path = `$.circuit_breakers[${index}]`
+    if (breakerIDs.has(breaker.id)) throw new ValidationError(`${path}.id`, 'unique circuit-breaker identity')
+    breakerIDs.add(breaker.id)
+    same(breaker.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
+    if (breaker.status !== 'resolved') {
+      if (breaker.scope_kind === 'project') projectBreaker = true
+      else if (breaker.scope_kind === 'lane' && breaker.lane_key) breakerLanes.add(breaker.lane_key)
+    }
+  })
 
   const mergeIntentIDs = new Set<string>()
+  const mergeCycleIDs = new Set<string>()
   status.merge_cycles.forEach((cycle, index) => {
     const path = `$.merge_cycles[${index}]`
+    if (mergeCycleIDs.has(cycle.id)) throw new ValidationError(`${path}.id`, 'unique merge-cycle identity')
     if (mergeIntentIDs.has(cycle.intent_id)) throw new ValidationError(`${path}.intent_id`, 'one merge read-back per Intent')
+    mergeCycleIDs.add(cycle.id)
     mergeIntentIDs.add(cycle.intent_id)
     same(cycle.project_id, status.project_id, `${path}.project_id`, 'top-level project identity')
     const intent = intentByID.get(cycle.intent_id)
@@ -452,6 +502,16 @@ function validateIdentityGraph(status: AutopilotStatus): void {
     same(cycle.issue_number, intent.issue_number, `${path}.issue_number`, 'Issue identity matching merge Intent')
     same(cycle.pr_number, intent.pr_number, `${path}.pr_number`, 'PR identity matching merge Intent')
     same(cycle.approved_head, intent.expected_head, `${path}.approved_head`, 'approved Head matching merge Intent')
+  })
+
+  status.warnings.forEach((warning, index) => {
+    if (!warning.intent_id) return
+    const path = `$.warnings[${index}]`
+    const intent = intentByID.get(warning.intent_id)
+    if (!intent) throw new ValidationError(`${path}.intent_id`, 'warning Intent identity present in authoritative intents')
+    same(warning.issue_number, intent.issue_number, `${path}.issue_number`, 'warning Issue matching referenced Intent')
+    same(warning.pr_number, intent.pr_number, `${path}.pr_number`, 'warning PR matching referenced Intent')
+    same(warning.expected_head, intent.expected_head, `${path}.expected_head`, 'warning Head matching referenced Intent')
   })
 
   const countIntents = (value: string): number => status.intents.filter((intent) => intent.status === value).length
@@ -476,15 +536,19 @@ function validateIdentityGraph(status: AutopilotStatus): void {
   const representedAmbiguous = countIntents('ambiguous') +
     status.commands.filter((command) => command.status === 'ambiguous' || command.workflow_status === 'ambiguous' || command.delivery_status === 'uncertain').length +
     status.results.filter((result) => result.validation_status === 'ambiguous').length
-  if (status.counts.ambiguous_records < representedAmbiguous) {
-    throw new ValidationError('$.counts.ambiguous_records', 'at least every represented ambiguous record')
-  }
+  if (status.counts.ambiguous_records < representedAmbiguous) throw new ValidationError('$.counts.ambiguous_records', 'at least every represented ambiguous record')
 
   const derivedLeadBusy = status.active_leases.some((lease) => intentByID.get(lease.intent_id)?.role === 'lead')
   same(status.lead_busy, derivedLeadBusy, '$.lead_busy', 'Lead lane state matching authoritative active leases')
 
-  const derivedHold = status.intents.find((intent) => intent.status === 'blocked' && intent.issue_number === undefined)?.reason_code
+  const derivedHold = status.intents.find((intent) => intent.status === 'blocked' && intent.issue_number === undefined && Boolean(intent.reason_code))?.reason_code
   same(status.project_hold_reason, derivedHold, '$.project_hold_reason', 'Project hold reason matching authoritative blocked Intent')
+
+  status.queue.forEach((entry, index) => {
+    const expected = derivedWaitingReason(entry.intent, status, projectBreaker, breakerLanes, activeLaneKeys)
+    same(entry.waiting_reason, expected, `$.queue[${index}].waiting_reason`, 'waiting reason matching current control, breaker and lane state')
+  })
+  same(status.next_action, derivedNextAction(status), '$.next_action', 'operator guidance matching current authoritative state')
 }
 
 export function parseAutopilotStatus(value: unknown): AutopilotStatus {
