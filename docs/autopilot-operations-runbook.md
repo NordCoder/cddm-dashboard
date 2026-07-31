@@ -34,7 +34,15 @@ Before recovery, breaker resolution, delivery retry decisions or cleanup, record
 | Worker result | GitHub result-comment ID, Workflow Command ID, Issue, role, result, payload hash, validation status/reason and accepted/observed timestamps |
 | Merge read-back | Merge-cycle ID, referenced merge Intent, Issue, PR, approved Head, status and observed merge commit |
 
-The lease token is a transition credential and is intentionally absent from the operator projection. Record the lease ID and claim ID instead. `active_leases` is only a filtered mirror: every non-secret field must exactly match the authoritative record in `leases`. A `provisioned` record must carry its own durable managed session ID even when no materialization or delivery command exists. Every queue, lease, provisioning, command, result and merge record must resolve to the exact durable parent identities shown in the same response. If any authoritative collection, parent record or cross-link is absent or incompatible, treat the projection as malformed, keep work paused and investigate rather than substituting a default.
+The lease token is a transition credential and is intentionally absent from the operator projection. Record the lease ID and claim ID instead. `active_leases` is an exact filtered mirror: every authoritative active lease must appear exactly once, no non-active lease may appear, every non-secret field must match the authoritative record in `leases`, and the active count must agree. The queue must likewise contain each pending, blocked, claimed or ambiguous Intent exactly once and no terminal Intent. A `provisioned` record must carry its own durable managed session ID even when no materialization or delivery command exists. Every queue, lease, provisioning, command, result and merge record must resolve to the exact durable parent identities shown in the same response. If any authoritative collection, parent record, required member or cross-link is absent, duplicated or incompatible, treat the projection as malformed, keep work paused and investigate rather than substituting a default.
+
+## Upgrade interpretation
+
+Migration 18 introduces durable provisioning-owned session identity.
+
+- A version-17 provisioned request linked to a materialized delivery is backfilled from that exact delivery's managed session ID.
+- A version-17 standalone provisioned request has no durable source from which to recover the session identity. The migration preserves its evidence but changes it to terminal `uncertain` with reason `missing_durable_session_identity_after_upgrade`.
+- Do not manually relabel such a quarantined record as `provisioned`, infer a session from a live tab, or reuse the old binding. Resolve it through the normal bounded recovery path.
 
 ## Circuit-breaker recovery
 
@@ -58,7 +66,7 @@ Acknowledgement records operator awareness but does not unblock work. Resolve on
 - `provisioned`: the evidence row includes the provisioning-owned worker/session/tab/binding chain even before materialization exists.
 - `target_observed`: retry finalization against the same tab, target and attachment evidence; do not resend bootstrap.
 - `delivery_pending` or `awaiting_result`: retain the same Intent, lease, provisioning request, managed session, binding, materialization, Workflow Command and delivery identities.
-- `ambiguous`: preserve all evidence and trip the narrowest valid circuit breaker.
+- `ambiguous` or `uncertain`: preserve all evidence and trip the narrowest valid circuit breaker or operator recovery path.
 
 ## Disposable live-smoke checklist
 
@@ -84,4 +92,4 @@ Use a temporary Issue, temporary branch, disposable ChatGPT conversation and a d
 
 ## Escalation
 
-Stop and require owner review when GitHub facts conflict, the exact ChatGPT Project cannot be proven, attachment evidence drifts, a browser send is uncertain, result comments conflict, the projection omits an authoritative collection or identity, any projected record is orphaned or conflicts with its authoritative mirror, or merge read-back does not match the approved Head. Never infer success from ChatGPT response content.
+Stop and require owner review when GitHub facts conflict, the exact ChatGPT Project cannot be proven, attachment evidence drifts, a browser send is uncertain, result comments conflict, the projection omits an authoritative collection or identity, any derived collection is incomplete or duplicated, any projected record is orphaned or conflicts with its authoritative mirror, an upgraded provisioning record lacks recoverable session identity, or merge read-back does not match the approved Head. Never infer success from ChatGPT response content.
