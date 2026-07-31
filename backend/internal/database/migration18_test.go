@@ -20,6 +20,9 @@ func TestProvisioningWorkerSessionMigrationBackfillsOrQuarantinesVersion17Record
 		CREATE TABLE session_provision_requests(
 			id TEXT PRIMARY KEY,
 			project_id INTEGER NOT NULL,
+			worker_id TEXT NOT NULL DEFAULT '',
+			bound_binding_id TEXT NOT NULL DEFAULT '',
+			bound_binding_version INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL,
 			completion_reason TEXT NOT NULL DEFAULT ''
 		);
@@ -32,19 +35,29 @@ func TestProvisioningWorkerSessionMigrationBackfillsOrQuarantinesVersion17Record
 		);
 		CREATE TABLE delivery_commands(
 			id TEXT PRIMARY KEY,
-			worker_session_id TEXT NOT NULL DEFAULT ''
+			project_id INTEGER NOT NULL,
+			worker_id TEXT NOT NULL,
+			worker_session_id TEXT NOT NULL DEFAULT '',
+			binding_id TEXT NOT NULL,
+			binding_version INTEGER NOT NULL
 		);
-		INSERT INTO session_provision_requests(id,project_id,status,completion_reason) VALUES
-			('provision-linked',1,'provisioned','exact_session_bound'),
-			('provision-standalone',1,'provisioned','exact_session_bound'),
-			('provision-pending',1,'pending','');
-		INSERT INTO delivery_commands(id,worker_session_id) VALUES
-			('delivery-linked','session-from-v17');
+		INSERT INTO session_provision_requests(
+			id,project_id,worker_id,bound_binding_id,bound_binding_version,status,completion_reason
+		) VALUES
+			('provision-linked',1,'worker-one','binding-one',3,'provisioned','exact_session_bound'),
+			('provision-conflicting',1,'worker-two','binding-two',4,'provisioned','exact_session_bound'),
+			('provision-standalone',1,'worker-three','binding-three',1,'provisioned','exact_session_bound'),
+			('provision-pending',1,'','','0','pending','');
+		INSERT INTO delivery_commands(
+			id,project_id,worker_id,worker_session_id,binding_id,binding_version
+		) VALUES
+			('delivery-linked',1,'worker-one','session-from-v17','binding-one',3),
+			('delivery-conflicting',1,'wrong-worker','session-wrong','binding-two',4);
 		INSERT INTO autonomous_command_materializations(
 			id,project_id,provision_request_id,delivery_command_id,created_at
-		) VALUES(
-			'materialization-linked',1,'provision-linked','delivery-linked','2026-07-30T00:00:00Z'
-		);
+		) VALUES
+			('materialization-linked',1,'provision-linked','delivery-linked','2026-07-30T00:00:00Z'),
+			('materialization-conflicting',1,'provision-conflicting','delivery-conflicting','2026-07-30T00:00:01Z');
 		PRAGMA user_version = 17;
 	`)
 	if err != nil {
@@ -60,6 +73,7 @@ func TestProvisioningWorkerSessionMigrationBackfillsOrQuarantinesVersion17Record
 	}
 
 	assertProvisionMigrationRow(t, db, "provision-linked", "provisioned", "session-from-v17", "exact_session_bound")
+	assertProvisionMigrationRow(t, db, "provision-conflicting", "uncertain", "", "exact_session_bound;missing_durable_session_identity_after_upgrade")
 	assertProvisionMigrationRow(t, db, "provision-standalone", "uncertain", "", "exact_session_bound;missing_durable_session_identity_after_upgrade")
 	assertProvisionMigrationRow(t, db, "provision-pending", "pending", "", "")
 
