@@ -453,6 +453,38 @@ function validateIdentityGraph(status: AutopilotStatus): void {
     same(cycle.pr_number, intent.pr_number, `${path}.pr_number`, 'PR identity matching merge Intent')
     same(cycle.approved_head, intent.expected_head, `${path}.approved_head`, 'approved Head matching merge Intent')
   })
+
+  const countIntents = (value: string): number => status.intents.filter((intent) => intent.status === value).length
+  same(status.counts.pending_intents, countIntents('pending'), '$.counts.pending_intents', 'pending Intent count matching authoritative Intents')
+  same(status.counts.blocked_intents, countIntents('blocked'), '$.counts.blocked_intents', 'blocked Intent count matching authoritative Intents')
+  same(status.counts.claimed_intents, countIntents('claimed'), '$.counts.claimed_intents', 'claimed Intent count matching authoritative Intents')
+
+  const pendingProvisioning = status.provisioning.filter((request) => ['pending', 'claimed', 'surface_ready'].includes(request.status)).length
+  const managedSessions = status.provisioning.filter((request) => request.status === 'provisioned').length
+  same(status.counts.pending_provisioning, pendingProvisioning, '$.counts.pending_provisioning', 'pending provisioning count matching authoritative requests')
+  same(status.counts.managed_sessions, managedSessions, '$.counts.managed_sessions', 'managed session count matching provisioned requests')
+
+  const activeCommands = status.commands.filter((command) =>
+    command.status === 'pending' || command.status === 'materialized' ||
+    command.workflow_status === 'created' || command.workflow_status === 'delivery_pending' || command.workflow_status === 'awaiting_result'
+  ).length
+  same(status.counts.active_commands, activeCommands, '$.counts.active_commands', 'active command count matching authoritative commands')
+
+  const activeBreakers = status.circuit_breakers.filter((breaker) => breaker.status !== 'resolved').length
+  same(status.counts.active_circuit_breakers, activeBreakers, '$.counts.active_circuit_breakers', 'active breaker count matching authoritative breakers')
+
+  const representedAmbiguous = countIntents('ambiguous') +
+    status.commands.filter((command) => command.status === 'ambiguous' || command.workflow_status === 'ambiguous' || command.delivery_status === 'uncertain').length +
+    status.results.filter((result) => result.validation_status === 'ambiguous').length
+  if (status.counts.ambiguous_records < representedAmbiguous) {
+    throw new ValidationError('$.counts.ambiguous_records', 'at least every represented ambiguous record')
+  }
+
+  const derivedLeadBusy = status.active_leases.some((lease) => intentByID.get(lease.intent_id)?.role === 'lead')
+  same(status.lead_busy, derivedLeadBusy, '$.lead_busy', 'Lead lane state matching authoritative active leases')
+
+  const derivedHold = status.intents.find((intent) => intent.status === 'blocked' && intent.issue_number === undefined)?.reason_code
+  same(status.project_hold_reason, derivedHold, '$.project_hold_reason', 'Project hold reason matching authoritative blocked Intent')
 }
 
 export function parseAutopilotStatus(value: unknown): AutopilotStatus {
