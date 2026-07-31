@@ -21,10 +21,15 @@ Verify the complete M9–M12 durable loop under restart, duplicate, stale-identi
 - Assignment claim recovery converts a reserved send to durable uncertain state and refuses retargeting under the same claim identity.
 - The operator projection exposes all durable Intents and leases, provisioning-owned session identities, command provisioning/worker/session/tab/binding links, correlated result-comment identities and merge read-backs while excluding lease tokens.
 - A pending materialization with no delivery command still exposes its own provisioning-owned worker/session/tab/binding chain; session evidence does not disappear during the valid pre-delivery stage.
+- Workflow Command and delivery joins are Project-scoped. A materialization that references an ID absent from its own Project fails the projection instead of borrowing another Project's status or delivery identity.
+- When a delivery exists, the projection exposes the delivery-owned worker/session/binding identity rather than masking a conflicting delivery worker with provisioning data.
 - `active_leases` is an exact, complete and duplicate-free filtered mirror of authoritative `leases`; every authoritative active lease appears once, no non-active lease appears, every non-secret field matches, and the published active count agrees.
-- The queue is an exact duplicate-free projection of every pending, blocked, claimed or ambiguous Intent.
-- Every displayed Intent, provisioning, command and breaker count, plus `lead_busy` and Project hold state, is validated against the authoritative arrays before the response is rendered. The ambiguous count may include additional durable records but may never omit ambiguity represented in the projection.
-- The frontend requires every authoritative collection, requires a session identity for every `provisioned` request and rejects orphaned, duplicated or conflicting queue, lease, provisioning, command, result and merge records.
+- Claimed state and active leases form an exact bidirectional relation: every claimed Intent has exactly one active lease, every active lease belongs to a claimed Intent, and no two active leases occupy one lane or reference one Intent.
+- The queue is an exact duplicate-free projection of every pending, blocked, claimed or ambiguous Intent. Every `waiting_reason` is recomputed from the current control, breaker, Intent and active-lane state.
+- Operator `next_action` is recomputed from the same authoritative projection and cannot claim that work is idle, ready or recoverable when breakers, holds, leases, provisioning or commands say otherwise.
+- Every displayed Intent, provisioning, command and breaker count, plus `lead_busy` and Project hold state, is validated against the authoritative arrays before the response is rendered. The ambiguous count may include additional durable records but may never omit ambiguity represented in the projection. Failure to query the durable ambiguous count fails the status request rather than substituting zero.
+- The frontend requires every authoritative collection, requires a session identity for every `provisioned` request and rejects orphaned, duplicated or conflicting queue, lease, provisioning, command, result, warning and merge records.
+- Active-Wave Issues, materialization IDs, result-comment IDs, breaker IDs and merge-cycle IDs are duplicate-free within one projection.
 - The operator UI renders one row for every Intent, prefers the authoritative active lease over historical lease records, and keeps lease-only `claimed` and standalone `provisioned` stages visible before command materialization.
 - The operator runbook requires one correlated evidence row before recovery, breaker resolution, delivery decisions or cleanup.
 
@@ -45,7 +50,10 @@ Verify the complete M9–M12 durable loop under restart, duplicate, stale-identi
 - explicit version-17-to-18 upgrade regression;
 - deterministic exact-session commit-lock regression;
 - pending-materialization operator projection regression;
-- frontend parser/evidence and derived-field tests plus production build;
+- Project-isolated Workflow Command and delivery-link regressions;
+- claimed-Intent/active-lease bidirectional regression;
+- ambiguous-count query-error regression;
+- frontend parser/evidence, exact-guidance and derived-field tests plus production build;
 - Chrome extension recovery suite;
 - Runtime CLI and configuration validation;
 - exact Candidate Head read-back;
